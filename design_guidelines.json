@@ -1,0 +1,163 @@
+{
+  "typography": {
+    "fonts": {
+      "display": {
+        "family": "'Cormorant Garamond', serif",
+        "weights": ["400", "600", "700"],
+        "usage": "Public campaign headings, festive typography, hero sections, and main titles.",
+        "rationale": "Evokes an elegant, traditional Indian/Bengali festivity and adds warmth and heritage."
+      },
+      "body": {
+        "family": "'Manrope', sans-serif",
+        "weights": ["400", "500", "600", "700"],
+        "usage": "Data grids, admin dashboards, forms, buttons, and dense financial tables.",
+        "rationale": "Highly legible workhorse sans-serif for clear data readability, numbers, and dense information."
+      }
+    },
+    "scale": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tight leading-none",
+      "h2": "text-3xl sm:text-4xl lg:text-5xl tracking-tight leading-tight",
+      "h3": "text-2xl sm:text-3xl leading-snug",
+      "h4": "text-xl sm:text-2xl leading-snug",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm leading-normal",
+      "tiny": "text-xs tracking-wider uppercase"
+    }
+  },
+  "colors": {
+    "palette": {
+      "deep_brown": {
+        "900": "#170D0B",
+        "800": "#1F1412",
+        "700": "#2A1B18",
+        "description": "Base dark background for the public campaign. Represents the deep earthy tones."
+      },
+      "ivory": {
+        "100": "#FFFFF0",
+        "200": "#FDFBF7",
+        "300": "#F5F0E6",
+        "description": "Base light background for admin dashboards and public cards. Represents purity and canvas."
+      },
+      "vermilion": {
+        "500": "#D9381E",
+        "600": "#B92B15",
+        "description": "Sindoor red. Used for primary CTAs on public pages, and danger/failed states in admin."
+      },
+      "warm_gold": {
+        "400": "#E6B31E",
+        "500": "#D4AF37",
+        "600": "#B5952F",
+        "description": "Accent color for festive flair, secondary buttons, and pending states."
+      }
+    },
+    "status_semantics": {
+      "success_verified_paid": {
+        "bg": "bg-emerald-100",
+        "text": "text-emerald-800",
+        "border": "border-emerald-200"
+      },
+      "pending_advances": {
+        "bg": "bg-[#FDF8E8]",
+        "text": "text-[#B5952F]",
+        "border": "border-[#D4AF37]"
+      },
+      "danger_failed": {
+        "bg": "bg-red-50",
+        "text": "text-[#D9381E]",
+        "border": "border-red-200"
+      },
+      "warning_reconciliation": {
+        "bg": "bg-amber-50",
+        "text": "text-amber-800",
+        "border": "border-amber-300"
+      }
+    },
+    "themes": {
+      "public_campaign": {
+        "background": "bg-[#1F1412]",
+        "text": "text-[#FFFFF0]",
+        "primary_action": "bg-[#D9381E] text-white hover:bg-[#B92B15]",
+        "card_bg": "bg-[#2A1B18] or bg-[#FFFFF0] for contrast cards"
+      },
+      "admin_dashboard": {
+        "background": "bg-[#FDFBF7]",
+        "text": "text-[#1F1412]",
+        "primary_action": "bg-[#1F1412] text-[#FFFFF0] hover:bg-[#2A1B18]",
+        "card_bg": "bg-white border-[#E6B31E]/30"
+      }
+    }
+  },
+  "grids_and_layouts": {
+    "public_campaign": {
+      "spacing": "Generous padding (p-8 to p-16) to allow decorative elements to breathe.",
+      "layout": "Asymmetrical, narrative-driven flow. Use max-w-7xl containers. Hero section should feature central festive typography with elegant ivory cards overlapping.",
+      "cards": "Ivory cards on deep brown background. Use rounded-2xl or rounded-3xl with 1px warm gold borders (border-[#D4AF37]/30) and soft glowing shadows."
+    },
+    "admin_dashboard": {
+      "spacing": "Dense, compact spacing (p-4 to p-6) for maximum data visibility.",
+      "layout": "Sidebar navigation (Deep Brown bg, Ivory text) with main content area (Ivory bg, Dark text). CSS Grid for metric summary cards (grid-cols-1 md:grid-cols-4).",
+      "cards": "Sharp or slightly rounded (rounded-lg). Flat, 1px subtle borders (border-[#2A1B18]/10) without heavy drop shadows to keep the UI clean and analytical."
+    }
+  },
+  "visual_enhancers": {
+    "motifs": "Incorporate subtle Alpona (white floor-art patterns) as background opacity masks (opacity-5) in the public campaign. Use Lotus and Diya shapes as section dividers or bullet points.",
+    "borders": "Use double-line borders or ornate corner accents for the Receipt Verification page to make it feel like a premium printed document.",
+    "motion": "Subtle, elegant fade-ins (framer-motion). Ensure all motion respects `prefers-reduced-motion` for accessibility."
+  },
+  "components": {
+    "buttons": {
+      "public": "Pill-shaped (rounded-full). Primary: Vermilion bg. Secondary: Transparent with Warm Gold border.",
+      "admin": "Slightly rounded (rounded-md). Utility-focused, high contrast."
+    },
+    "status_badges": "Pill-shaped (rounded-full), px-2.5 py-0.5, text-xs font-semibold uppercase tracking-wider. Follow status_semantics colors.",
+    "tables": "Admin only. Dense rows, sticky headers. Hover states on rows (hover:bg-[#F5F0E6]). Use left-alignment for text, right-alignment for INR currency columns.",
+    "forms": "Floating labels or clear stacked labels. High contrast focus rings (focus:ring-2 focus:ring-[#D4AF37])."
+  },
+  "component_path": {
+    "shadcn_ui": "Use standard Shadcn components in `/app/src/components/ui/` for the Admin Dashboard (Tables, Dialogs, Select, Tabs, Data-tables). Strip extreme rounded corners to match the elegant, trustworthy feel.",
+    "custom_marketing": "Build custom HTML/Tailwind components for the Public Campaign hero, subscription pricing cards, and immersive calendar."
+  },
+  "instructions_to_main_agent": [
+    "Install required fonts from Google Fonts: 'Cormorant Garamond' and 'Manrope'.",
+    "Install lucide-react for standard icons, and react-icons for any specific festive/traditional icons if needed. DO NOT use emojis.",
+    "Apply dual-theme logic: Public pages should default to the Dark/Ornate theme (Deep Brown base). Admin routes (`/admin/*`) should default to the Light/Clean theme (Ivory base).",
+    "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., `data-testid=\"subscribe-btn\"`, `data-testid=\"admin-login-submit\"`).",
+    "For the ₹3,500 breakup card (₹2,500/₹300/₹700), use an elegant Bento-style layout or an ivory card with warm gold dividers.",
+    "For the Receipt Verification page, design it to look like a physical, verified certificate with Alpona border motifs.",
+    "Ensure total WCAG compliance: High contrast ratios (especially text on Vermilion or Gold), semantic HTML, and visible keyboard focus states.",
+    "Do NOT use complete transparent backgrounds for dropdowns or floating headers."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur) where appropriate.",
+    "You MUST NOT apply universal transition (e.g., `transition: all`). Always add transitions for specific interactive elements.",
+    "You MUST NOT center align the app container. Do not add `.App { text-align: center; }`.",
+    "Every interaction needs micro-animations - hover states, transitions, entrance animations. Static = dead.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use `sonner` for toast notifications."
+  ],
+  "image_urls": {
+    "public_hero_durga_idol": {
+      "url": "https://images.pexels.com/photos/34153858/pexels-photo-34153858.jpeg",
+      "description": "Beautiful and detailed Durga idol adorned with vibrant decorations."
+    },
+    "public_festive_diya": {
+      "url": "https://images.pexels.com/photos/34431714/pexels-photo-34431714.jpeg",
+      "description": "Close-up of traditional Diwali oil lamps with glowing flames, representing warm gold and festivity."
+    },
+    "public_lotus_accent": {
+      "url": "https://images.unsplash.com/photo-1594882471743-2758d2ce5f00",
+      "description": "Pink lotus flower in bloom for traditional touch."
+    },
+    "public_alpona_garland_texture": {
+      "url": "https://images.unsplash.com/photo-1760192158969-fba5f503404f",
+      "description": "Close-up of colorful indian festival garlands with lotus charms, useful for subtle background overlays."
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text over vermilion or gold meets APCA or WCAG AA standards (4.5:1 for normal text). Use ivory text on deep brown, and deep brown text on ivory.",
+    "motion": "Wrap framer-motion animations with useReducedMotion hooks to disable animations for users preferring reduced motion.",
+    "touch_targets": "Minimum 44x44px for all interactive elements, crucial for the mobile-first subscription flow."
+  }
+}

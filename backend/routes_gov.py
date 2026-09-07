@@ -8,7 +8,7 @@ from fastapi import (APIRouter, Depends, Request, Response, HTTPException, Body,
                      UploadFile, File, Form, Query)
 
 from db import db, new_id, clean
-from config import get_settings, DEFAULT_SETTINGS
+from config import get_settings, get_active_cycle_id, list_campaigns, DEFAULT_SETTINGS
 from util import iso, now_utc, fmt_inr, to_ist
 from audit import audit
 from ledger import trial_balance, account_balance
@@ -89,24 +89,160 @@ async def get_admin_settings(user: dict = Depends(require("settings:read"))):
 async def update_settings(body: dict = Body(...), request: Request = None,
                           user: dict = Depends(require("settings:manage"))):
     before = await get_settings()
+    cycle_id = await get_active_cycle_id()
     updates = {}
-    for section in ("organisation", "campaign", "approval_thresholds_paise", "eligibility",
-                    "receipt", "feature_flags"):
+    cycle_updates = {}
+    for section in ("organisation", "platform", "approval_thresholds_paise", "eligibility",
+                    "feature_flags"):
         if section in body:
             merged = {**before.get(section, {}), **body[section]}
             updates[section] = merged
-    if "subscription" in body:
-        sub = {**before["subscription"], **body["subscription"]}
-        comp_sum = sum(c["amount_paise"] for c in sub["components"])
-        if comp_sum != sub["base_amount_paise"]:
-            raise HTTPException(status_code=400, detail="Component amounts must sum to the base amount.")
-        updates["subscription"] = sub
+    # Campaign / subscription / receipt live on the active cycle document
+    for section in ("campaign", "subscription", "receipt"):
+        if section in body:
+            merged = {**(before.get(section) or {}), **body[section]}
+            if section == "subscription":
+                comps = merged.get("components") or []
+                comp_sum = sum(c["amount_paise"] for c in comps)
+                if comps and comp_sum != merged["base_amount_paise"]:
+                    raise HTTPException(status_code=400, detail="Component amounts must sum to the base amount.")
+            cycle_updates[section] = merged
+            updates[section] = merged  # mirror for legacy settings consumers
     updates["updated_at"] = iso()
     await db.application_settings.update_one({"id": "app_settings"}, {"$set": updates})
+    if cycle_updates:
+        await db.annual_cycles.update_one({"id": cycle_id}, {"$set": cycle_updates})
     after = await get_settings()
     await audit("settings.update", actor=user, entity_type="application_settings",
                 entity_id="app_settings", before=before, after=after, request=request)
     return after
+
+
+# =============================================================== CAMPAIGNS / CYCLES
+@router.get("/admin/campaigns")
+async def admin_list_campaigns(user: dict = Depends(require("settings:read", "reports:read"))):
+    items = await list_campaigns(published_only=False)
+    return {"items": items, "active_cycle_id": await get_active_cycle_id()}
+
+
+@router.post("/admin/campaigns")
+async def create_campaign(body: dict = Body(...), request: Request = None,
+                          user: dict = Depends(require("settings:manage"))):
+    name = (body.get("name") or "").strip()
+    slug = (body.get("slug") or "").strip().lower().replace(" ", "-")
+    if not name or not slug:
+        raise HTTPException(status_code=400, detail="name and slug are required.")
+    if await db.annual_cycles.find_one({"$or": [{"slug": slug}, {"id": body.get("id") or f"cycle_{slug.replace('-', '_')}"}]}):
+        raise HTTPException(status_code=409, detail="A campaign with this slug already exists.")
+    cycle_id = body.get("id") or f"cycle_{slug.replace('-', '_')}"
+    sub = body.get("subscription") or {
+        "base_amount_paise": int(round(float(body.get("base_amount_rupees") or 0) * 100)),
+        "components": body.get("components") or [],
+        "donation_min_paise": 0,
+        "allow_donation": True,
+    }
+    if sub.get("components"):
+        if sum(c["amount_paise"] for c in sub["components"]) != sub["base_amount_paise"]:
+            raise HTTPException(status_code=400, detail="Component amounts must sum to the base amount.")
+    prefix = (body.get("receipt_prefix") or f"ONE10-{slug[:8].upper()}").replace(" ", "")
+    doc = {
+        "id": cycle_id,
+        "name": name,
+        "slug": slug,
+        "kind": body.get("kind") or "event",
+        "summary": body.get("summary") or "",
+        "currency": "INR",
+        "timezone": "Asia/Kolkata",
+        "is_active": bool(body.get("is_active", False)),
+        "is_locked": False,
+        "is_published": bool(body.get("is_published", False)),
+        "campaign": body.get("campaign") or {
+            "title": name,
+            "theme_line": body.get("theme_line") or "",
+            "inclusive_line": body.get("inclusive_line") or "",
+            "consecutive_year": int(body.get("consecutive_year") or 1),
+            "venue": body.get("venue") or "",
+            "important_notice": "A receipt is issued only after payment is verified.",
+            "short_url": f"one10events.example/campaigns/{slug}",
+            "hero_url": body.get("hero_url") or "",
+        },
+        "subscription": sub,
+        "receipt": body.get("receipt") or {
+            "prefix": prefix,
+            "credit_note_prefix": f"{prefix}-CN",
+            "computer_generated_note": "This is a computer-generated receipt and does not require a physical signature.",
+            "refund_policy_ref": "See /refund-policy",
+            "document_version": "v1.0",
+            "tax_deductible": False,
+        },
+        "created_at": iso(),
+    }
+    await db.annual_cycles.insert_one(dict(doc))
+    await audit("campaign.create", actor=user, entity_type="annual_cycle", entity_id=cycle_id,
+                after={"name": name, "slug": slug}, request=request)
+    return clean(doc)
+
+
+@router.put("/admin/campaigns/{cycle_id}")
+async def update_campaign(cycle_id: str, body: dict = Body(...), request: Request = None,
+                          user: dict = Depends(require("settings:manage"))):
+    existing = await db.annual_cycles.find_one({"id": cycle_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    allowed = ("name", "summary", "kind", "is_published", "is_active", "campaign",
+               "subscription", "receipt", "slug")
+    updates = {k: body[k] for k in allowed if k in body}
+    if "subscription" in updates and updates["subscription"].get("components"):
+        sub = updates["subscription"]
+        if sum(c["amount_paise"] for c in sub["components"]) != sub["base_amount_paise"]:
+            raise HTTPException(status_code=400, detail="Component amounts must sum to the base amount.")
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided.")
+    updates["updated_at"] = iso()
+    await db.annual_cycles.update_one({"id": cycle_id}, {"$set": updates})
+    # Keep mirrored settings in sync when editing the active cycle
+    if cycle_id == await get_active_cycle_id():
+        mirror = {k: updates[k] for k in ("campaign", "subscription", "receipt") if k in updates}
+        if mirror:
+            mirror["updated_at"] = iso()
+            await db.application_settings.update_one({"id": "app_settings"}, {"$set": mirror})
+    await audit("campaign.update", actor=user, entity_type="annual_cycle", entity_id=cycle_id,
+                after=updates, request=request)
+    return clean(await db.annual_cycles.find_one({"id": cycle_id}))
+
+
+@router.post("/admin/campaigns/{cycle_id}/activate")
+async def activate_campaign(cycle_id: str, request: Request = None,
+                            user: dict = Depends(require("settings:manage"))):
+    cycle = await db.annual_cycles.find_one({"id": cycle_id})
+    if not cycle:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    if cycle.get("is_locked"):
+        raise HTTPException(status_code=423, detail="Cannot activate a locked cycle.")
+    await db.annual_cycles.update_many({}, {"$set": {"is_active": False}})
+    await db.annual_cycles.update_one({"id": cycle_id}, {"$set": {"is_active": True, "is_published": True}})
+    mirror = {
+        "active_cycle_id": cycle_id,
+        "cycle": {
+            "id": cycle["id"],
+            "name": cycle.get("name"),
+            "currency": cycle.get("currency", "INR"),
+            "timezone": cycle.get("timezone", "Asia/Kolkata"),
+            "is_active": True,
+            "is_locked": bool(cycle.get("is_locked")),
+        },
+        "updated_at": iso(),
+    }
+    if cycle.get("campaign"):
+        mirror["campaign"] = cycle["campaign"]
+    if cycle.get("subscription"):
+        mirror["subscription"] = cycle["subscription"]
+    if cycle.get("receipt"):
+        mirror["receipt"] = cycle["receipt"]
+    await db.application_settings.update_one({"id": "app_settings"}, {"$set": mirror})
+    await audit("campaign.activate", actor=user, entity_type="annual_cycle", entity_id=cycle_id,
+                request=request)
+    return await get_settings()
 
 
 # =============================================================== DOCUMENTS
@@ -363,8 +499,9 @@ async def period_approve(pc_id: str, body: dict = Body(default={}), request: Req
         "status": "locked", "approved_by": user["user_id"], "locked_at": iso(),
         "carry_forward_reason": body.get("carry_forward_reason", "")}})
     if pc.get("scope") == "final":
+        cycle_id = await get_active_cycle_id()
         await db.application_settings.update_one({"id": "app_settings"}, {"$set": {"cycle.is_locked": True}})
-        await db.annual_cycles.update_one({"id": "cycle_2026"}, {"$set": {"is_locked": True}})
+        await db.annual_cycles.update_one({"id": cycle_id}, {"$set": {"is_locked": True}})
     await audit("period.lock", actor=user, entity_type="period_close", entity_id=pc_id,
                 approval_chain=[pc["prepared_by"], user["user_id"]], request=request)
     return {"ok": True, "status": "locked"}
@@ -385,8 +522,9 @@ async def period_reopen(pc_id: str, body: dict = Body(...), request: Request = N
                                                                "reopen_approvals": approvals,
                                                                "reopened_at": iso()}})
     if pc.get("scope") == "final":
+        cycle_id = await get_active_cycle_id()
         await db.application_settings.update_one({"id": "app_settings"}, {"$set": {"cycle.is_locked": False}})
-        await db.annual_cycles.update_one({"id": "cycle_2026"}, {"$set": {"is_locked": False}})
+        await db.annual_cycles.update_one({"id": cycle_id}, {"$set": {"is_locked": False}})
     await audit("period.reopen", actor=user, entity_type="period_close", entity_id=pc_id,
                 reason=reason, approval_chain=approvals, request=request)
     return {"ok": True, "status": "reopened"}

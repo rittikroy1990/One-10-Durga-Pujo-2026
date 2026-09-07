@@ -50,6 +50,15 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     W, H = A4
     org = settings.get("organisation", {})
     rc = settings.get("receipt", {})
+    camp = settings.get("campaign", {})
+    letterhead = rc.get("letterhead_title") or org.get("organiser") or "Events Organizations Committee of One10"
+    subtitle = rc.get("letterhead_subtitle") or org.get("legal_status") or ""
+    campaign_title = (
+        receipt.get("campaign_title")
+        or camp.get("title")
+        or settings.get("cycle", {}).get("name")
+        or "Subscription Receipt"
+    )
 
     # border
     c.setStrokeColor(GOLD)
@@ -58,19 +67,32 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.setLineWidth(0.5)
     c.rect(15 * mm, 15 * mm, W - 30 * mm, H - 30 * mm)
 
-    y = H - 30 * mm
+    y = H - 28 * mm
     c.setFillColor(VERMILION)
-    c.setFont("Helvetica-Bold", 20)
-    c.drawCentredString(W / 2, y, org.get("organiser", "One10 EOC"))
-    y -= 8 * mm
-    c.setFillColor(BROWN)
-    c.setFont("Helvetica", 10)
-    c.drawCentredString(W / 2, y, org.get("address", ""))
-    y -= 10 * mm
+    c.setFont("Helvetica-Bold", 16)
+    c.drawCentredString(W / 2, y, letterhead)
+    y -= 5 * mm
     c.setFillColor(GOLD)
-    c.setFont("Helvetica-Bold", 15)
-    c.drawCentredString(W / 2, y, "One10 Durgotsav 2026 Subscription Receipt")
-    y -= 12 * mm
+    c.setFont("Helvetica", 8)
+    if subtitle:
+        # wrap-ish: truncate long legal status for letterhead
+        c.drawCentredString(W / 2, y, subtitle[:110])
+        y -= 5 * mm
+    c.setFillColor(BROWN)
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(W / 2, y, org.get("address", ""))
+    y -= 5 * mm
+    pan = (org.get("pan") or "").strip()
+    if pan:
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(W / 2, y, f"PAN: {pan}")
+        y -= 6 * mm
+    else:
+        y -= 3 * mm
+    c.setFillColor(GOLD)
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(W / 2, y, f"{campaign_title} — Subscription Receipt")
+    y -= 10 * mm
 
     c.setFillColor(BROWN)
     c.setFont("Helvetica-Bold", 11)
@@ -134,10 +156,15 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawString(52 * mm, y - 18 * mm, rc.get("computer_generated_note", ""))
     c.drawString(52 * mm, y - 23 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
 
-    c.setFont("Helvetica-Bold", 10)
-    c.drawRightString(W - 22 * mm, y - 30 * mm, org.get("authorised_signatory", "Authorised Signatory"))
-    c.setFont("Helvetica", 8)
-    c.drawRightString(W - 22 * mm, y - 35 * mm, "Authorised Signatory")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawRightString(W - 22 * mm, y - 28 * mm, org.get("authorised_signatory", "Authorised Signatory"))
+    c.setFont("Helvetica", 7)
+    c.drawRightString(W - 22 * mm, y - 32 * mm, "Authorised Signatory (for the Committee)")
+    c.setFont("Helvetica", 6.5)
+    mandate = org.get("bank_operating_mandate") or ""
+    if mandate:
+        c.drawCentredString(W / 2, 18 * mm, f"Bank mandate: {mandate}")
+    c.drawCentredString(W / 2, 14 * mm, "Funds are accepted as voluntary subscriptions/donations for committee activities (non-profit).")
 
     c.showPage()
     c.save()

@@ -117,7 +117,7 @@ export default function Subscribe() {
       amount: order.amount,
       currency: order.currency,
       order_id: order.provider_order_id,
-      name: "One10 Durgotsav 2026",
+      name: cfg?.campaign?.title || cfg?.platform?.name || "One 10 Events",
       description: "Household subscription",
       handler: async (resp) => {
         try {
@@ -141,7 +141,10 @@ export default function Subscribe() {
     <PublicLayout>
       <div className="mx-auto max-w-3xl px-5 py-12">
         <h1 className="font-display text-5xl text-ivory-100">Subscribe & Pay</h1>
-        <p className="mt-2 text-ivory-100/70">₹3,500 per family for One10 Durgotsav 2026. Your household is recorded once, with a verified receipt.</p>
+        <p className="mt-2 text-ivory-100/70">
+          {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
+          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Your household is recorded once, with a verified receipt.
+        </p>
 
         {/* stepper */}
         <div className="mt-6 flex items-center gap-2 text-xs">

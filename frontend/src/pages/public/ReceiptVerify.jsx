@@ -30,7 +30,7 @@ export default function ReceiptVerify() {
             {data && (
               <div data-testid="verify-result">
                 <div className="text-center">
-                  <div className="text-xs uppercase tracking-[0.3em] text-gold-600">One10 Durgotsav 2026</div>
+                  <div className="text-xs uppercase tracking-[0.3em] text-gold-600">{data.campaign_title || "One 10 Events"}</div>
                   <h1 className="mt-1 font-display text-4xl">Receipt Verification</h1>
                   <div className={`mt-3 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold ${data.verified ? "bg-emerald-100 text-emerald-800" : "bg-red-50 text-vermilion-600"}`}>
                     {data.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />} {data.status}

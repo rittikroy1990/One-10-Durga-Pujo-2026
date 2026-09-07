@@ -4,7 +4,7 @@ App uses Emergent Google OAuth. No app-managed passwords. To test protected rout
 create a user + session in Mongo, then use the session token.
 
 ## DB
-- Database: `one10_durgotsav_2026`
+- Database: `one10_events` (or the value of `DB_NAME`)
 - Users: `users` (custom `user_id`; MongoDB `_id` is separate/internal)
 - Sessions: `user_sessions` (`user_id`, `session_token`, `expires_at`)
 

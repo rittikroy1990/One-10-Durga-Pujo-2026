@@ -1,11 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X, Flower2 } from "lucide-react";
 import { Button } from "./ui";
+import api from "../lib/api";
 
 const LINKS = [
   { to: "/", label: "Home" },
   { to: "/events", label: "Programme" },
+  { to: "/sponsors", label: "Sponsors" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
   { to: "/transparency", label: "Transparency" },
@@ -22,8 +24,8 @@ export function PublicNav() {
             <Flower2 className="h-5 w-5" />
           </span>
           <span className="leading-none">
-            <span className="block font-display text-xl text-gradient-gold">One10 Durgotsav</span>
-            <span className="block text-[11px] uppercase tracking-[0.3em] text-ivory-100/60">2026 · EOC</span>
+            <span className="block font-display text-xl text-gradient-gold">One 10 Events</span>
+            <span className="block text-[11px] uppercase tracking-[0.3em] text-ivory-100/60">EOC · Community</span>
           </span>
         </Link>
         <nav className="hidden items-center gap-1 md:flex">
@@ -70,12 +72,22 @@ export function PublicNav() {
 }
 
 export function PublicFooter() {
+  const [org, setOrg] = useState(null);
+  useEffect(() => {
+    api.get("/config").then((r) => setOrg(r.data.organisation)).catch(() => {});
+  }, []);
+  const name = org?.organiser || "Events Organizations Committee of One10";
+  const address = org?.address || "One10 Residential Complex, Thakdari, Newtown, Action Area 1, Kolkata – 700102";
+
   return (
     <footer className="border-t border-gold-500/20 bg-brown-900 text-ivory-100/70">
       <div className="mx-auto grid max-w-7xl gap-8 px-5 py-12 md:grid-cols-4">
         <div className="md:col-span-2">
-          <div className="font-display text-2xl text-gradient-gold">One10 Durgotsav 2026</div>
-          <p className="mt-2 max-w-md text-sm">Amader Pujo • Amader One10. Organised by the Events Organising Committee (EOC), One10 — the third consecutive year.</p>
+          <div className="font-display text-2xl text-gradient-gold">One 10 Events</div>
+          <p className="mt-2 max-w-md text-sm">
+            {name} — voluntary non-profit community association for cultural and community events at One10.
+          </p>
+          <p className="mt-2 text-xs text-ivory-100/45">{address}</p>
           <p className="mt-3 text-xs text-ivory-100/40">A receipt is issued only after payment is verified. Please do not treat screenshots as proof of payment.</p>
         </div>
         <div>
@@ -83,6 +95,7 @@ export function PublicFooter() {
           <ul className="space-y-1.5 text-sm">
             <li><Link to="/subscribe" className="hover:text-ivory-100">Subscribe & Pay</Link></li>
             <li><Link to="/receipt/find" className="hover:text-ivory-100">Find Receipt</Link></li>
+            <li><Link to="/sponsors" className="hover:text-ivory-100">Sponsorship</Link></li>
             <li><Link to="/participate" className="hover:text-ivory-100">Participate</Link></li>
             <li><Link to="/events" className="hover:text-ivory-100">Programme</Link></li>
             <li><Link to="/transparency" className="hover:text-ivory-100">Public Transparency</Link></li>
@@ -94,12 +107,12 @@ export function PublicFooter() {
             <li><Link to="/privacy" className="hover:text-ivory-100">Privacy Policy</Link></li>
             <li><Link to="/terms" className="hover:text-ivory-100">Terms</Link></li>
             <li><Link to="/refund-policy" className="hover:text-ivory-100">Refund Policy</Link></li>
-            <li><Link to="/contact" className="hover:text-ivory-100">Contact EOC</Link></li>
+            <li><Link to="/contact" className="hover:text-ivory-100">Contact Committee</Link></li>
           </ul>
         </div>
       </div>
       <div className="border-t border-gold-500/10 py-4 text-center text-xs text-ivory-100/40">
-        © 2026 Events Organising Committee, One10. Built for transparent, audit-ready collection.
+        © {new Date().getFullYear()} {name}. Built for transparent, audit-ready collection.
       </div>
     </footer>
   );

@@ -7,7 +7,7 @@ from typing import Optional
 import json
 
 from db import db, new_id, clean
-from config import get_settings, CYCLE_2026
+from config import get_settings, get_active_cycle_id
 from util import (now_utc, iso, valid_indian_mobile, mask_mobile, mask_name, fmt_inr,
                   rupees_to_paise)
 from audit import audit, next_formatted
@@ -63,8 +63,9 @@ async def _household_is_paid(household_id: str) -> bool:
 @router.post("/subscribe")
 async def subscribe(body: SubscribeIn, request: Request):
     settings = await get_settings()
+    cycle_id = await get_active_cycle_id()
     if settings["cycle"].get("is_locked"):
-        raise HTTPException(status_code=423, detail="The 2026 cycle is locked.")
+        raise HTTPException(status_code=423, detail="This campaign cycle is locked.")
     if not (body.accuracy_confirmed and body.privacy_consent and body.terms_consent):
         raise HTTPException(status_code=400, detail="All confirmations and consents are required.")
     if not valid_indian_mobile(body.mobile):
@@ -84,7 +85,7 @@ async def subscribe(body: SubscribeIn, request: Request):
     donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
 
     # canonical household
-    household = await db.households.find_one({"cycle_id": CYCLE_2026, "tower_id": body.tower_id,
+    household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": body.tower_id,
                                               "flat_id": body.flat_id})
     if household and await _household_is_paid(household["id"]):
         raise HTTPException(status_code=409, detail={
@@ -97,7 +98,7 @@ async def subscribe(body: SubscribeIn, request: Request):
     if not household:
         hid = new_id("hh")
         household = {
-            "id": hid, "cycle_id": CYCLE_2026, "tower_id": body.tower_id, "tower_name": tower["name"],
+            "id": hid, "cycle_id": cycle_id, "tower_id": body.tower_id, "tower_name": tower["name"],
             "flat_id": body.flat_id, "flat_number": flat["number"],
             "occupancy_type": body.occupancy_type, "family_members": body.family_members,
             "family_display_name": body.family_display_name or "",
@@ -124,7 +125,7 @@ async def subscribe(body: SubscribeIn, request: Request):
         hid = household["id"]
 
     intent = {
-        "id": new_id("intent"), "cycle_id": CYCLE_2026, "household_id": hid, "kind": "subscription",
+        "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
         "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
         "components": await _components(settings, donation),
         "payer_is_member": body.payer_is_member,
@@ -205,6 +206,7 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
 
     household = await db.households.find_one({"id": intent["household_id"]}, {"_id": 0})
     settings = await get_settings()
+    cycle_id = intent.get("cycle_id") or await get_active_cycle_id()
     n, receipt_no = await next_formatted("receipt", settings["receipt"]["prefix"], 6)
     rid = new_id("rcpt")
     lines = [{"account_code": debit_account, "debit": intent["total_amount"], "credit": 0}]
@@ -215,8 +217,9 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     journal = await post_journal(source_type="receipt", source_id=rid,
                                  narration=f"Subscription receipt {receipt_no} ({method})",
                                  lines=lines, actor="system")
+    campaign_title = settings.get("campaign", {}).get("title") or settings.get("cycle", {}).get("name") or "One 10 Events"
     receipt = {
-        "id": rid, "receipt_no": receipt_no, "cycle_id": CYCLE_2026,
+        "id": rid, "receipt_no": receipt_no, "cycle_id": cycle_id,
         "household_id": intent["household_id"], "intent_id": intent["id"],
         "payment_id": provider_payment_id, "kind": "subscription",
         "payer_name": intent.get("payer_name") or household.get("primary_name"),
@@ -225,13 +228,14 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "total_amount": intent["total_amount"], "components": intent["components"],
         "method": method, "masked_ref": masked_ref, "status": "issued",
         "journal_id": journal["id"], "issued_at": iso(),
+        "campaign_title": campaign_title,
     }
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
                 after={"receipt_no": receipt_no, "total": receipt["total_amount"]}, request=request)
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
-                 subject=f"Your One10 Durgotsav 2026 receipt {receipt_no}",
+                 subject=f"Your {campaign_title} receipt {receipt_no}",
                  data={"receipt_no": receipt_no})
     return clean(receipt)
 

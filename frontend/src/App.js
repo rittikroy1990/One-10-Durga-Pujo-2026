@@ -15,6 +15,7 @@ import Events from "./pages/public/Events";
 import Participate from "./pages/public/Participate";
 import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
+import Sponsors from "./pages/public/Sponsors";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
@@ -42,6 +43,7 @@ function AppRoutes() {
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />
       <Route path="/events" element={<Events />} />
       <Route path="/participate" element={<Participate />} />
+      <Route path="/sponsors" element={<Sponsors />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />

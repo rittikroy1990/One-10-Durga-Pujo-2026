@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Body
 
 from db import db, new_id, clean
-from config import get_settings, CYCLE_2026
+from config import get_settings, get_active_cycle_id
 from util import iso, valid_indian_mobile
 from audit import audit
 from auth import require
@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api")
 
 async def _create_hh_intent(body: dict, method: str, user: dict):
     settings = await get_settings()
+    cycle_id = await get_active_cycle_id()
     tower = await db.towers.find_one({"id": body.get("tower_id")})
     flat = await db.flats.find_one({"id": body.get("flat_id")})
     if not tower or not flat:
@@ -21,7 +22,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
         raise HTTPException(status_code=400, detail="Valid mobile required.")
     base = int(settings["subscription"]["base_amount_paise"])
     donation = int(round(float(body.get("donation_rupees") or 0) * 100))
-    household = await db.households.find_one({"cycle_id": CYCLE_2026, "tower_id": tower["id"],
+    household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": tower["id"],
                                              "flat_id": flat["id"]})
     if household:
         if await db.receipts.count_documents({"household_id": household["id"], "status": "issued",
@@ -30,7 +31,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
         hid = household["id"]
     else:
         hid = new_id("hh")
-        household = {"id": hid, "cycle_id": CYCLE_2026, "tower_id": tower["id"],
+        household = {"id": hid, "cycle_id": cycle_id, "tower_id": tower["id"],
                      "tower_name": tower["name"], "flat_id": flat["id"], "flat_number": flat["number"],
                      "occupancy_type": body.get("occupancy_type", "other"),
                      "family_members": int(body.get("family_members") or 1),
@@ -39,7 +40,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
         await db.households.insert_one(dict(household))
     comps = [{"code": c["code"], "label": c["label"], "amount_paise": c["amount_paise"],
               "account_code": c["account_code"]} for c in settings["subscription"]["components"]]
-    intent = {"id": new_id("intent"), "cycle_id": CYCLE_2026, "household_id": hid, "kind": "subscription",
+    intent = {"id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
               "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
               "components": comps, "payer_name": body.get("name", ""),
               "payer_mobile": body.get("mobile", ""), "status": "payment_pending", "method": method,

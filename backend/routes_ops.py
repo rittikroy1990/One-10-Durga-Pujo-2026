@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException, Body
 
 from db import db, new_id, clean
-from config import CYCLE_2026
+from config import get_active_cycle_id
 from util import iso, valid_indian_mobile
 from audit import audit
 from auth import require
@@ -33,9 +33,10 @@ async def participate(body: dict = Body(...), request: Request = None):
     is_minor = bool(body.get("is_minor"))
     if is_minor and not body.get("guardian_consent"):
         raise HTTPException(status_code=400, detail="Guardian consent is required for minors.")
+    cycle_id = await get_active_cycle_id()
 
     if kind == "performer":
-        doc = {"id": new_id("perf"), "cycle_id": CYCLE_2026, "source": "public_interest",
+        doc = {"id": new_id("perf"), "cycle_id": cycle_id, "source": "public_interest",
                "act_title": body.get("act_title", ""), "category": body.get("category", ""),
                "participants": body.get("participants", ""), "duration": body.get("duration", ""),
                "technical_needs": body.get("technical_needs", ""), "contact_name": name,
@@ -44,7 +45,7 @@ async def participate(body: dict = Body(...), request: Request = None):
                "status": "interested", "created_at": iso(), "is_deleted": False}
         await db.performances.insert_one(dict(doc))
     else:
-        doc = {"id": new_id("vol"), "cycle_id": CYCLE_2026, "source": "public_interest",
+        doc = {"id": new_id("vol"), "cycle_id": cycle_id, "source": "public_interest",
                "name": name, "mobile": mobile, "skills": body.get("skills", ""),
                "availability": body.get("availability", ""),
                "interests": body.get("interests", []), "status": "interested",

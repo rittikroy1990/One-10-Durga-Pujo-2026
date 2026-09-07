@@ -23,7 +23,7 @@ import routes_gov
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("one10")
 
-app = FastAPI(title="One10 Durgotsav 2026 Portal", version="1.0.0")
+app = FastAPI(title="One 10 Events Portal", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,4 +51,4 @@ async def startup():
         logger.info("Object storage initialised")
     except Exception as e:
         logger.warning(f"Storage init deferred: {e}")
-    logger.info("One10 Durgotsav 2026 Portal ready")
+    logger.info("One 10 Events Portal ready")

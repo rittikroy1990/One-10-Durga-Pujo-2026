@@ -43,8 +43,8 @@ export default function AdminLayout() {
         <div className="flex items-center gap-2.5 border-b border-gold-500/20 px-5 py-4">
           <span className="grid h-9 w-9 place-items-center rounded-full bg-vermilion-500"><Flower2 className="h-4 w-4" /></span>
           <div className="leading-none">
-            <div className="font-display text-lg text-gradient-gold">One10 EOC</div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-ivory-100/50">Durgotsav 2026</div>
+            <div className="font-display text-lg text-gradient-gold">One 10 Events</div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-ivory-100/50">EOC Admin</div>
           </div>
         </div>
         <nav className="flex flex-col gap-0.5 p-3">

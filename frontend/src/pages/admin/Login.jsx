@@ -30,7 +30,7 @@ export default function Login() {
           <Flower2 className="h-7 w-7" />
         </span>
         <h1 className="mt-4 font-display text-4xl text-gradient-gold">Committee Portal</h1>
-        <p className="mt-1 text-sm text-ivory-100/60">One10 Durgotsav 2026 — EOC finance & operations</p>
+        <p className="mt-1 text-sm text-ivory-100/60">One 10 Events — EOC finance, subscriptions & operations</p>
         <Button variant="gold" size="lg" className="mt-8 w-full" onClick={login} data-testid="google-login-btn">
           <LogIn className="h-5 w-5" /> Sign in with Google
         </Button>

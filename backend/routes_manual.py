@@ -23,11 +23,8 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
     base = int(settings["subscription"]["base_amount_paise"])
     donation = int(round(float(body.get("donation_rupees") or 0) * 100))
     household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": tower["id"],
-                                             "flat_id": flat["id"]})
+                                             "flat_id": flat["id"], "is_deleted": {"$ne": True}})
     if household:
-        if await db.receipts.count_documents({"household_id": household["id"], "status": "issued",
-                                              "kind": {"$ne": "donation"}}):
-            raise HTTPException(status_code=409, detail="Household already has a verified subscription.")
         hid = household["id"]
     else:
         hid = new_id("hh")
@@ -230,6 +227,55 @@ async def admin_household_detail(hid: str, user: dict = Depends(require("househo
 async def admin_receipts(user: dict = Depends(require("receipts:read"))):
     rs = await db.receipts.find({}, {"_id": 0}).sort("issued_at", -1).to_list(5000)
     return {"items": rs, "count": len(rs)}
+
+
+@router.post("/admin/households/{hid}/clear-subscription")
+async def admin_clear_household_subscription(hid: str, body: dict = Body(default={}),
+                                             request: Request = None,
+                                             user: dict = Depends(require("receipts:manage"))):
+    """Void issued subscription receipts and soft-delete the household so the flat can pay again."""
+    h = await db.households.find_one({"id": hid})
+    if not h or h.get("is_deleted"):
+        raise HTTPException(status_code=404, detail="Household not found.")
+    reason = (body.get("reason") or "Cleared to allow a fresh subscription payment.").strip()
+    now = iso()
+    voided = await db.receipts.update_many(
+        {"household_id": hid, "status": "issued", "kind": {"$ne": "donation"}},
+        {"$set": {"status": "voided", "voided_at": now, "void_reason": reason,
+                  "voided_by": user.get("user_id")}})
+    superseded = await db.subscription_intents.update_many(
+        {"household_id": hid, "kind": {"$ne": "donation"},
+         "status": {"$in": ["paid", "payment_pending", "pending", "authorised"]}},
+        {"$set": {"status": "superseded", "superseded_at": now, "supersede_reason": reason}})
+    await db.upi_submissions.update_many(
+        {"household_id": hid, "status": {"$nin": ["voided", "rejected"]}},
+        {"$set": {"status": "voided", "voided_at": now}})
+    await db.households.update_one(
+        {"id": hid},
+        {"$set": {"is_deleted": True, "deleted_at": now, "deleted_by": user.get("user_id"),
+                  "delete_reason": reason}})
+    await audit("household.clear_subscription", actor=user, entity_type="household", entity_id=hid,
+                after={"receipts_voided": voided.modified_count,
+                       "intents_superseded": superseded.modified_count},
+                reason=reason, request=request)
+    return {"ok": True, "household_id": hid, "receipts_voided": voided.modified_count,
+            "intents_superseded": superseded.modified_count}
+
+
+@router.post("/admin/households/clear-by-flat")
+async def admin_clear_by_flat(body: dict = Body(...), request: Request = None,
+                              user: dict = Depends(require("receipts:manage"))):
+    """Clear the active-cycle household for a tower+flat (convenience for ops)."""
+    cycle_id = await get_active_cycle_id()
+    tower_id = body.get("tower_id")
+    flat_id = body.get("flat_id")
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="tower_id and flat_id are required.")
+    h = await db.households.find_one({"cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id,
+                                      "is_deleted": {"$ne": True}})
+    if not h:
+        raise HTTPException(status_code=404, detail="No active household found for that flat.")
+    return await admin_clear_household_subscription(h["id"], body, request, user)
 
 
 @router.get("/admin/payments")

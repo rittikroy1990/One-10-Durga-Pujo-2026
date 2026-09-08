@@ -38,15 +38,32 @@ function useList(endpoint, key = "items") {
 
 function Households() {
   const { items, loading, load } = useList("/admin/households");
+  const clearHousehold = async (h) => {
+    if (!window.confirm(`Clear subscription for ${h.tower_name} ${h.flat_number}? Existing receipts will be voided and the flat can pay again.`)) return;
+    try {
+      const r = await api.post(`/admin/households/${h.id}/clear-subscription`, {
+        reason: "Cleared to allow a fresh subscription payment.",
+      });
+      toast.success(`Cleared — ${r.data.receipts_voided || 0} receipt(s) voided`);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not clear household.");
+    }
+  };
   return (
     <Card><CardBody>
       <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
-        <Table><THead><TR><TH>Tower</TH><TH>Flat</TH><TH>Primary Contact</TH><TH>Occupancy</TH><TH right>Members</TH><TH>Status</TH></TR></THead>
+        <Table><THead><TR><TH>Tower</TH><TH>Flat</TH><TH>Primary Contact</TH><TH>Occupancy</TH><TH right>Members</TH><TH>Status</TH><TH>Actions</TH></TR></THead>
           <tbody>{items.map((h) => (
             <TR key={h.id}><TD>{h.tower_name}</TD><TD>{h.flat_number}</TD><TD>{h.primary_name}</TD>
               <TD className="capitalize">{(h.occupancy_type || "").replace(/_/g, " ")}</TD><TD right>{h.family_members}</TD>
-              <TD><StatusBadge status={h.paid ? "paid" : "pending"} /></TD></TR>
+              <TD><StatusBadge status={h.paid ? "paid" : "pending"} /></TD>
+              <TD>
+                <Button variant="subtle" size="sm" onClick={() => clearHousehold(h)} data-testid={`clear-hh-${h.id}`}>
+                  <Undo2 className="h-3.5 w-3.5" /> Clear
+                </Button>
+              </TD></TR>
           ))}</tbody></Table>
       )}
     </CardBody></Card>

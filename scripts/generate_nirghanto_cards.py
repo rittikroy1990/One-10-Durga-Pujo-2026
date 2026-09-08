@@ -1,274 +1,385 @@
 #!/usr/bin/env python3
-"""Generate 4 door-to-door Durgotsav 2026 Nirghonto campaign cards (A5 portrait PNGs)."""
+"""Rebuild aligned campaign collages and regenerate Nirghonto door-to-door cards."""
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT_DIRS = [
+CAMPAIGN = ROOT / "frontend" / "public" / "images" / "campaign"
+OUT_CARDS = [
     ROOT / "frontend" / "public" / "campaign-cards",
     Path("/opt/cursor/artifacts/campaign-cards"),
 ]
+ARTIFACTS = Path("/opt/cursor/artifacts/campaign-images")
 
-W, H = 1240, 1748  # ~A5 @ 150dpi
-BROWN = (31, 20, 18)
-BROWN2 = (42, 27, 24)
+W_CARD, H_CARD = 1240, 1748
+MARGIN = 56
+L = MARGIN + 24
+R = W_CARD - MARGIN - 24
+CW = R - L
+FOOTER_Y = H_CARD - 100
+
+BROWN = (27, 17, 15)
+PANEL = (36, 23, 21)
 IVORY = (255, 255, 240)
-IVORY_DIM = (245, 240, 230)
+IVORY_DIM = (220, 210, 195)
 GOLD = (212, 175, 55)
 GOLD_SOFT = (230, 179, 30)
 VERMILION = (217, 56, 30)
 WHITE = (255, 255, 255)
+NAVY = (12, 22, 48)
 
-BN = "/usr/share/fonts/truetype/noto/NotoSerifBengali-Regular.ttf"
-BN_B = "/usr/share/fonts/truetype/noto/NotoSerifBengali-Bold.ttf"
-EN = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+BN = "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf"
+BN_B = "/usr/share/fonts/truetype/noto/NotoSansBengali-Bold.ttf"
+EN = "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 EN_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-EN_SERIF_B = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
 
 
 def font(path, size):
     return ImageFont.truetype(path, size)
 
 
-def draw_bg(draw):
-    draw.rectangle([0, 0, W, H], fill=BROWN)
-    draw.rectangle([36, 36, W - 36, H - 36], outline=GOLD, width=3)
-    draw.rectangle([48, 48, W - 48, H - 48], outline=GOLD, width=1)
-    draw.rectangle([48, 48, W - 48, 160], fill=BROWN2)
-    draw.line([48, 160, W - 48, 160], fill=GOLD, width=2)
+def fit(path, tw, th, center=(0.5, 0.4)):
+    im = Image.open(path).convert("RGB")
+    return ImageOps.fit(im, (tw, th), method=Image.Resampling.LANCZOS, centering=center)
 
 
-def text_w(draw, text, fnt):
-    b = draw.textbbox((0, 0), text, font=fnt)
-    return b[2] - b[0]
+def rounded_paste(base, photo, xy, radius=16):
+    x, y = xy
+    w, h = photo.size
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
+    base.paste(photo, (x, y), mask)
 
 
-def center_text(draw, y, text, fnt, fill=IVORY):
-    tw = text_w(draw, text, fnt)
-    draw.text(((W - tw) / 2, y), text, font=fnt, fill=fill)
-    b = draw.textbbox((0, 0), text, font=fnt)
-    return y + (b[3] - b[1]) + 8
+def text_center(draw, y, text, fnt, fill, width=None, x0=0):
+    width = width or W_CARD
+    bb = draw.textbbox((0, 0), text, font=fnt)
+    tw = bb[2] - bb[0]
+    draw.text((x0 + (width - tw) / 2, y), text, font=fnt, fill=fill)
+    return y + (bb[3] - bb[1]) + 8
 
 
-def wrap_lines(draw, text, fnt, max_w):
-    words = text.split()
+def rebuild_highlights():
+    """Last Year Celebrations — 3 rows x 2 equal photos, perfect grid."""
+    W, H = 1200, 1600
+    img = Image.new("RGB", (W, H), NAVY)
+    d = ImageDraw.Draw(img)
+
+    # header bar
+    d.rounded_rectangle([60, 40, W - 60, 130], radius=20, fill=IVORY)
+    text_center(d, 68, "Last Year Celebrations", font(EN_B, 42), NAVY, width=W)
+
+    rows = [
+        ("Khuti Puja 2024", (255, 214, 90), ["full-30.jpg", "full-34.jpg"]),
+        ("Durga Puja 2024", (120, 200, 255), ["full-14.jpg", "full-24.jpg"]),
+        ("Kali Puja & Bijoya 2024", (255, 140, 180), ["full-27.jpg", "full-26.jpg"]),
+    ]
+
+    pad_x = 60
+    gap = 20
+    usable_w = W - 2 * pad_x
+    cell_w = (usable_w - gap) // 2
+    cell_h = 360
+    y = 160
+
+    for title, color, files in rows:
+        d.text((pad_x, y), title, font=font(EN_B, 28), fill=color)
+        y += 48
+        for i, name in enumerate(files):
+            x = pad_x + i * (cell_w + gap)
+            # white frame
+            frame = [x - 6, y - 6, x + cell_w + 6, y + cell_h + 6]
+            d.rounded_rectangle(frame, radius=18, fill=WHITE)
+            photo = fit(CAMPAIGN / name, cell_w, cell_h, center=(0.5, 0.35))
+            rounded_paste(img, photo, (x, y), radius=14)
+        y += cell_h + 36
+
+    out = CAMPAIGN / "highlights.jpg"
+    img.save(out, "JPEG", quality=92, optimize=True)
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    img.save(ARTIFACTS / "highlights.jpg", "JPEG", quality=92)
+    print("rebuilt", out)
+    return out
+
+
+def rebuild_experience():
+    """This Year Celebrations — 3 equal full-width photos, aligned frames."""
+    W, H = 1200, 1600
+    img = Image.new("RGB", (W, H), NAVY)
+    d = ImageDraw.Draw(img)
+
+    d.rounded_rectangle([60, 40, 780, 120], radius=18, fill=IVORY)
+    d.text((90, 62), "This Year Celebrations", font=font(EN_B, 36), fill=NAVY)
+
+    sections = [
+        ("Saraswati Puja 2026", (80, 220, 210), "full-33.jpg"),
+        ("Dol / Holi 2026", (255, 150, 170), "full-23.jpg"),
+        ("Poila Boishakh 2026", (255, 200, 150), "full-20.jpg"),
+    ]
+
+    pad_x = 60
+    frame_w = W - 2 * pad_x
+    photo_h = 360
+    y = 150
+
+    for title, color, name in sections:
+        d.text((pad_x, y), title, font=font(EN_B, 28), fill=color)
+        y += 46
+        d.rounded_rectangle([pad_x - 6, y - 6, pad_x + frame_w + 6, y + photo_h + 6], radius=18, fill=WHITE)
+        photo = fit(CAMPAIGN / name, frame_w, photo_h, center=(0.5, 0.35))
+        rounded_paste(img, photo, (pad_x, y), radius=14)
+        y += photo_h + 28
+        if y < H - 40:
+            d.line([pad_x, y - 12, pad_x + frame_w, y - 12], fill=(80, 100, 140), width=1)
+
+    out = CAMPAIGN / "experience.jpg"
+    img.save(out, "JPEG", quality=92, optimize=True)
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    img.save(ARTIFACTS / "experience.jpg", "JPEG", quality=92)
+    print("rebuilt", out)
+    return out
+
+
+def rebuild_hero():
+    """Clean full-bleed idol hero for site + cards."""
+    W, H = 1200, 1600
+    photo = fit(CAMPAIGN / "full-36.jpg", W, H, center=(0.5, 0.35))
+    # subtle bottom gradient for overlays
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    for i in range(280):
+        a = int(160 * (i / 280))
+        od.line([(0, H - 280 + i), (W, H - 280 + i)], fill=(20, 12, 10, a))
+    out_im = Image.alpha_composite(photo.convert("RGBA"), overlay).convert("RGB")
+    out = CAMPAIGN / "hero-cover.jpg"
+    out_im.save(out, "JPEG", quality=92, optimize=True)
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    out_im.save(ARTIFACTS / "hero-cover.jpg", "JPEG", quality=92)
+    print("rebuilt", out)
+    return out
+
+
+# ---- Nirghonto cards ----
+
+def is_bn(ch):
+    return 0x0980 <= ord(ch) <= 0x09FF
+
+
+def split_runs(text):
+    runs, cur, mode = [], "", None
+    for ch in text:
+        m = "bn" if is_bn(ch) else "en"
+        if mode is None:
+            mode, cur = m, ch
+        elif m == mode or ch.isspace() or ch in "|/-–,.:()₹+•'\"0123456789":
+            cur += ch
+        else:
+            runs.append((mode, cur))
+            mode, cur = m, ch
+    if cur:
+        runs.append((mode, cur))
+    return runs
+
+
+def measure(draw, text, size, bold=False):
+    w = h = 0
+    for mode, run in split_runs(text):
+        path = (BN_B if bold else BN) if mode == "bn" else (EN_B if bold else EN)
+        bb = draw.textbbox((0, 0), run, font=font(path, size))
+        w += bb[2] - bb[0]
+        h = max(h, bb[3] - bb[1])
+    return w, h
+
+
+def draw_mixed(draw, x, y, text, size, fill, bold=False, center=False, max_w=None):
+    max_w = max_w or CW
+    words = text.split(" ")
     lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if text_w(draw, trial, fnt) <= max_w:
+    for word in words:
+        trial = (cur + " " + word).strip()
+        if measure(draw, trial, size, bold)[0] <= max_w:
             cur = trial
         else:
             if cur:
                 lines.append(cur)
-            cur = w
+            cur = word
     if cur:
         lines.append(cur)
-    return lines or [text]
+    cy = y
+    for line in lines:
+        lw, lh = measure(draw, line, size, bold)
+        lx = (L + (CW - lw) / 2) if center else x
+        cx = lx
+        for mode, run in split_runs(line):
+            path = (BN_B if bold else BN) if mode == "bn" else (EN_B if bold else EN)
+            f = font(path, size)
+            draw.text((cx, cy), run, font=f, fill=fill)
+            bb = draw.textbbox((0, 0), run, font=f)
+            cx += bb[2] - bb[0]
+        cy += lh + 10
+    return cy
 
 
-def draw_footer(draw, page_label):
-    y = H - 120
-    draw.line([80, y, W - 80, y], fill=GOLD, width=1)
-    center_text(draw, y + 16, "EOC One10 · PS One-10, New Town", font(EN, 22), GOLD)
-    center_text(draw, y + 48, page_label, font(BN, 26), IVORY_DIM)
+def base(photo_name, photo_h=300):
+    img = Image.new("RGB", (W_CARD, H_CARD), BROWN)
+    d = ImageDraw.Draw(img)
+    d.rectangle([MARGIN - 6, MARGIN - 6, W_CARD - MARGIN + 6, H_CARD - MARGIN + 6], outline=GOLD, width=3)
+    d.rectangle([MARGIN, MARGIN, W_CARD - MARGIN, H_CARD - MARGIN], outline=(170, 135, 40), width=1)
+    y = MARGIN + 18
+    photo = fit(CAMPAIGN / photo_name, CW, photo_h, center=(0.5, 0.35))
+    # frame photo full width of content
+    rounded_paste(img, photo, (L, y), radius=18)
+    d.rounded_rectangle([L, y, R, y + photo_h], radius=18, outline=GOLD, width=2)
+    y = y + photo_h + 22
+    return img, d, y
 
 
-def section_header(d, y, title_bn, title_en, date_line):
-    y = center_text(d, y, title_bn, font(BN_B, 44), GOLD)
-    y = center_text(d, y, title_en, font(EN_SERIF_B, 36), IVORY)
-    y = center_text(d, y + 4, date_line, font(EN, 26), VERMILION)
-    d.line([140, y + 10, W - 140, y + 10], fill=GOLD, width=1)
-    return y + 28
+def footer(d, label):
+    d.line([L, FOOTER_Y - 16, R, FOOTER_Y - 16], fill=GOLD, width=1)
+    draw_mixed(d, L, FOOTER_Y - 6, "EOC One10 | PS One-10, New Town", 20, GOLD, center=True)
+    draw_mixed(d, L, FOOTER_Y + 26, label, 20, IVORY_DIM, center=True)
+
+
+def info_box(d, y, title, lines):
+    line_h = 38
+    h = 28 + 40 + len(lines) * line_h + 18
+    d.rounded_rectangle([L, y, R, y + h], radius=16, fill=PANEL, outline=GOLD, width=2)
+    ty = y + 18
+    ty = draw_mixed(d, L + 24, ty, title, 24, GOLD_SOFT, bold=True, max_w=CW - 48)
+    for line in lines:
+        ty = draw_mixed(d, L + 24, ty + 2, "•  " + line, 22, IVORY, max_w=CW - 48)
+    return y + h + 16
 
 
 def card_cover():
-    img = Image.new("RGB", (W, H), BROWN)
-    d = ImageDraw.Draw(img)
-    draw_bg(d)
-
-    y = 70
-    y = center_text(d, y, "Events Organising Committee", font(EN, 26), GOLD)
-    y = center_text(d, y + 4, "One10 Durgotsav 2026", font(EN_SERIF_B, 54), IVORY)
-    y = center_text(d, y + 2, "আমাদের পুজো · আমাদের One10", font(BN_B, 36), GOLD_SOFT)
-
-    y += 36
-    box = [180, y, W - 180, y + 90]
-    d.rounded_rectangle(box, radius=20, fill=VERMILION)
-    center_text(d, y + 22, "16 – 21 October 2026", font(EN_B, 36), WHITE)
-
-    y = box[3] + 28
-    y = center_text(d, y, "ষষ্ঠী → দশমী  ·  পূর্ণ নির্ঘণ্ট সহ", font(BN, 32), IVORY)
-    y = center_text(d, y + 4, "Door-to-door campaign card set", font(EN, 26), IVORY_DIM)
-
-    y += 28
-    d.rounded_rectangle([100, y, W - 100, y + 260], radius=24, outline=GOLD, width=2, fill=BROWN2)
-    center_text(d, y + 28, "Household subscription", font(EN, 24), GOLD)
-    center_text(d, y + 70, "₹ 3,500", font(EN_SERIF_B, 72), IVORY)
-    center_text(d, y + 160, "₹2,500 + ₹300 Kali + ₹700 Bijoya", font(EN, 24), IVORY_DIM)
-    center_text(d, y + 200, "Verified digital receipt after payment", font(EN, 22), GOLD_SOFT)
-
-    y += 300
-    d.rounded_rectangle([100, y, W - 100, y + 180], radius=24, fill=(23, 13, 11), outline=GOLD, width=1)
-    center_text(d, y + 28, "Principal venue", font(EN, 22), GOLD)
-    yy = y + 70
-    for line in wrap_lines(d, "Badminton court near the tennis court, in front of Tower 11", font(EN, 28), W - 260):
-        center_text(d, yy, line, font(EN, 28), IVORY)
-        yy += 40
-
-    y += 220
-    for b in [
-        "১৬ অক্টোবর ষষ্ঠী · ১৭ সপ্তমী · ১৮ সপ্তমী/অষ্টমী",
-        "১৯ অষ্টমী (সন্ধিপুজো) · ২০ নবমী · ২১ দশমী",
-        "প্রাচীন পঞ্জিকা · ঠাকুরমশাই নিশ্চিত",
+    img, d, y = base("full-36.jpg", 340)
+    y = draw_mixed(d, L, y, "Events Organising Committee", 22, GOLD, center=True)
+    y = draw_mixed(d, L, y + 2, "One10 Durgotsav 2026", 46, IVORY, bold=True, center=True)
+    y = draw_mixed(d, L, y + 6, "আমাদের পুজো | আমাদের ওয়ান-টেন", 26, GOLD_SOFT, bold=True, center=True)
+    y += 12
+    d.rounded_rectangle([L + 100, y, R - 100, y + 64], radius=16, fill=VERMILION)
+    draw_mixed(d, L, y + 16, "16 - 21 October 2026", 28, WHITE, bold=True, center=True)
+    y += 80
+    y = draw_mixed(d, L, y, "ষষ্ঠী থেকে দশমী | পূর্ণ নির্ঘণ্ট", 24, IVORY, center=True)
+    y = draw_mixed(d, L, y, "Door-to-door campaign cards", 20, IVORY_DIM, center=True)
+    y += 12
+    d.rounded_rectangle([L, y, R, y + 190], radius=16, fill=PANEL, outline=GOLD, width=2)
+    cy = y + 18
+    cy = draw_mixed(d, L, cy, "Household subscription", 20, GOLD, center=True)
+    cy = draw_mixed(d, L, cy + 2, "Rs 3,500 / family", 40, IVORY, bold=True, center=True)
+    cy = draw_mixed(d, L, cy, "Rs 2,500 + Rs 300 Kali + Rs 700 Bijoya", 20, IVORY_DIM, center=True)
+    draw_mixed(d, L, cy, "Verified digital receipt after payment", 18, GOLD_SOFT, center=True)
+    y += 206
+    d.rounded_rectangle([L, y, R, y + 100], radius=16, fill=(20, 12, 10), outline=GOLD, width=1)
+    cy = y + 16
+    cy = draw_mixed(d, L, cy, "Principal venue", 18, GOLD, center=True)
+    draw_mixed(d, L, cy, "Badminton court near tennis court, Tower 11", 22, IVORY, center=True)
+    y += 116
+    for line in [
+        "16 Sasthi | 17 Saptami | 18 Saptami/Ashtami",
+        "19 Ashtami (Sandhi) | 20 Navami | 21 Dashami",
     ]:
-        center_text(d, y, b, font(BN, 28), IVORY_DIM)
-        y += 42
-
-    y += 16
-    d.rounded_rectangle([200, y, W - 200, y + 70], radius=35, fill=VERMILION)
-    center_text(d, y + 16, "Subscribe & Pay · One 10 Events", font(EN_B, 28), WHITE)
-
-    draw_footer(d, "কার্ড ১ / ৪  ·  কভার")
+        y = draw_mixed(d, L, y, line, 20, IVORY_DIM, center=True)
+    y += 8
+    d.rounded_rectangle([L + 60, y, R - 60, y + 58], radius=28, fill=VERMILION)
+    draw_mixed(d, L, y + 14, "Open /subscribe  |  Cards /nirghanto", 20, WHITE, bold=True, center=True)
+    footer(d, "Card 1/4 Cover | /nirghanto")
     return img
 
 
-def card_sasthi_saptami():
-    img = Image.new("RGB", (W, H), BROWN)
-    d = ImageDraw.Draw(img)
-    draw_bg(d)
-    y = 70
-    y = center_text(d, y, "পুজো নির্ঘণ্ট · প্রাচীন পঞ্জিকা", font(BN, 28), GOLD)
-    y = section_header(d, y + 20, "ষষ্ঠী ও সপ্তমী", "Sasthi & Saptami", "16–18 October 2026")
-
-    d.rounded_rectangle([90, y, W - 90, y + 320], radius=20, fill=BROWN2, outline=GOLD, width=1)
-    d.text((120, y + 24), "মহা ষষ্ঠী · 16 Oct (Fri) · ২৮ আশ্বিন", font=font(BN_B, 30), fill=GOLD_SOFT)
-    lines = [
-        "তিথি: 16 Oct 1:42 AM → 17 Oct 3:46 AM",
-        "সকাল ৮:৩০-এর মধ্যে সংকল্প ও ষষ্ঠী পুজো",
-        "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
-        "সন্ধ্যায়: বোধন, আমন্ত্রণ, বেলবরণ, অধিবাস",
-    ]
-    yy = y + 80
-    for line in lines:
-        d.text((130, yy), "•  " + line, font=font(BN, 28), fill=IVORY)
-        yy += 48
-
-    y = y + 350
-    d.rounded_rectangle([90, y, W - 90, y + 420], radius=20, fill=BROWN2, outline=GOLD, width=1)
-    d.text((120, y + 24), "মহা সপ্তমী · 17–18 Oct · ২৯–৩০ আশ্বিন", font=font(BN_B, 30), fill=GOLD_SOFT)
-    lines = [
-        "তিথি শুরু: 17 Oct 3:46 AM (অহোরাত্র)",
-        "দিবা ৭:০৪-এর পরে নবপত্রিকা প্রবেশ ও স্থাপন",
-        "সপ্তমাদি কল্পারম্ভ ও সপ্তমী বিহিত পুজো",
-        "তিথি শেষ: 18 Oct 5:53 AM",
-        "ভোর ৫:৫৩-এর মধ্যে অধিক সপ্তমী পুজো",
-        "রাত ১০:৫৯–১১:৪৭ অর্ধরাত্রি পুজো",
-    ]
-    yy = y + 80
-    for line in lines:
-        d.text((130, yy), "•  " + line, font=font(BN, 28), fill=IVORY)
-        yy += 48
-
-    draw_footer(d, "কার্ড ২ / ৪  ·  ষষ্ঠী–সপ্তমী")
+def card_sasthi():
+    img, d, y = base("full-34.jpg", 260)
+    y = draw_mixed(d, L, y, "পুজো নির্ঘণ্ট | প্রাচীন পঞ্জিকা", 22, GOLD, center=True)
+    y = draw_mixed(d, L, y + 4, "ষষ্ঠী ও সপ্তমী", 36, GOLD, bold=True, center=True)
+    y = draw_mixed(d, L, y, "Sasthi & Saptami", 26, IVORY, bold=True, center=True)
+    y = draw_mixed(d, L, y, "16 - 18 October 2026", 22, VERMILION, bold=True, center=True)
+    y += 14
+    y = info_box(d, y, "Maha Sasthi | 16 Oct (Fri)", [
+        "Tithi: 16 Oct 1:42 AM - 17 Oct 3:46 AM",
+        "Sankalpa & Sasthi puja by 8:30 AM",
+        "Purvahna until 9:28 AM",
+        "Evening: Bodhon, Belbaran, Adhibas",
+    ])
+    y = info_box(d, y, "Maha Saptami | 17-18 Oct", [
+        "Tithi starts 17 Oct 3:46 AM (day-night)",
+        "Nabapatrika after 7:04 AM",
+        "Saptami kalparambha & puja",
+        "Tithi ends 18 Oct 5:53 AM",
+        "Midnight puja 10:59 PM - 11:47 PM",
+    ])
+    footer(d, "Card 2/4 Sasthi-Saptami | /nirghanto")
     return img
 
 
-def card_ashtami_sandhi():
-    img = Image.new("RGB", (W, H), BROWN)
-    d = ImageDraw.Draw(img)
-    draw_bg(d)
-    y = 70
-    y = center_text(d, y, "পুজো নির্ঘণ্ট · প্রাচীন পঞ্জিকা", font(BN, 28), GOLD)
-    y = section_header(d, y + 20, "মহাষ্টমী ও সন্ধিপুজো", "Maha Ashtami & Sandhi", "18–19 October 2026")
-
-    d.rounded_rectangle([90, y, W - 90, y + 160], radius=20, fill=VERMILION)
-    center_text(d, y + 28, "সন্ধিপুজো", font(BN_B, 36), WHITE)
-    center_text(d, y + 80, "19 Oct · 7:26 AM – 8:14 AM", font(EN_B, 34), WHITE)
-
-    y += 190
-    d.rounded_rectangle([90, y, W - 90, y + 520], radius=20, fill=BROWN2, outline=GOLD, width=1)
-    d.text((120, y + 24), "তিথি ও পুজোর সময়", font=font(BN_B, 30), fill=GOLD_SOFT)
-    lines = [
-        "অষ্টমী শুরু: 18 Oct রবিবার সকাল ৫:৫৩",
-        "অষ্টমী শেষ: 19 Oct সোমবার সকাল ৭:৫০",
-        "সকাল ৭:০৫-এর মধ্যে মহাষ্টমী কল্পারম্ভ",
-        "অঞ্জলি ও বীরাষ্টমী ব্রত সকাল ৭:০৫-এর মধ্যে",
-        "সন্ধিপুজো: ৭:২৬ গতে → ৮:১৪-এর মধ্যে",
-        "বলিদান: সকাল ৭:৫০",
-        "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
-    ]
-    yy = y + 80
-    for line in lines:
-        d.text((130, yy), "•  " + line, font=font(BN, 28), fill=IVORY)
-        yy += 52
-
-    y += 560
-    d.rounded_rectangle([90, y, W - 90, y + 110], radius=16, outline=GOLD_SOFT, width=2)
-    note = "বিশুদ্ধ সিদ্ধান্ত মতে সন্ধিপুজো: সকাল ১০:২৮ – ১১:১৬ (One10 প্রাচীন পঞ্জিকা মানবে)"
-    for i, line in enumerate(wrap_lines(d, note, font(BN, 26), W - 240)):
-        d.text((120, y + 28 + i * 36), line, font=font(BN, 26), fill=GOLD_SOFT)
-
-    draw_footer(d, "কার্ড ৩ / ৪  ·  অষ্টমী–সন্ধি")
+def card_ashtami():
+    img, d, y = base("full-18.jpg", 260)
+    y = draw_mixed(d, L, y, "পুজো নির্ঘণ্ট | প্রাচীন পঞ্জিকা", 22, GOLD, center=True)
+    y = draw_mixed(d, L, y + 4, "মহাষ্টমী ও সন্ধিপুজো", 34, GOLD, bold=True, center=True)
+    y = draw_mixed(d, L, y, "Maha Ashtami & Sandhi", 26, IVORY, bold=True, center=True)
+    y = draw_mixed(d, L, y, "18 - 19 October 2026", 22, VERMILION, bold=True, center=True)
+    y += 12
+    d.rounded_rectangle([L, y, R, y + 100], radius=16, fill=VERMILION)
+    draw_mixed(d, L, y + 18, "সন্ধিপুজো / Sandhi Puja", 26, WHITE, bold=True, center=True)
+    draw_mixed(d, L, y + 56, "19 Oct  |  7:26 AM - 8:14 AM", 26, WHITE, bold=True, center=True)
+    y += 118
+    y = info_box(d, y, "Tithi & puja timings (Prachin)", [
+        "Ashtami starts: 18 Oct Sun 5:53 AM",
+        "Ashtami ends: 19 Oct Mon 7:50 AM",
+        "Kalparambha & Anjali by 7:05 AM",
+        "Sandhi Puja: 7:26 AM - 8:14 AM",
+        "Balidan: 7:50 AM | Purvahna to 9:28 AM",
+    ])
+    d.rounded_rectangle([L, y, R, y + 90], radius=14, fill=PANEL, outline=GOLD_SOFT, width=2)
+    draw_mixed(
+        d, L + 20, y + 20,
+        "Bisuddha Sandhi: 10:28 AM - 11:16 AM. One10 follows Prachin / Thakurmasai.",
+        20, GOLD_SOFT, max_w=CW - 40,
+    )
+    footer(d, "Card 3/4 Ashtami-Sandhi | /nirghanto")
     return img
 
 
-def card_navami_dashami():
-    img = Image.new("RGB", (W, H), BROWN)
-    d = ImageDraw.Draw(img)
-    draw_bg(d)
-    y = 70
-    y = center_text(d, y, "পুজো নির্ঘণ্ট · প্রাচীন পঞ্জিকা", font(BN, 28), GOLD)
-    y = section_header(d, y + 16, "নবমী ও বিজয়া দশমী", "Navami & Vijaya Dashami", "19–21 October 2026")
-
-    d.rounded_rectangle([90, y, W - 90, y + 300], radius=20, fill=BROWN2, outline=GOLD, width=1)
-    d.text((120, y + 24), "মহানবমী · 19–20 Oct · ২ কার্তিক", font=font(BN_B, 30), fill=GOLD_SOFT)
-    lines = [
-        "তিথি: 19 Oct 7:50 AM → 20 Oct 9:31 AM",
-        "সকাল ৭:০৫-এর মধ্যে মহানবমী পুজো",
-        "পুনঃ ৮:৩১ – ৯:৩১ কেবল মহানবমী কল্প",
-        "নবরাত্রি ব্রত সমাপন",
-    ]
-    yy = y + 80
-    for line in lines:
-        d.text((130, yy), "•  " + line, font=font(BN, 28), fill=IVORY)
-        yy += 48
-
-    y += 330
-    d.rounded_rectangle([90, y, W - 90, y + 320], radius=20, fill=BROWN2, outline=GOLD, width=1)
-    d.text((120, y + 24), "বিজয়া দশমী · 20–21 Oct · ৩ কার্তিক", font=font(BN_B, 30), fill=GOLD_SOFT)
-    lines = [
-        "তিথি: 20 Oct 9:31 AM → 21 Oct 10:47 AM",
-        "সকাল ৮:৩১-এর মধ্যে দশমী পুজো ও বিসর্জন",
-        "বিসর্জনান্তে অপরাজিতা পুজো",
-        "বিজয়া দশমী কৃত্য / দশেরা",
-    ]
-    yy = y + 80
-    for line in lines:
-        d.text((130, yy), "•  " + line, font=font(BN, 28), fill=IVORY)
-        yy += 48
-
-    y += 360
-    d.rounded_rectangle([90, y, W - 90, y + 160], radius=20, fill=VERMILION)
-    center_text(d, y + 28, "পরিবার পিছু চাঁদা ₹৩,৫০০", font(BN_B, 34), WHITE)
-    center_text(d, y + 85, "Subscribe on One 10 Events · verified receipt", font(EN, 24), WHITE)
-
-    draw_footer(d, "কার্ড ৪ / ৪  ·  নবমী–দশমী")
+def card_navami():
+    img, d, y = base("full-15.jpg", 260)
+    y = draw_mixed(d, L, y, "পুজো নির্ঘণ্ট | প্রাচীন পঞ্জিকা", 22, GOLD, center=True)
+    y = draw_mixed(d, L, y + 4, "নবমী ও বিজয়া দশমী", 34, GOLD, bold=True, center=True)
+    y = draw_mixed(d, L, y, "Navami & Vijaya Dashami", 26, IVORY, bold=True, center=True)
+    y = draw_mixed(d, L, y, "19 - 21 October 2026", 22, VERMILION, bold=True, center=True)
+    y += 12
+    y = info_box(d, y, "Maha Navami | 19-20 Oct", [
+        "Tithi: 19 Oct 7:50 AM - 20 Oct 9:31 AM",
+        "Mahanaavami puja by 7:05 AM",
+        "Again 8:31 AM - 9:31 AM",
+        "Navaratri brata concludes",
+    ])
+    y = info_box(d, y, "Vijaya Dashami | 20-21 Oct", [
+        "Tithi: 20 Oct 9:31 AM - 21 Oct 10:47 AM",
+        "Dashami puja & Visarjan by 8:31 AM",
+        "Aparajita puja after Visarjan",
+        "Vijaya Dashami rites / Dussehra",
+    ])
+    d.rounded_rectangle([L, y, R, y + 100], radius=16, fill=VERMILION)
+    draw_mixed(d, L, y + 18, "পরিবার পিছু চাঁদা Rs 3,500", 28, WHITE, bold=True, center=True)
+    draw_mixed(d, L, y + 58, "Pay at /subscribe  |  Schedule /nirghanto", 20, WHITE, center=True)
+    footer(d, "Card 4/4 Navami-Dashami | /subscribe")
     return img
 
 
 def main():
+    rebuild_highlights()
+    rebuild_experience()
+    rebuild_hero()
     cards = [
         ("01-cover-subscribe.png", card_cover()),
-        ("02-sasthi-saptami.png", card_sasthi_saptami()),
-        ("03-ashtami-sandhi.png", card_ashtami_sandhi()),
-        ("04-navami-dashami.png", card_navami_dashami()),
+        ("02-sasthi-saptami.png", card_sasthi()),
+        ("03-ashtami-sandhi.png", card_ashtami()),
+        ("04-navami-dashami.png", card_navami()),
     ]
-    for out in OUT_DIRS:
+    for out in OUT_CARDS:
         out.mkdir(parents=True, exist_ok=True)
         for name, img in cards:
-            path = out / name
-            img.save(path, "PNG", optimize=True)
-            print(f"wrote {path}")
+            img.save(out / name, "PNG", optimize=True)
+            print("card", out / name)
 
 
 if __name__ == "__main__":

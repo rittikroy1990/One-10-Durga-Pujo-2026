@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Download, Printer, MapPin } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Download, Printer, MapPin, ExternalLink } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
@@ -23,7 +24,7 @@ export default function Nirghanto() {
       setMeta(r.data.nirghanto || null);
       setVenue(r.data.venue || "");
       setDatesLabel(r.data.dates_label || "");
-    });
+    }).catch(() => {});
   }, []);
 
   return (
@@ -32,9 +33,10 @@ export default function Nirghanto() {
         <p className="text-xs uppercase tracking-[0.3em] text-gold-400">Door-to-door campaign</p>
         <h1 className="mt-2 font-display text-5xl text-ivory-100">পুজো নির্ঘণ্ট কার্ড</h1>
         <p className="mt-3 max-w-2xl text-ivory-100/70">
-          Complete Nirghonto for One10 Durgotsav 2026 — print A5 / share on WhatsApp while collecting subscriptions.
+          Complete Nirghonto for One10 Durgotsav 2026 — print A5 or share on WhatsApp while collecting subscriptions.
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-ivory-100/65">
+
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ivory-100/65">
           {datesLabel && <span className="text-gold-400">{datesLabel}</span>}
           {venue && (
             <span className="inline-flex items-center gap-1.5">
@@ -42,40 +44,58 @@ export default function Nirghanto() {
             </span>
           )}
         </div>
+
+        <div className="mt-5 flex flex-wrap gap-3 print:hidden">
+          <Link to="/subscribe">
+            <Button variant="primary" size="sm" data-testid="nirghanto-subscribe-link">
+              Subscribe &amp; Pay <ExternalLink className="h-4 w-4" />
+            </Button>
+          </Link>
+          <Link to="/events">
+            <Button variant="outline" size="sm" data-testid="nirghanto-events-link">Programme</Button>
+          </Link>
+          <Button variant="outline" size="sm" onClick={() => window.print()} data-testid="print-cards-btn">
+            <Printer className="h-4 w-4" /> Print all
+          </Button>
+        </div>
+
         {meta?.note_bn && (
-          <p className="mt-4 rounded-xl border border-gold-500/25 bg-brown-700/40 px-4 py-3 text-sm text-ivory-100/75">
+          <p className="mt-5 rounded-xl border border-gold-500/25 bg-brown-700/40 px-4 py-3 text-sm text-ivory-100/75">
             {meta.note_bn}
           </p>
         )}
 
-        <div className="mt-6 flex flex-wrap gap-3 print:hidden">
-          <Button variant="primary" size="sm" onClick={() => window.print()} data-testid="print-cards-btn">
-            <Printer className="h-4 w-4" /> Print cards
-          </Button>
-          {CARD_FILES.map((c) => (
-            <a key={c.file} href={`/campaign-cards/${c.file}`} download={c.file}>
-              <Button variant="outline" size="sm" data-testid={`download-${c.file}`}>
-                <Download className="h-4 w-4" /> {c.title}
-              </Button>
-            </a>
-          ))}
-        </div>
-
-        <div className="mt-10 grid gap-8 sm:grid-cols-2 print:grid-cols-2" data-testid="campaign-card-grid">
+        {/* Equal-height aligned card gallery */}
+        <div
+          className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-2"
+          data-testid="campaign-card-grid"
+        >
           {CARD_FILES.map((c, i) => (
-            <figure key={c.file} className="overflow-hidden rounded-2xl border border-gold-500/25 bg-brown-900/40 print:break-inside-avoid">
-              <img
-                src={`/campaign-cards/${c.file}`}
-                alt={`${c.titleBn} — One10 Durgotsav 2026 Nirghonto card ${i + 1}`}
-                className="w-full"
-                data-testid={`card-img-${i + 1}`}
-              />
-              <figcaption className="flex items-center justify-between gap-2 px-4 py-3 text-sm text-ivory-100/70 print:hidden">
+            <figure
+              key={c.file}
+              className="flex h-full flex-col overflow-hidden rounded-2xl border border-gold-500/25 bg-brown-900/50"
+            >
+              <div className="flex aspect-[5/7] w-full items-center justify-center bg-[#140e0c] p-3">
+                <img
+                  src={`/campaign-cards/${c.file}`}
+                  alt={`${c.titleBn} — One10 Durgotsav 2026 Nirghonto card ${i + 1}`}
+                  className="h-full w-full object-contain object-center"
+                  data-testid={`card-img-${i + 1}`}
+                />
+              </div>
+              <figcaption className="mt-auto flex items-center justify-between gap-3 border-t border-gold-500/15 px-4 py-3 text-sm text-ivory-100/70 print:hidden">
                 <span>
-                  <span className="font-semibold text-ivory-100">{i + 1}/4</span> · {c.titleBn}
+                  <span className="font-semibold text-ivory-100">{i + 1}/4</span>
+                  <span className="mx-1.5 text-ivory-100/30">|</span>
+                  {c.titleBn}
                 </span>
-                <a href={`/campaign-cards/${c.file}`} download={c.file} className="text-gold-400 hover:underline">
-                  Download PNG
+                <a
+                  href={`/campaign-cards/${c.file}`}
+                  download={c.file}
+                  className="inline-flex items-center gap-1.5 text-gold-400 hover:underline"
+                  data-testid={`download-${c.file}`}
+                >
+                  <Download className="h-4 w-4" /> PNG
                 </a>
               </figcaption>
             </figure>
@@ -86,7 +106,7 @@ export default function Nirghanto() {
           <section className="mt-16 print:hidden">
             <h2 className="font-display text-3xl text-ivory-100">Day-by-day timings</h2>
             <p className="mt-1 text-sm text-ivory-100/60">Primary: {meta?.primary_label || "প্রাচীন পঞ্জিকা"}</p>
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
               {programme.map((day) => (
                 <article
                   key={day.id}
@@ -95,13 +115,15 @@ export default function Nirghanto() {
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
                     <h3 className="font-display text-2xl text-ivory-100">
-                      {day.title_bn || day.title}{" "}
-                      <span className="text-lg text-ivory-100/50">· {day.title}</span>
+                      {day.title_bn || day.title}
                     </h3>
                     <div className="text-sm text-gold-400">
                       {day.day} {day.month_label} · {day.weekday}
-                      {day.bengali_date ? ` · ${day.bengali_date}` : ""}
                     </div>
+                  </div>
+                  <div className="mt-1 text-sm text-ivory-100/55">
+                    {day.tithi}
+                    {day.bengali_date ? ` · ${day.bengali_date}` : ""}
                   </div>
                   {day.nirghanto && (
                     <ul className="mt-3 space-y-1.5 text-sm text-ivory-100/75">
@@ -112,9 +134,6 @@ export default function Nirghanto() {
                         <li className="font-semibold text-vermilion-400">
                           • সন্ধিপুজো {day.nirghanto.sandhi_start} – {day.nirghanto.sandhi_end}
                         </li>
-                      )}
-                      {day.nirghanto.bisuddha_sandhi && (
-                        <li className="text-gold-400/80">• {day.nirghanto.bisuddha_sandhi}</li>
                       )}
                     </ul>
                   )}

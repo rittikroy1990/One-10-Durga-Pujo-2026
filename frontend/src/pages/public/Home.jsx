@@ -10,7 +10,7 @@ import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
-const DIYA = "/images/campaign/gallery-3.jpg";
+const DIYA = "/images/campaign/full-36.jpg";
 
 const fade = {
   hidden: { opacity: 0, y: 24 },

@@ -33,17 +33,23 @@ async def public_config():
             "secondary_contact_name", "secondary_contact_role", "secondary_contact_phone",
             "authorised_signatory", "authorised_signatories_note", "bank_operating_mandate",
             "bank_account", "moa_reference", "objectives_events", "office_bearers",
-            "logo_url", "hero_url", "governing_body_size",
+            "logo_url", "hero_url", "governing_body_size", "upi",
         )},
         "campaign": s.get("campaign", {}),
         "cycle": s.get("cycle", {}),
         "subscription": s.get("subscription", {}),
         "receipt": {"prefix": s["receipt"]["prefix"], "refund_policy_ref": s["receipt"]["refund_policy_ref"],
-                    "tax_deductible": s["receipt"]["tax_deductible"]},
+                    "tax_deductible": s["receipt"]["tax_deductible"],
+                    "verification_note": s["receipt"].get("verification_note")},
         "feature_flags": s.get("feature_flags", {}),
         "campaigns": [c["public"] for c in campaigns],
         "active_cycle_id": await get_active_cycle_id(),
         "sponsorship": s.get("sponsorship") or {},
+        "payment": {
+            "provider": (s.get("feature_flags") or {}).get("payment_provider", "upi_qr"),
+            "upi": (s.get("organisation") or {}).get("upi") or {},
+            "bank_account": (s.get("organisation") or {}).get("bank_account") or {},
+        },
     }
 
 
@@ -121,5 +127,9 @@ async def verify_receipt(token: str):
         "issued_at": r.get("issued_at"),
         "status": "VALID" if r.get("status") == "issued" else r.get("status", "").upper(),
         "verified": r.get("status") == "issued",
+        "bank_verified": bool(r.get("bank_verified")) if "bank_verified" in r else (
+            r.get("method") not in ("upi_qr", "bank_transfer")
+        ),
+        "method": r.get("method"),
         "campaign_title": r.get("campaign_title", ""),
     }

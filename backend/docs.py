@@ -154,12 +154,27 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawString(52 * mm, y - 6 * mm, "Scan to verify this receipt online:")
     c.drawString(52 * mm, y - 11 * mm, verify_url)
     c.drawString(52 * mm, y - 18 * mm, rc.get("computer_generated_note", ""))
-    c.drawString(52 * mm, y - 23 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+    # Subtle note for QR / bank-transfer receipts — not a bank settlement confirmation
+    if receipt.get("method") in ("upi_qr", "bank_transfer") or receipt.get("bank_verified") is False:
+        note = rc.get("verification_note") or (
+            "Committee-recorded against the payment reference you submitted. "
+            "This is not a bank settlement confirmation."
+        )
+        c.setFillColor(colors.HexColor("#5c5346"))
+        c.setFont("Helvetica-Oblique", 7.5)
+        c.drawString(52 * mm, y - 23 * mm, note[:110])
+        c.setFillColor(BROWN)
+        c.setFont("Helvetica", 8)
+        c.drawString(52 * mm, y - 28 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+        y_shift = 5 * mm
+    else:
+        c.drawString(52 * mm, y - 23 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+        y_shift = 0
 
     c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(W - 22 * mm, y - 28 * mm, org.get("authorised_signatory", "Authorised Signatory"))
+    c.drawRightString(W - 22 * mm, y - 28 * mm - y_shift, org.get("authorised_signatory", "Authorised Signatory"))
     c.setFont("Helvetica", 7)
-    c.drawRightString(W - 22 * mm, y - 32 * mm, "Authorised Signatory (for the Committee)")
+    c.drawRightString(W - 22 * mm, y - 32 * mm - y_shift, "Authorised Signatory (for the Committee)")
     c.setFont("Helvetica", 6.5)
     mandate = org.get("bank_operating_mandate") or ""
     if mandate:

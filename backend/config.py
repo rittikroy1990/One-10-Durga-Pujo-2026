@@ -167,7 +167,7 @@ DURGOTSAV_2026_CAMPAIGN = {
     "programme": list(DURGOTSAV_2026_PROGRAMME),
     "programme_source": "Confirmed with Thakurmasai · Prachin Panjika Nirghonto",
     "nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
-    "important_notice": "A receipt is issued only after payment is verified. Please do not share screenshots as proof of payment.",
+    "important_notice": "Pay via the committee QR / bank transfer, then upload your payment screenshot with the UTR/reference. A receipt is issued after the screenshot is checked.",
     "short_url": "https://one10events.in/subscribe",
     "site_url": "https://one10events.in",
     "nirghanto_url": "https://one10events.in/nirghanto",
@@ -192,8 +192,12 @@ DURGOTSAV_2026_RECEIPT = {
         "This is a computer-generated receipt of the Events Organizations Committee of One10 "
         "and does not require a physical signature."
     ),
+    "verification_note": (
+        "Committee-recorded against the payment reference you submitted. "
+        "This is not a bank settlement confirmation."
+    ),
     "refund_policy_ref": "See /refund-policy",
-    "document_version": "v1.1",
+    "document_version": "v1.2",
     "tax_deductible": False,
     "letterhead_title": "Events Organizations Committee of One10",
     "letterhead_subtitle": "ONE10 Events Committee · Unregistered non-profit community association",
@@ -250,6 +254,17 @@ ORGANISATION_DEFAULTS = {
         "account_number": "572205000037",
         "ifsc": "ICIC0005722",
         "bank": "ICICI Bank",
+    },
+    # UPI / QR payment (public subscribe). Update VPA if committee issues a dedicated UPI ID.
+    "upi": {
+        "enabled": True,
+        "vpa": "",  # optional; when empty QR uses bank account display + static image if present
+        "payee_name": "ONE 10 EVENT ORGANISING COMMITTEE",
+        "static_qr_url": "/images/payment-qr.png",
+        "instructions": (
+            "Scan the QR or transfer the exact amount to the committee bank account. "
+            "Then upload your payment screenshot and enter the UTR / UPI reference number."
+        ),
     },
     "governing_body_size": 11,
     "committee_term_years": 1,
@@ -447,6 +462,9 @@ DEFAULT_SETTINGS = {
         "otp_enabled": False,
         "email_enabled": False,
         "multi_campaign": True,
+        "payment_provider": "upi_qr",
+        "razorpay_public_checkout": False,
+        "llm_screenshot_auto_issue": True,
     },
     "approval_thresholds_paise": {
         "note": NOT_APPROVED,
@@ -461,7 +479,7 @@ DEFAULT_SETTINGS = {
         "note": NOT_APPROVED,
     },
     "policy_checklist": [
-        "Razorpay merchant in committee name (currently temporary third-party keys may be in use)",
+        "Confirm UPI VPA / static payment QR for public subscribe",
         "Approval thresholds and reconciliation confidence threshold",
         "Refund window and retention/secure-deletion policy confirmation",
         "Domain and email sender verification",
@@ -585,6 +603,34 @@ async def ensure_settings():
             for k, v in org_patch.items():
                 org[k] = v
             patch["organisation"] = org
+        # Ensure UPI block exists for QR subscribe flow
+        if "upi" not in (patch.get("organisation") or org):
+            org = patch.get("organisation") or dict(org)
+            org["upi"] = ORGANISATION_DEFAULTS.get("upi")
+            patch["organisation"] = org
+
+        # Merge new feature flags (payment_provider etc.) without wiping custom toggles
+        flags = dict(existing.get("feature_flags") or {})
+        for fk, fv in DEFAULT_SETTINGS["feature_flags"].items():
+            if fk not in flags:
+                flags[fk] = fv
+        # Prefer UPI QR as public default going forward
+        if flags.get("payment_provider") not in ("upi_qr", "razorpay"):
+            flags["payment_provider"] = "upi_qr"
+        if "razorpay_public_checkout" not in (existing.get("feature_flags") or {}):
+            flags["razorpay_public_checkout"] = False
+            flags["payment_provider"] = "upi_qr"
+            flags["llm_screenshot_auto_issue"] = True
+        if flags != (existing.get("feature_flags") or {}):
+            patch["feature_flags"] = flags
+
+        # Receipt verification note for QR/screenshot receipts
+        rc_existing = existing.get("receipt") or {}
+        if not rc_existing.get("verification_note"):
+            rc_merge = dict(rc_existing)
+            rc_merge["verification_note"] = DURGOTSAV_2026_RECEIPT["verification_note"]
+            rc_merge["document_version"] = DURGOTSAV_2026_RECEIPT["document_version"]
+            patch["receipt"] = rc_merge
 
         sp = existing.get("sponsorship") or {}
         if (
@@ -708,6 +754,7 @@ async def ensure_settings():
         "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
         "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
         "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        "campaign.important_notice": DURGOTSAV_2026_CAMPAIGN["important_notice"],
         "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
     }
     await db.application_settings.update_one({"id": "app_settings"}, {"$set": camp_patch})
@@ -719,6 +766,7 @@ async def ensure_settings():
             "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
             "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
             "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        "campaign.important_notice": DURGOTSAV_2026_CAMPAIGN["important_notice"],
             "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
         }},
     )

@@ -52,6 +52,11 @@ export default function ReceiptVerify() {
                 <p className="mt-6 text-center text-xs text-brown-800/40">
                   Only masked identity is shown to protect resident privacy. This is a computer-generated verification.
                 </p>
+                {data.bank_verified === false && (
+                  <p className="mt-2 text-center text-xs text-brown-800/45">
+                    Committee-recorded against the submitted payment reference — not a bank settlement confirmation.
+                  </p>
+                )}
               </div>
             )}
           </div>

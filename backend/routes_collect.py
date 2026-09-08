@@ -132,12 +132,16 @@ async def subscribe(body: SubscribeIn, request: Request):
         "payer_name": (body.payer_name if not body.payer_is_member else body.primary_contact_name),
         "payer_mobile": (body.payer_mobile if not body.payer_is_member else body.mobile),
         "payer_relationship": body.payer_relationship or "self",
-        "status": "payment_pending", "method": "razorpay",
+        "status": "payment_pending", "method": "upi_qr",
         "created_at": iso(),
     }
+    flags = settings.get("feature_flags") or {}
+    if flags.get("razorpay_public_checkout") and flags.get("payment_provider") == "razorpay":
+        intent["method"] = "razorpay"
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
-                entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid},
+                entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid,
+                                               "method": intent["method"]},
                 request=request)
 
     return {
@@ -146,6 +150,7 @@ async def subscribe(body: SubscribeIn, request: Request):
         "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
         "components": intent["components"],
         "household": {"tower_name": tower["name"], "flat_number": flat["number"]},
+        "payment_method": intent["method"],
     }
 
 
@@ -357,15 +362,303 @@ async def payment_status(token: str):
         raise HTTPException(status_code=404, detail="Not found.")
     receipt = await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0})
     order = await db.payment_orders.find_one({"intent_id": intent_id}, sort=[("created_at", -1)])
+    submission = await db.upi_submissions.find_one({"intent_id": intent_id}, {"_id": 0}, sort=[("created_at", -1)])
     warn = order and order.get("status") in ("authorised", "verification_pending")
+    if receipt or intent.get("status") == "paid":
+        status = "paid"
+        message = "Payment recorded and receipt issued."
+    elif submission and submission.get("status") == "needs_review":
+        status = "needs_review"
+        message = submission.get("review_message") or (
+            "Screenshot received. Amount/reference needs committee review — please do not pay again."
+        )
+        warn = True
+    elif submission and submission.get("status") in ("submitted", "llm_ok", "processing"):
+        status = "processing"
+        message = "Screenshot received. Checking payment details…"
+        warn = True
+    elif warn:
+        status = intent["status"]
+        message = "Verification in progress — please do not pay again."
+    else:
+        status = intent["status"]
+        message = "Awaiting payment screenshot."
     return {
-        "status": intent["status"],
+        "status": status,
+        "intent_status": intent["status"],
         "total_amount": intent["total_amount"],
         "receipt_no": receipt["receipt_no"] if receipt else None,
         "verify_token": receipt["verify_token"] if receipt else None,
-        "do_not_pay_again": bool(warn),
-        "message": ("Verification in progress — please do not pay again."
-                    if warn else ("Payment verified." if receipt else "Awaiting payment.")),
+        "bank_verified": False if receipt and receipt.get("method") in ("upi_qr", "bank_transfer") else None,
+        "submission_status": submission.get("status") if submission else None,
+        "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
+        "message": message,
+    }
+
+
+# --------------------------------------------------------------- UPI QR + screenshot proof
+def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
+    org = settings.get("organisation") or {}
+    upi = org.get("upi") or {}
+    bank = org.get("bank_account") or {}
+    payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "EOC One10"
+    vpa = (upi.get("vpa") or "").strip()
+    amount_rupees = f"{amount_paise / 100:.2f}"
+    qr_data = ""
+    if vpa:
+        from urllib.parse import quote
+        qr_data = (
+            f"upi://pay?pa={quote(vpa)}&pn={quote(payee)}&am={amount_rupees}"
+            f"&cu=INR&tn={quote(note or 'One10 subscription')}"
+        )
+    return {
+        "vpa": vpa,
+        "payee_name": payee,
+        "amount_paise": amount_paise,
+        "amount_rupees": amount_rupees,
+        "qr_data": qr_data,
+        "static_qr_url": upi.get("static_qr_url") or "/images/payment-qr.png",
+        "instructions": upi.get("instructions") or "",
+        "bank_account": {
+            "account_name": bank.get("account_name"),
+            "account_number": bank.get("account_number"),
+            "ifsc": bank.get("ifsc"),
+            "bank": bank.get("bank"),
+        },
+    }
+
+
+@router.get("/payments/upi/session")
+async def upi_session(intent_id: str):
+    intent = await db.subscription_intents.find_one({"id": intent_id}, {"_id": 0})
+    if not intent:
+        raise HTTPException(status_code=404, detail="Subscription intent not found.")
+    if intent["status"] == "paid":
+        raise HTTPException(status_code=409, detail="This subscription is already paid.")
+    settings = await get_settings()
+    payload = _upi_payload(settings, int(intent["total_amount"]), note=intent["id"][:20])
+    return {
+        "intent_id": intent_id,
+        "status_token": status_token(intent_id),
+        "total_amount": intent["total_amount"],
+        "payment": payload,
+        "campaign_notice": (settings.get("campaign") or {}).get("important_notice"),
+    }
+
+
+@router.get("/payments/upi/qr.png")
+async def upi_qr_png(intent_id: str):
+    """Dynamic UPI QR when VPA is configured; otherwise 404 so client uses static QR."""
+    intent = await db.subscription_intents.find_one({"id": intent_id})
+    if not intent:
+        raise HTTPException(status_code=404, detail="Not found.")
+    settings = await get_settings()
+    payload = _upi_payload(settings, int(intent["total_amount"]), note=intent["id"][:20])
+    if not payload["qr_data"]:
+        raise HTTPException(status_code=404, detail="Dynamic UPI QR not configured.")
+    from docs import qr_png
+    return Response(content=qr_png(payload["qr_data"], box=6), media_type="image/png")
+
+
+@router.post("/payments/upi/submit")
+async def upi_submit(request: Request):
+    """Resident uploads payment screenshot + reference. LLM extracts details, validates, auto-issues receipt."""
+    from vision_extract import extract_payment_screenshot, normalize_ref
+    from storage import save_document
+
+    form = await request.form()
+    intent_id = (form.get("intent_id") or "").strip()
+    token = (form.get("status_token") or "").strip()
+    reference = (form.get("reference") or "").strip()
+    file = form.get("screenshot")
+
+    if not intent_id or read_status_token(token) != intent_id:
+        raise HTTPException(status_code=400, detail="Invalid payment session.")
+    if not reference or len(normalize_ref(reference)) < 6:
+        raise HTTPException(status_code=400, detail="Enter a valid UTR / UPI reference number.")
+    if not file or not getattr(file, "filename", None):
+        raise HTTPException(status_code=400, detail="Payment screenshot is required.")
+
+    intent = await db.subscription_intents.find_one({"id": intent_id})
+    if not intent:
+        raise HTTPException(status_code=404, detail="Subscription intent not found.")
+    if intent["status"] == "paid":
+        raise HTTPException(status_code=409, detail="This subscription is already paid.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty screenshot file.")
+    if len(data) > 12 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Screenshot too large (max 12 MB).")
+
+    content_type = getattr(file, "content_type", None) or "image/jpeg"
+    filename = file.filename or "payment-screenshot.jpg"
+    ref_norm = normalize_ref(reference)
+
+    # Duplicate UTR guard
+    existing_pay = await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": ref_norm})
+    if existing_pay and existing_pay.get("intent_id") != intent_id:
+        raise HTTPException(status_code=409, detail="This payment reference was already used.")
+
+    sub_id = new_id("upi")
+    submission = {
+        "id": sub_id,
+        "intent_id": intent_id,
+        "household_id": intent["household_id"],
+        "cycle_id": intent.get("cycle_id"),
+        "amount_expected_paise": int(intent["total_amount"]),
+        "reference_entered": reference,
+        "reference_normalized": ref_norm,
+        "status": "processing",
+        "proof_doc_id": None,
+        "llm": {},
+        "validation": {},
+        "created_at": iso(),
+    }
+    await db.upi_submissions.insert_one(dict(submission))
+
+    proof_doc_id = None
+    try:
+        doc = await save_document(
+            data=data, filename=filename, doc_type="upi_proof",
+            linked_type="subscription_intent", linked_id=intent_id,
+            uploaded_by="resident", content_type=content_type,
+        )
+        proof_doc_id = doc["id"]
+    except Exception as e:
+        # Still continue — keep bytes path via LLM only; store failure note
+        await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
+
+    llm = extract_payment_screenshot(data, content_type=content_type)
+    expected = int(intent["total_amount"])
+    llm_amount = llm.get("amount_paise")
+    llm_utr = normalize_ref(llm.get("utr") or "") if llm.get("utr") else ""
+
+    amount_ok = llm_amount is None or abs(int(llm_amount) - expected) <= 100  # ± ₹1
+    # Prefer matching entered ref to LLM UTR when LLM found one
+    utr_ok = True
+    if llm_utr:
+        utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
+    status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
+    confidence = float(llm.get("confidence") or 0)
+    llm_usable = bool(llm.get("ok"))
+
+    auto_flags = (await get_settings()).get("feature_flags") or {}
+    auto_issue = bool(auto_flags.get("llm_screenshot_auto_issue", True))
+
+    validation = {
+        "amount_ok": amount_ok,
+        "utr_ok": utr_ok,
+        "status_ok": status_ok,
+        "llm_usable": llm_usable,
+        "confidence": confidence,
+    }
+
+    # Auto-issue when: LLM ok and amount+utr pass, OR LLM unavailable but user supplied ref
+    can_issue = auto_issue and amount_ok and utr_ok and status_ok and (
+        (llm_usable and confidence >= 0.35) or (not llm_usable and len(ref_norm) >= 8)
+    )
+    # Hard block if LLM clearly saw wrong amount
+    if llm_usable and llm_amount is not None and abs(int(llm_amount) - expected) > 100:
+        can_issue = False
+
+    review_message = None
+    receipt = None
+    final_status = "needs_review"
+
+    if can_issue:
+        try:
+            await db.payments.insert_one({
+                "id": new_id("pay"),
+                "provider": "upi_qr",
+                "provider_payment_id": ref_norm,
+                "intent_id": intent_id,
+                "amount": expected,
+                "currency": "INR",
+                "status": "captured",
+                "bank_verified": False,
+                "proof_doc_id": proof_doc_id,
+                "created_at": iso(),
+            })
+        except Exception:
+            # Unique conflict — already processed
+            existing = await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": ref_norm})
+            if existing and existing.get("intent_id") == intent_id:
+                receipt = await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0})
+                final_status = "issued" if receipt else "needs_review"
+            else:
+                raise HTTPException(status_code=409, detail="This payment reference was already used.")
+        else:
+            receipt = await _issue_receipt(
+                intent,
+                method="upi_qr",
+                masked_ref="UTR-" + ref_norm[-4:],
+                provider_payment_id=ref_norm,
+                debit_account="1001",
+                request=request,
+            )
+            if receipt:
+                # Mark receipt as not bank-verified
+                await db.receipts.update_one(
+                    {"id": receipt["id"]},
+                    {"$set": {
+                        "bank_verified": False,
+                        "verification_level": "committee_recorded",
+                        "proof_doc_id": proof_doc_id,
+                    }},
+                )
+                receipt["bank_verified"] = False
+                final_status = "issued"
+            else:
+                final_status = "duplicate_payment"
+                review_message = "Excess / duplicate payment queued for refund review."
+    else:
+        reasons = []
+        if not amount_ok:
+            reasons.append("amount on screenshot does not match payable total")
+        if not utr_ok:
+            reasons.append("UTR on screenshot does not match the reference entered")
+        if llm_usable and not status_ok:
+            reasons.append("payment status on screenshot is unclear")
+        review_message = "Could not auto-confirm: " + ("; ".join(reasons) or "needs committee review") + ". Please do not pay again."
+
+    await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
+        "status": final_status if final_status != "issued" else "issued",
+        "proof_doc_id": proof_doc_id,
+        "llm": {k: llm.get(k) for k in (
+            "ok", "error", "amount_paise", "utr", "txn_time", "payer_name", "payee_name",
+            "status", "confidence", "notes", "model",
+        )},
+        "validation": validation,
+        "review_message": review_message,
+        "payment_id": ref_norm,
+        "receipt_id": receipt.get("id") if receipt else None,
+        "processed_at": iso(),
+    }})
+    await audit(
+        "upi.screenshot.submit",
+        entity_type="upi_submission",
+        entity_id=sub_id,
+        after={"status": final_status, "intent_id": intent_id, "ref": ref_norm[-4:]},
+        request=request,
+    )
+
+    if final_status == "issued" and receipt:
+        return {
+            "status": "paid",
+            "receipt": clean(receipt),
+            "bank_verified": False,
+            "message": "Receipt issued. Recorded against your payment reference (not a bank settlement confirmation).",
+            "status_token": status_token(intent_id),
+        }
+    return {
+        "status": "needs_review",
+        "submission_id": sub_id,
+        "bank_verified": False,
+        "message": review_message or "Submitted for committee review.",
+        "do_not_pay_again": True,
+        "status_token": status_token(intent_id),
+        "llm": {"ok": llm.get("ok"), "confidence": confidence, "amount_paise": llm_amount},
     }
 
 

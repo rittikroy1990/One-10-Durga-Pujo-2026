@@ -17,6 +17,7 @@ import Participate from "./pages/public/Participate";
 import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
+import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
@@ -51,6 +52,7 @@ function AppRoutes() {
       <Route path="/terms" element={<Legal type="terms" />} />
       <Route path="/refund-policy" element={<Legal type="refund" />} />
       <Route path="/contact" element={<Legal type="contact" />} />
+      <Route path="/upload-qr" element={<UploadPaymentQr />} />
 
       <Route path="/admin/login" element={<Login />} />
       <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>

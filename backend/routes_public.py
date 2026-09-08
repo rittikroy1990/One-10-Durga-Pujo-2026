@@ -84,7 +84,15 @@ async def public_events():
     if not events:
         events = await db.events.find({}, {"_id": 0}).to_list(50)
     s = await get_settings()
-    return {"items": events, "venue": s["campaign"]["venue"], "cycle_id": cycle_id}
+    campaign = s.get("campaign") or {}
+    return {
+        "items": events,
+        "venue": campaign.get("venue"),
+        "cycle_id": cycle_id,
+        "dates_label": campaign.get("dates_label"),
+        "programme": campaign.get("programme") or [],
+        "programme_source": campaign.get("programme_source"),
+    }
 
 
 @router.get("/announcements")

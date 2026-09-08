@@ -134,6 +134,9 @@ export default function Home() {
                       {c.venue}
                     </div>
                   )}
+                  {c.dates_label && (
+                    <div className="mt-2 text-sm text-gold-400/90">{c.dates_label}</div>
+                  )}
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="font-display text-3xl text-ivory-100">
                       {c.base_amount_paise > 0 ? formatPaise(c.base_amount_paise) : "TBC"}
@@ -175,6 +178,9 @@ export default function Home() {
               <div>
                 <div className="text-xs uppercase tracking-wider text-gold-400">Principal Venue</div>
                 <div className="text-ivory-100/90">{camp?.venue || "Badminton court near the tennis court, in front of Tower 11"}</div>
+                {camp?.dates_label && (
+                  <div className="mt-1 text-sm text-gold-400/90">{camp.dates_label}</div>
+                )}
               </div>
             </div>
           </motion.div>

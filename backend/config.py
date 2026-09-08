@@ -11,12 +11,33 @@ NOT_APPROVED = "NOT APPROVED FOR PRODUCTION"
 
 CYCLE_2026 = "cycle_2026"  # default / seed cycle id (kept for backward compatibility)
 
+# Ritual calendar confirmed with Thakurmasai (Oct 2026).
+DURGOTSAV_2026_PROGRAMME = [
+    {"id": "day_sasthi", "date": "2026-10-16", "day": 16, "month_label": "Oct", "weekday": "Friday",
+     "tithi": "Sasthi", "title": "Maha Sasthi"},
+    {"id": "day_saptami", "date": "2026-10-17", "day": 17, "month_label": "Oct", "weekday": "Saturday",
+     "tithi": "Saptami", "title": "Maha Saptami"},
+    {"id": "day_saptami_ashtami", "date": "2026-10-18", "day": 18, "month_label": "Oct", "weekday": "Sunday",
+     "tithi": "Saptami / Ashtami", "title": "Saptami / Ashtami"},
+    {"id": "day_ashtami", "date": "2026-10-19", "day": 19, "month_label": "Oct", "weekday": "Monday",
+     "tithi": "Ashtami", "title": "Maha Ashtami"},
+    {"id": "day_navami", "date": "2026-10-20", "day": 20, "month_label": "Oct", "weekday": "Tuesday",
+     "tithi": "Navami", "title": "Maha Navami"},
+    {"id": "day_dashami", "date": "2026-10-21", "day": 21, "month_label": "Oct", "weekday": "Wednesday",
+     "tithi": "Dashami", "title": "Vijaya Dashami"},
+]
+
 DURGOTSAV_2026_CAMPAIGN = {
     "title": "One10 Durgotsav 2026",
     "theme_line": "Amader Pujo \u2022 Amader One10",
     "inclusive_line": "This will be a Pujo for everyone.",
     "consecutive_year": 3,
     "venue": "Badminton court near the tennis court, in front of Tower 11",
+    "dates_label": "16–21 October 2026",
+    "start_date": "2026-10-16",
+    "end_date": "2026-10-21",
+    "programme": list(DURGOTSAV_2026_PROGRAMME),
+    "programme_source": "Confirmed with Thakurmasai",
     "important_notice": "A receipt is issued only after payment is verified. Please do not share screenshots as proof of payment.",
     "short_url": "one10events.example/subscribe",
     "hero_url": "/images/campaign/hero-cover.jpg",
@@ -349,12 +370,13 @@ CHART_OF_ACCOUNTS = [
 
 # ---------------------------------------------------------------- Events / cost centres
 EVENTS = [
-    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI"},
-    {"id": "ev_durga", "name": "Durga Puja", "cost_centre": "DURGA"},
-    {"id": "ev_lakshmi", "name": "Lakshmi Puja", "cost_centre": "LAKSHMI"},
-    {"id": "ev_kali", "name": "Kali Puja", "cost_centre": "KALI"},
-    {"id": "ev_bijoya", "name": "Bijoya Sammilani", "cost_centre": "BIJOYA"},
-    {"id": "ev_common", "name": "Common / shared", "cost_centre": "COMMON"},
+    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI", "dates": "TBC"},
+    {"id": "ev_durga", "name": "Durga Puja", "cost_centre": "DURGA",
+     "dates": "16–21 October 2026 (Sasthi–Dashami)"},
+    {"id": "ev_lakshmi", "name": "Lakshmi Puja", "cost_centre": "LAKSHMI", "dates": "TBC"},
+    {"id": "ev_kali", "name": "Kali Puja", "cost_centre": "KALI", "dates": "TBC"},
+    {"id": "ev_bijoya", "name": "Bijoya Sammilani", "cost_centre": "BIJOYA", "dates": "TBC"},
+    {"id": "ev_common", "name": "Common / shared", "cost_centre": "COMMON", "dates": "—"},
 ]
 
 # ---------------------------------------------------------------- Towers & flats (demo master data)
@@ -532,13 +554,41 @@ async def ensure_settings():
             summary="Community Diwali Milan — subscription amount and venue pending EOC confirmation.",
         ))
 
-    # events
+    # events / cost centres — refresh names + known dates (programme calendar on campaign)
     for e in EVENTS:
         await db.events.update_one(
             {"id": e["id"]},
-            {"$setOnInsert": {**e, "cycle_id": CYCLE_2026, "dates": "TBC"}},
+            {
+                "$setOnInsert": {"id": e["id"], "cycle_id": CYCLE_2026},
+                "$set": {
+                    "name": e["name"],
+                    "cost_centre": e["cost_centre"],
+                    "dates": e.get("dates") or "TBC",
+                    "cycle_id": CYCLE_2026,
+                },
+            },
             upsert=True,
         )
+
+    # Keep active Durgotsav campaign programme dates in sync with Thakurmasai calendar.
+    camp_patch = {
+        "campaign.dates_label": DURGOTSAV_2026_CAMPAIGN["dates_label"],
+        "campaign.start_date": DURGOTSAV_2026_CAMPAIGN["start_date"],
+        "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
+        "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
+        "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+    }
+    await db.application_settings.update_one({"id": "app_settings"}, {"$set": camp_patch})
+    await db.annual_cycles.update_one(
+        {"id": CYCLE_2026},
+        {"$set": {
+            "campaign.dates_label": DURGOTSAV_2026_CAMPAIGN["dates_label"],
+            "campaign.start_date": DURGOTSAV_2026_CAMPAIGN["start_date"],
+            "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
+            "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
+            "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        }},
+    )
     # towers & flats (demo: 20 flats per tower) — shared estate master data
     if await db.towers.count_documents({}) == 0:
         for t in TOWERS:
@@ -620,6 +670,7 @@ async def list_campaigns(*, published_only: bool = False) -> list[dict]:
             "title": camp.get("title") or c.get("name"),
             "theme_line": camp.get("theme_line", ""),
             "venue": camp.get("venue", ""),
+            "dates_label": camp.get("dates_label", ""),
             "hero_url": camp.get("hero_url", ""),
             "base_amount_paise": sub.get("base_amount_paise", 0),
             "is_locked": bool(c.get("is_locked")),

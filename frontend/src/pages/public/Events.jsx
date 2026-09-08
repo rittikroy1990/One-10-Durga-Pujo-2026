@@ -61,7 +61,7 @@ export default function Events() {
                   className="rounded-full border border-vermilion-500/40 bg-vermilion-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-vermilion-400 hover:bg-vermilion-500/25"
                   data-testid="link-nirghanto-cards"
                 >
-                  Door-to-door cards
+                  Download PDF cards
                 </a>
               </div>
             </div>

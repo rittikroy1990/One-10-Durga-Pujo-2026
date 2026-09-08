@@ -365,6 +365,48 @@ def card_navami():
     return img
 
 
+def export_pdfs(card_png_names):
+    """Write individual A5 PDFs + one combined PDF next to the PNGs."""
+    try:
+        from reportlab.lib.pagesizes import A5
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.utils import ImageReader
+    except ImportError:
+        print("reportlab not installed — skip PDF export")
+        return
+
+    primary = OUT_CARDS[0]
+    pdf_names = []
+    page_w, page_h = A5
+    for png_name in card_png_names:
+        pdf_name = png_name.replace(".png", ".pdf")
+        pdf_names.append(pdf_name)
+        for out in OUT_CARDS:
+            pdf_path = out / pdf_name
+            c = canvas.Canvas(str(pdf_path), pagesize=A5)
+            c.drawImage(
+                ImageReader(str(out / png_name)),
+                0, 0, width=page_w, height=page_h,
+                preserveAspectRatio=True, anchor="c",
+            )
+            c.showPage()
+            c.save()
+            print("pdf", pdf_path)
+
+    combined = "one10-durgotsav-2026-nirghonto-cards.pdf"
+    for out in OUT_CARDS:
+        c = canvas.Canvas(str(out / combined), pagesize=A5)
+        for png_name in card_png_names:
+            c.drawImage(
+                ImageReader(str(out / png_name)),
+                0, 0, width=page_w, height=page_h,
+                preserveAspectRatio=True, anchor="c",
+            )
+            c.showPage()
+        c.save()
+        print("pdf", out / combined)
+
+
 def main():
     rebuild_highlights()
     rebuild_experience()
@@ -375,11 +417,15 @@ def main():
         ("03-ashtami-sandhi.png", card_ashtami()),
         ("04-navami-dashami.png", card_navami()),
     ]
+    names = []
     for out in OUT_CARDS:
         out.mkdir(parents=True, exist_ok=True)
         for name, img in cards:
             img.save(out / name, "PNG", optimize=True)
             print("card", out / name)
+            if name not in names:
+                names.append(name)
+    export_pdfs(names)
 
 
 if __name__ == "__main__":

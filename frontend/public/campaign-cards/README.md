@@ -1,17 +1,22 @@
 # Door-to-door Nirghonto cards (set of 4)
 
-Print-ready A5 PNGs for One10 Durgotsav 2026.
+Print-ready A5 assets for One10 Durgotsav 2026.
 
-| # | File | Content |
-|---|------|---------|
-| 1 | `01-cover-subscribe.png` | Cover + ₹3,500 + venue + dates |
-| 2 | `02-sasthi-saptami.png` | Sasthi & Saptami timings |
-| 3 | `03-ashtami-sandhi.png` | Ashtami + Sandhi 7:26–8:14 AM |
-| 4 | `04-navami-dashami.png` | Navami, Dashami + subscribe CTA |
+## Download PDFs (A5)
 
-## Website routes (after deploy)
+| File | Content |
+|------|---------|
+| `one10-durgotsav-2026-nirghonto-cards.pdf` | All 4 cards (combined) |
+| `01-cover-subscribe.pdf` | Cover + ₹3,500 |
+| `02-sasthi-saptami.pdf` | Sasthi & Saptami |
+| `03-ashtami-sandhi.pdf` | Ashtami & Sandhi |
+| `04-navami-dashami.pdf` | Navami & Dashami |
 
-- Nirghonto cards page: `/nirghanto`
+On the site open **`/nirghanto`** for one-click PDF downloads. PNG previews are also available for WhatsApp.
+
+## Website routes
+
+- Cards + PDF downloads: `/nirghanto`
 - Subscribe & pay: `/subscribe`
 - Programme: `/events`
 - Home: `/`
@@ -22,4 +27,4 @@ Print-ready A5 PNGs for One10 Durgotsav 2026.
 python3 scripts/generate_nirghanto_cards.py
 ```
 
-Also rebuilds aligned `highlights.jpg`, `experience.jpg`, and `hero-cover.jpg`.
+Rebuilds aligned campaign images, PNG cards, and A5 PDFs.

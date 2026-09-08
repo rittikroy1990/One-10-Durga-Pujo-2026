@@ -1,16 +1,42 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Download, Printer, MapPin, ExternalLink } from "lucide-react";
+import { Download, Printer, MapPin, ExternalLink, FileText } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 
 const CARD_FILES = [
-  { file: "01-cover-subscribe.png", title: "Cover · Subscribe", titleBn: "কভার · চাঁদা" },
-  { file: "02-sasthi-saptami.png", title: "Sasthi & Saptami", titleBn: "ষষ্ঠী ও সপ্তমী" },
-  { file: "03-ashtami-sandhi.png", title: "Ashtami & Sandhi", titleBn: "অষ্টমী ও সন্ধিপুজো" },
-  { file: "04-navami-dashami.png", title: "Navami & Dashami", titleBn: "নবমী ও দশমী" },
+  {
+    id: "cover",
+    png: "01-cover-subscribe.png",
+    pdf: "01-cover-subscribe.pdf",
+    title: "Cover · Subscribe",
+    titleBn: "কভার · চাঁদা",
+  },
+  {
+    id: "sasthi",
+    png: "02-sasthi-saptami.png",
+    pdf: "02-sasthi-saptami.pdf",
+    title: "Sasthi & Saptami",
+    titleBn: "ষষ্ঠী ও সপ্তমী",
+  },
+  {
+    id: "ashtami",
+    png: "03-ashtami-sandhi.png",
+    pdf: "03-ashtami-sandhi.pdf",
+    title: "Ashtami & Sandhi",
+    titleBn: "অষ্টমী ও সন্ধিপুজো",
+  },
+  {
+    id: "navami",
+    png: "04-navami-dashami.png",
+    pdf: "04-navami-dashami.pdf",
+    title: "Navami & Dashami",
+    titleBn: "নবমী ও দশমী",
+  },
 ];
+
+const ALL_PDF = "one10-durgotsav-2026-nirghonto-cards.pdf";
 
 export default function Nirghanto() {
   const [meta, setMeta] = useState(null);
@@ -33,7 +59,7 @@ export default function Nirghanto() {
         <p className="text-xs uppercase tracking-[0.3em] text-gold-400">Door-to-door campaign</p>
         <h1 className="mt-2 font-display text-5xl text-ivory-100">পুজো নির্ঘণ্ট কার্ড</h1>
         <p className="mt-3 max-w-2xl text-ivory-100/70">
-          Complete Nirghonto for One10 Durgotsav 2026 — print A5 or share on WhatsApp while collecting subscriptions.
+          Complete Nirghonto for One10 Durgotsav 2026 — download A5 PDFs for printing, or PNG for WhatsApp.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ivory-100/65">
@@ -45,18 +71,51 @@ export default function Nirghanto() {
           )}
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3 print:hidden">
-          <Link to="/subscribe">
-            <Button variant="primary" size="sm" data-testid="nirghanto-subscribe-link">
-              Subscribe &amp; Pay <ExternalLink className="h-4 w-4" />
+        {/* Primary download actions */}
+        <div className="mt-6 rounded-2xl border border-gold-500/30 bg-brown-700/40 p-5 print:hidden" data-testid="pdf-download-panel">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="font-display text-2xl text-ivory-100">Download PDFs</h2>
+              <p className="mt-1 text-sm text-ivory-100/65">A5 print-ready · প্রাচীন পঞ্জিকা · Thakurmasai confirmed</p>
+            </div>
+            <a href={`/campaign-cards/${ALL_PDF}`} download={ALL_PDF}>
+              <Button variant="primary" size="sm" data-testid="download-all-pdf-btn">
+                <FileText className="h-4 w-4" /> Download all 4 (PDF)
+              </Button>
+            </a>
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {CARD_FILES.map((c, i) => (
+              <a
+                key={c.id}
+                href={`/campaign-cards/${c.pdf}`}
+                download={c.pdf}
+                className="flex items-center justify-between gap-3 rounded-xl border border-gold-500/20 bg-brown-900/40 px-4 py-3 text-sm text-ivory-100 transition-colors hover:border-gold-500/50 hover:bg-brown-800/60"
+                data-testid={`download-pdf-${c.id}`}
+              >
+                <span>
+                  <span className="font-semibold text-gold-400">{i + 1}.</span> {c.titleBn}
+                  <span className="ml-2 text-ivory-100/45">{c.title}</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-vermilion-400">
+                  <Download className="h-3.5 w-3.5" /> PDF
+                </span>
+              </a>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link to="/subscribe">
+              <Button variant="outline" size="sm" data-testid="nirghanto-subscribe-link">
+                Subscribe &amp; Pay <ExternalLink className="h-4 w-4" />
+              </Button>
+            </Link>
+            <Link to="/events">
+              <Button variant="outline" size="sm" data-testid="nirghanto-events-link">Programme</Button>
+            </Link>
+            <Button variant="outline" size="sm" onClick={() => window.print()} data-testid="print-cards-btn">
+              <Printer className="h-4 w-4" /> Print page
             </Button>
-          </Link>
-          <Link to="/events">
-            <Button variant="outline" size="sm" data-testid="nirghanto-events-link">Programme</Button>
-          </Link>
-          <Button variant="outline" size="sm" onClick={() => window.print()} data-testid="print-cards-btn">
-            <Printer className="h-4 w-4" /> Print all
-          </Button>
+          </div>
         </div>
 
         {meta?.note_bn && (
@@ -65,38 +124,47 @@ export default function Nirghanto() {
           </p>
         )}
 
-        {/* Equal-height aligned card gallery */}
         <div
-          className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-2"
+          className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2"
           data-testid="campaign-card-grid"
         >
           {CARD_FILES.map((c, i) => (
             <figure
-              key={c.file}
+              key={c.id}
               className="flex h-full flex-col overflow-hidden rounded-2xl border border-gold-500/25 bg-brown-900/50"
             >
               <div className="flex aspect-[5/7] w-full items-center justify-center bg-[#140e0c] p-3">
                 <img
-                  src={`/campaign-cards/${c.file}`}
+                  src={`/campaign-cards/${c.png}`}
                   alt={`${c.titleBn} — One10 Durgotsav 2026 Nirghonto card ${i + 1}`}
                   className="h-full w-full object-contain object-center"
                   data-testid={`card-img-${i + 1}`}
                 />
               </div>
-              <figcaption className="mt-auto flex items-center justify-between gap-3 border-t border-gold-500/15 px-4 py-3 text-sm text-ivory-100/70 print:hidden">
+              <figcaption className="mt-auto flex flex-wrap items-center justify-between gap-3 border-t border-gold-500/15 px-4 py-3 text-sm text-ivory-100/70 print:hidden">
                 <span>
                   <span className="font-semibold text-ivory-100">{i + 1}/4</span>
                   <span className="mx-1.5 text-ivory-100/30">|</span>
                   {c.titleBn}
                 </span>
-                <a
-                  href={`/campaign-cards/${c.file}`}
-                  download={c.file}
-                  className="inline-flex items-center gap-1.5 text-gold-400 hover:underline"
-                  data-testid={`download-${c.file}`}
-                >
-                  <Download className="h-4 w-4" /> PNG
-                </a>
+                <span className="flex items-center gap-3">
+                  <a
+                    href={`/campaign-cards/${c.pdf}`}
+                    download={c.pdf}
+                    className="inline-flex items-center gap-1.5 font-semibold text-vermilion-400 hover:underline"
+                    data-testid={`card-pdf-${c.id}`}
+                  >
+                    <FileText className="h-4 w-4" /> PDF
+                  </a>
+                  <a
+                    href={`/campaign-cards/${c.png}`}
+                    download={c.png}
+                    className="inline-flex items-center gap-1.5 text-gold-400 hover:underline"
+                    data-testid={`card-png-${c.id}`}
+                  >
+                    <Download className="h-4 w-4" /> PNG
+                  </a>
+                </span>
               </figcaption>
             </figure>
           ))}

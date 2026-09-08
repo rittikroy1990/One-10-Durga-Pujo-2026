@@ -12,14 +12,14 @@ Print-ready A5 assets for One10 Durgotsav 2026.
 | `03-ashtami-sandhi.pdf` | Ashtami & Sandhi |
 | `04-navami-dashami.pdf` | Navami & Dashami |
 
-On the site open **`/nirghanto`** for one-click PDF downloads. PNG previews are also available for WhatsApp.
+Live site: **https://one10events.in/nirghanto**
 
 ## Website routes
 
-- Cards + PDF downloads: `/nirghanto`
-- Subscribe & pay: `/subscribe`
-- Programme: `/events`
-- Home: `/`
+- Cards + PDF downloads: https://one10events.in/nirghanto
+- Subscribe & pay: https://one10events.in/subscribe
+- Programme: https://one10events.in/events
+- Home: https://one10events.in/
 
 ## Regenerate
 

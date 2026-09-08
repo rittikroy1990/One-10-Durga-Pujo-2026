@@ -168,7 +168,9 @@ DURGOTSAV_2026_CAMPAIGN = {
     "programme_source": "Confirmed with Thakurmasai · Prachin Panjika Nirghonto",
     "nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
     "important_notice": "A receipt is issued only after payment is verified. Please do not share screenshots as proof of payment.",
-    "short_url": "one10events.example/subscribe",
+    "short_url": "https://one10events.in/subscribe",
+    "site_url": "https://one10events.in",
+    "nirghanto_url": "https://one10events.in/nirghanto",
     "hero_url": "/images/campaign/hero-cover.jpg",
 }
 
@@ -661,7 +663,7 @@ async def ensure_settings():
                 "consecutive_year": 1,
                 "venue": "TBC — EOC confirmation required",
                 "important_notice": "Subscriptions open only after EOC publishes this campaign.",
-                "short_url": "one10events.example/campaigns/diwali-milan-2026",
+                "short_url": "https://one10events.in/campaigns/diwali-milan-2026",
                 "hero_url": "https://images.pexels.com/photos/34431714/pexels-photo-34431714.jpeg",
             },
             {

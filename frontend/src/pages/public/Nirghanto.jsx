@@ -56,10 +56,13 @@ export default function Nirghanto() {
   return (
     <PublicLayout>
       <div className="mx-auto max-w-6xl px-5 py-14">
-        <p className="text-xs uppercase tracking-[0.3em] text-gold-400">Door-to-door campaign</p>
+        <p className="text-xs uppercase tracking-[0.3em] text-gold-400">Door-to-door campaign · one10events.in</p>
         <h1 className="mt-2 font-display text-5xl text-ivory-100">পুজো নির্ঘণ্ট কার্ড</h1>
         <p className="mt-3 max-w-2xl text-ivory-100/70">
           Complete Nirghonto for One10 Durgotsav 2026 — download A5 PDFs for printing, or PNG for WhatsApp.
+        </p>
+        <p className="mt-2 text-sm text-gold-400">
+          <a href="https://one10events.in/nirghanto" className="underline hover:text-ivory-100">https://one10events.in/nirghanto</a>
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ivory-100/65">

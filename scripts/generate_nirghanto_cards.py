@@ -282,8 +282,8 @@ def card_cover():
         y = draw_mixed(d, L, y, line, 20, IVORY_DIM, center=True)
     y += 8
     d.rounded_rectangle([L + 60, y, R - 60, y + 58], radius=28, fill=VERMILION)
-    draw_mixed(d, L, y + 14, "Open /subscribe  |  Cards /nirghanto", 20, WHITE, bold=True, center=True)
-    footer(d, "Card 1/4 Cover | /nirghanto")
+    draw_mixed(d, L, y + 14, "one10events.in/subscribe  |  /nirghanto", 18, WHITE, bold=True, center=True)
+    footer(d, "Card 1/4 Cover | one10events.in/nirghanto")
     return img
 
 
@@ -307,7 +307,7 @@ def card_sasthi():
         "Tithi ends 18 Oct 5:53 AM",
         "Midnight puja 10:59 PM - 11:47 PM",
     ])
-    footer(d, "Card 2/4 Sasthi-Saptami | /nirghanto")
+    footer(d, "Card 2/4 Sasthi-Saptami | one10events.in/nirghanto")
     return img
 
 
@@ -335,7 +335,7 @@ def card_ashtami():
         "Bisuddha Sandhi: 10:28 AM - 11:16 AM. One10 follows Prachin / Thakurmasai.",
         20, GOLD_SOFT, max_w=CW - 40,
     )
-    footer(d, "Card 3/4 Ashtami-Sandhi | /nirghanto")
+    footer(d, "Card 3/4 Ashtami-Sandhi | one10events.in/nirghanto")
     return img
 
 
@@ -360,8 +360,8 @@ def card_navami():
     ])
     d.rounded_rectangle([L, y, R, y + 100], radius=16, fill=VERMILION)
     draw_mixed(d, L, y + 18, "পরিবার পিছু চাঁদা Rs 3,500", 28, WHITE, bold=True, center=True)
-    draw_mixed(d, L, y + 58, "Pay at /subscribe  |  Schedule /nirghanto", 20, WHITE, center=True)
-    footer(d, "Card 4/4 Navami-Dashami | /subscribe")
+    draw_mixed(d, L, y + 58, "one10events.in/subscribe  |  /nirghanto", 18, WHITE, center=True)
+    footer(d, "Card 4/4 Navami-Dashami | one10events.in/subscribe")
     return img
 
 

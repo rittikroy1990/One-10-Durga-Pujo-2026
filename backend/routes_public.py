@@ -92,6 +92,7 @@ async def public_events():
         "dates_label": campaign.get("dates_label"),
         "programme": campaign.get("programme") or [],
         "programme_source": campaign.get("programme_source"),
+        "nirghanto": campaign.get("nirghanto") or {},
     }
 
 

@@ -50,11 +50,20 @@ export default function Events() {
                   Sasthi through Dashami — day-by-day as confirmed for One10.
                 </p>
               </div>
-              {programmeSource && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-500/30 bg-brown-900/40 px-3 py-1 text-xs text-gold-400">
-                  <Sparkles className="h-3.5 w-3.5" /> {programmeSource}
-                </span>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {programmeSource && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-gold-500/30 bg-brown-900/40 px-3 py-1 text-xs text-gold-400">
+                    <Sparkles className="h-3.5 w-3.5" /> {programmeSource}
+                  </span>
+                )}
+                <a
+                  href="/nirghanto"
+                  className="rounded-full border border-vermilion-500/40 bg-vermilion-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-vermilion-400 hover:bg-vermilion-500/25"
+                  data-testid="link-nirghanto-cards"
+                >
+                  Door-to-door cards
+                </a>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {programme.map((day, i) => (
@@ -72,9 +81,15 @@ export default function Events() {
                     <span className="text-sm uppercase tracking-wider text-ivory-100/55">{day.month_label}</span>
                   </div>
                   <div className="mt-1 text-xs uppercase tracking-[0.2em] text-ivory-100/45">{day.weekday}</div>
-                  <h3 className="mt-3 font-display text-2xl text-ivory-100">{day.title || day.tithi}</h3>
-                  {day.title && day.title !== day.tithi && (
-                    <div className="mt-1 text-sm text-ivory-100/60">{day.tithi}</div>
+                  <h3 className="mt-3 font-display text-2xl text-ivory-100">{day.title_bn || day.title || day.tithi}</h3>
+                  <div className="mt-1 text-sm text-ivory-100/60">{day.tithi}{day.bengali_date ? ` · ${day.bengali_date}` : ""}</div>
+                  {day.nirghanto?.highlights?.[0] && (
+                    <div className="mt-2 text-xs text-gold-400/90">{day.nirghanto.highlights[0]}</div>
+                  )}
+                  {day.nirghanto?.sandhi_start && (
+                    <div className="mt-1 text-xs font-semibold text-vermilion-400">
+                      Sandhi {day.nirghanto.sandhi_start}–{day.nirghanto.sandhi_end}
+                    </div>
                   )}
                 </motion.div>
               ))}

@@ -12,20 +12,148 @@ NOT_APPROVED = "NOT APPROVED FOR PRODUCTION"
 CYCLE_2026 = "cycle_2026"  # default / seed cycle id (kept for backward compatibility)
 
 # Ritual calendar confirmed with Thakurmasai (Oct 2026).
+# Detailed timings from Ei Samay Nirghonto — প্রাচীন পঞ্জিকা (primary; matches Thakurmasai days)
+# and বিশুদ্ধ সিদ্ধান্ত (alternate). Source:
+# https://eisamay.com/.../durga-puja-2026-dates-timings-.../200533534.cms
 DURGOTSAV_2026_PROGRAMME = [
-    {"id": "day_sasthi", "date": "2026-10-16", "day": 16, "month_label": "Oct", "weekday": "Friday",
-     "tithi": "Sasthi", "title": "Maha Sasthi"},
-    {"id": "day_saptami", "date": "2026-10-17", "day": 17, "month_label": "Oct", "weekday": "Saturday",
-     "tithi": "Saptami", "title": "Maha Saptami"},
-    {"id": "day_saptami_ashtami", "date": "2026-10-18", "day": 18, "month_label": "Oct", "weekday": "Sunday",
-     "tithi": "Saptami / Ashtami", "title": "Saptami / Ashtami"},
-    {"id": "day_ashtami", "date": "2026-10-19", "day": 19, "month_label": "Oct", "weekday": "Monday",
-     "tithi": "Ashtami", "title": "Maha Ashtami"},
-    {"id": "day_navami", "date": "2026-10-20", "day": 20, "month_label": "Oct", "weekday": "Tuesday",
-     "tithi": "Navami", "title": "Maha Navami"},
-    {"id": "day_dashami", "date": "2026-10-21", "day": 21, "month_label": "Oct", "weekday": "Wednesday",
-     "tithi": "Dashami", "title": "Vijaya Dashami"},
+    {
+        "id": "day_sasthi", "date": "2026-10-16", "day": 16, "month_label": "Oct", "weekday": "Friday",
+        "bengali_date": "২৮ আশ্বিন", "tithi": "Sasthi", "title": "Maha Sasthi", "title_bn": "মহা ষষ্ঠী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "16 Oct, 1:42 AM",
+            "tithi_end": "17 Oct, 3:46 AM",
+            "highlights": [
+                "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
+                "সকাল ৮:৩০-এর মধ্যে সংকল্প ও ষষ্ঠী পুজো",
+                "সন্ধ্যায় বোধন, আমন্ত্রণ, বেলবরণ ও অধিবাস",
+            ],
+            "highlights_en": [
+                "Purvahna until 9:28 AM",
+                "Sankalpa & Sasthi puja by 8:30 AM",
+                "Evening: Bodhon, invitation, Belbaran & Adhibas",
+            ],
+        },
+    },
+    {
+        "id": "day_saptami", "date": "2026-10-17", "day": 17, "month_label": "Oct", "weekday": "Saturday",
+        "bengali_date": "২৯ আশ্বিন", "tithi": "Saptami", "title": "Maha Saptami", "title_bn": "মহা সপ্তমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "17 Oct, 3:46 AM",
+            "tithi_end": "18 Oct, 5:53 AM",
+            "note": "সপ্তমী তিথি অহোরাত্র (২ দিন)",
+            "highlights": [
+                "দিবা ৭:০৪-এর পরে নবপত্রিকা প্রবেশ ও স্থাপন",
+                "সপ্তমাদি কল্পারম্ভ ও সপ্তমী পুজো",
+                "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
+            ],
+            "highlights_en": [
+                "Nabapatrika after 7:04 AM",
+                "Saptami kalparambha & prescribed puja",
+                "Purvahna until 9:28 AM",
+            ],
+        },
+    },
+    {
+        "id": "day_saptami_ashtami", "date": "2026-10-18", "day": 18, "month_label": "Oct", "weekday": "Sunday",
+        "bengali_date": "৩০ আশ্বিন", "tithi": "Saptami / Ashtami", "title": "Saptami / Ashtami",
+        "title_bn": "সপ্তমী / অষ্টমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "Saptami ends 5:53 AM · Ashtami begins",
+            "tithi_end": "Ashtami continues into 19 Oct",
+            "highlights": [
+                "ভোর ৫:৫৩-এর মধ্যে সপ্তমী অধিক পুজো",
+                "অষ্টমী তিথি শুরু সকাল ৫:৫৩",
+                "রাত ১০:৫৯–১১:৪৭ অর্ধরাত্রি বিহিত পুজো",
+            ],
+            "highlights_en": [
+                "Extra Saptami puja by 5:53 AM",
+                "Ashtami tithi begins 5:53 AM",
+                "Midnight puja 10:59–11:47 PM",
+            ],
+        },
+    },
+    {
+        "id": "day_ashtami", "date": "2026-10-19", "day": 19, "month_label": "Oct", "weekday": "Monday",
+        "bengali_date": "১ কার্তিক", "tithi": "Ashtami", "title": "Maha Ashtami", "title_bn": "মহাষ্টমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "18 Oct, 5:53 AM",
+            "tithi_end": "19 Oct, 7:50 AM",
+            "sandhi_start": "7:26 AM",
+            "sandhi_end": "8:14 AM",
+            "balidan": "7:50 AM",
+            "highlights": [
+                "সকাল ৭:০৫-এর মধ্যে মহাষ্টমী কল্পারম্ভ, অঞ্জলি",
+                "সন্ধিপুজো ৭:২৬ – ৮:১৪",
+                "বলিদান ৭:৫০ · বীরাষ্টমী ব্রত",
+            ],
+            "highlights_en": [
+                "Maha Ashtami kalparambha & Anjali by 7:05 AM",
+                "Sandhi Puja 7:26 – 8:14 AM",
+                "Balidan 7:50 AM · Virashtami brata",
+            ],
+            "bisuddha_sandhi": "বিশুদ্ধ সিদ্ধান্ত: সন্ধিপুজো ১০:২৮ – ১১:১৬",
+        },
+    },
+    {
+        "id": "day_navami", "date": "2026-10-20", "day": 20, "month_label": "Oct", "weekday": "Tuesday",
+        "bengali_date": "২ কার্তিক", "tithi": "Navami", "title": "Maha Navami", "title_bn": "মহানবমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "19 Oct, 7:50 AM",
+            "tithi_end": "20 Oct, 9:31 AM",
+            "highlights": [
+                "সকাল ৭:০৫-এর মধ্যে, পুনঃ ৮:৩১–৯:৩১ মহানবমী পুজো",
+                "দেবীর নবরাত্রি ব্রত সমাপন",
+                "দশমী তিথি শুরু সকাল ৯:৩১",
+            ],
+            "highlights_en": [
+                "Mahanaavami puja by 7:05 AM; again 8:31–9:31 AM",
+                "Navaratri brata concludes",
+                "Dashami tithi begins 9:31 AM",
+            ],
+        },
+    },
+    {
+        "id": "day_dashami", "date": "2026-10-21", "day": 21, "month_label": "Oct", "weekday": "Wednesday",
+        "bengali_date": "৩ কার্তিক", "tithi": "Dashami", "title": "Vijaya Dashami", "title_bn": "বিজয়া দশমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "20 Oct, 9:31 AM",
+            "tithi_end": "21 Oct, 10:47 AM",
+            "highlights": [
+                "সকাল ৮:৩১-এর মধ্যে দশমী পুজো ও বিসর্জন প্রশস্ত",
+                "বিসর্জনান্তে অপরাজিতা পুজো",
+                "বিজয়া দশমী কৃত্য / দশেরা",
+            ],
+            "highlights_en": [
+                "Dashami puja & Visarjan preferred by 8:31 AM",
+                "Aparajita puja after Visarjan",
+                "Vijaya Dashami rites / Dussehra",
+            ],
+        },
+    },
 ]
+
+DURGOTSAV_2026_NIRGHANTO_META = {
+    "primary_panjika": "prachin",
+    "primary_label": "প্রাচীন পঞ্জিকা",
+    "primary_label_en": "Prachin Panjika",
+    "alternate_label": "বিশুদ্ধ সিদ্ধান্ত",
+    "source": "Ei Samay Puja Nirghonto 2026 + Thakurmasai confirmation",
+    "source_url": "https://eisamay.com/astrology/religion-and-rituals/durga-puja-2026-dates-timings-sasthi-saptami-ashtami-navami-dashami-bisudhha-siddhanta-prachin-panjika-puja-nirghonto/200533534.cms",
+    "note_bn": "One10 প্রাচীন পঞ্জিকা / ঠাকুরমশাই নির্দেশ অনুসরণ করবে। বিশুদ্ধ সিদ্ধান্তে সন্ধিপুজো ১০:২৮–১১:১৬।",
+    "note_en": "One10 follows Prachin Panjika / Thakurmasai. Bisuddha Siddhanta Sandhi: 10:28–11:16 AM.",
+    "cards": [
+        {"id": "card_cover", "title": "Door-to-door cover", "file": "01-cover-subscribe.png"},
+        {"id": "card_sasthi_saptami", "title": "Sasthi & Saptami", "file": "02-sasthi-saptami.png"},
+        {"id": "card_ashtami_sandhi", "title": "Ashtami & Sandhi", "file": "03-ashtami-sandhi.png"},
+        {"id": "card_navami_dashami", "title": "Navami & Dashami", "file": "04-navami-dashami.png"},
+    ],
+}
 
 DURGOTSAV_2026_CAMPAIGN = {
     "title": "One10 Durgotsav 2026",
@@ -37,7 +165,8 @@ DURGOTSAV_2026_CAMPAIGN = {
     "start_date": "2026-10-16",
     "end_date": "2026-10-21",
     "programme": list(DURGOTSAV_2026_PROGRAMME),
-    "programme_source": "Confirmed with Thakurmasai",
+    "programme_source": "Confirmed with Thakurmasai · Prachin Panjika Nirghonto",
+    "nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
     "important_notice": "A receipt is issued only after payment is verified. Please do not share screenshots as proof of payment.",
     "short_url": "one10events.example/subscribe",
     "hero_url": "/images/campaign/hero-cover.jpg",
@@ -577,6 +706,7 @@ async def ensure_settings():
         "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
         "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
         "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
     }
     await db.application_settings.update_one({"id": "app_settings"}, {"$set": camp_patch})
     await db.annual_cycles.update_one(
@@ -587,6 +717,7 @@ async def ensure_settings():
             "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
             "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
             "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+            "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
         }},
     )
     # towers & flats (demo: 20 flats per tower) — shared estate master data

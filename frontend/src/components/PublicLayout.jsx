@@ -7,6 +7,7 @@ import api from "../lib/api";
 const LINKS = [
   { to: "/", label: "Home" },
   { to: "/events", label: "Programme" },
+  { to: "/nirghanto", label: "Nirghonto" },
   { to: "/sponsors", label: "Sponsors" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },

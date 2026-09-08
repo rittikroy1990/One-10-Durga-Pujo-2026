@@ -12,6 +12,7 @@ import PaymentStatus from "./pages/public/PaymentStatus";
 import ReceiptFind from "./pages/public/ReceiptFind";
 import ReceiptVerify from "./pages/public/ReceiptVerify";
 import Events from "./pages/public/Events";
+import Nirghanto from "./pages/public/Nirghanto";
 import Participate from "./pages/public/Participate";
 import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
@@ -42,6 +43,7 @@ function AppRoutes() {
       <Route path="/receipt/find" element={<ReceiptFind />} />
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />
       <Route path="/events" element={<Events />} />
+      <Route path="/nirghanto" element={<Nirghanto />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
       <Route path="/transparency" element={<PublicReport />} />

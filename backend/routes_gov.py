@@ -130,7 +130,7 @@ def _payment_qr_paths():
 
 
 @router.get("/admin/payment-qr")
-async def admin_payment_qr_status(user: dict = Depends(require("settings:read", "settings:manage"))):
+async def admin_payment_qr_status(user: dict = Depends(require("settings:read", "settings:manage", "receipts:manage", "payments:manage", "households:write"))):
     settings = await get_settings()
     upi = (settings.get("organisation") or {}).get("upi") or {}
     locked = bool(upi.get("qr_locked"))
@@ -149,7 +149,7 @@ async def admin_payment_qr_status(user: dict = Depends(require("settings:read", 
 
 @router.post("/admin/payment-qr")
 async def admin_upload_payment_qr(request: Request = None,
-                                  user: dict = Depends(require("settings:manage")),
+                                  user: dict = Depends(require("settings:manage", "receipts:manage", "payments:manage", "households:write")),
                                   file: UploadFile = File(...)):
     """One-time upload of the public UPI payment QR. After success, further uploads are locked."""
     settings = await get_settings()

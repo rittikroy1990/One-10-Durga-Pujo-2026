@@ -52,14 +52,6 @@ async def _components(settings, donation_paise):
     return comps
 
 
-async def _household_is_paid(household_id: str) -> bool:
-    if await db.receipts.count_documents({"household_id": household_id, "status": "issued",
-                                          "kind": {"$ne": "donation"}}):
-        return True
-    return bool(await db.subscription_intents.count_documents(
-        {"household_id": household_id, "status": "paid", "kind": {"$ne": "donation"}}))
-
-
 @router.post("/subscribe")
 async def subscribe(body: SubscribeIn, request: Request):
     settings = await get_settings()
@@ -84,16 +76,9 @@ async def subscribe(body: SubscribeIn, request: Request):
         raise HTTPException(status_code=500, detail="Component allocation misconfigured.")
     donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
 
-    # canonical household
+    # Reuse the cycle+tower+flat household when present; never block a new payment.
     household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": body.tower_id,
-                                              "flat_id": body.flat_id})
-    if household and await _household_is_paid(household["id"]):
-        raise HTTPException(status_code=409, detail={
-            "code": "duplicate_household",
-            "message": "A verified subscription already exists for this flat this year.",
-            "options": ["retrieve_existing", "resume_pending", "donate_separately", "contact_eoc"],
-            "household_id": household["id"],
-        })
+                                              "flat_id": body.flat_id, "is_deleted": {"$ne": True}})
 
     if not household:
         hid = new_id("hh")

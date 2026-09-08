@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { ArrowRight, ArrowLeft, ShieldCheck, Loader2, Info } from "lucide-react";
+import { ArrowRight, ArrowLeft, ShieldCheck, Loader2 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Label, Input, Select, Textarea } from "../../components/ui";
@@ -31,7 +31,6 @@ export default function Subscribe() {
   const [busy, setBusy] = useState(false);
   const [intent, setIntent] = useState(null);
   const [order, setOrder] = useState(null);
-  const [conflict, setConflict] = useState(null);
 
   const [form, setForm] = useState({
     primary_contact_name: "", mobile: "", tower_id: "", flat_id: "",
@@ -65,7 +64,6 @@ export default function Subscribe() {
       return;
     }
     setBusy(true);
-    setConflict(null);
     try {
       const r = await api.post("/subscribe", { ...form, family_members: Number(form.family_members), donation_rupees: Number(form.donation_rupees || 0) });
       setIntent(r.data);
@@ -74,11 +72,7 @@ export default function Subscribe() {
       setStep(3);
     } catch (e) {
       const d = e?.response?.data?.detail;
-      if (e?.response?.status === 409 && d?.code === "duplicate_household") {
-        setConflict(d);
-      } else {
-        toast.error(typeof d === "string" ? d : "Could not create subscription. Please check your details.");
-      }
+      toast.error(typeof d === "string" ? d : (d?.message || "Could not create subscription. Please check your details."));
     } finally {
       setBusy(false);
     }
@@ -245,13 +239,6 @@ export default function Subscribe() {
                 <input type="checkbox" data-testid="sub-terms" checked={form.terms_consent} onChange={(e) => set("terms_consent", e.target.checked)} className="mt-1 h-4 w-4" />
                 I agree to the <a href="/terms" className="text-vermilion-600 underline">payment & refund terms</a>.
               </label>
-
-              {conflict && (
-                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800" data-testid="sub-conflict">
-                  <div className="flex items-center gap-2 font-semibold"><Info className="h-4 w-4" /> {conflict.message}</div>
-                  <p className="mt-1">You can retrieve the existing receipt, resume a pending payment, add a separate donation, or contact the EOC.</p>
-                </div>
-              )}
 
               <div className="flex justify-between">
                 <Button variant="subtle" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4" /> Back</Button>

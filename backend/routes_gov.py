@@ -118,6 +118,113 @@ async def update_settings(body: dict = Body(...), request: Request = None,
     return after
 
 
+# =============================================================== ONE-TIME PAYMENT QR UPLOAD
+def _payment_qr_paths():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    return [
+        root / "frontend" / "public" / "images" / "payment-qr.png",
+        root / "frontend" / "build" / "images" / "payment-qr.png",
+        root / "_uploads" / "payment-qr.png",
+    ]
+
+
+@router.get("/admin/payment-qr")
+async def admin_payment_qr_status(user: dict = Depends(require("settings:read", "settings:manage"))):
+    settings = await get_settings()
+    upi = (settings.get("organisation") or {}).get("upi") or {}
+    locked = bool(upi.get("qr_locked"))
+    url = upi.get("static_qr_url") or "/images/payment-qr.png"
+    return {
+        "locked": locked,
+        "uploaded": locked or bool(upi.get("qr_uploaded_at")),
+        "url": url,
+        "uploaded_at": upi.get("qr_uploaded_at"),
+        "uploaded_by": upi.get("qr_uploaded_by"),
+        "vpa": upi.get("vpa") or "",
+        "payee_name": upi.get("payee_name") or "",
+        "can_upload": not locked,
+    }
+
+
+@router.post("/admin/payment-qr")
+async def admin_upload_payment_qr(request: Request = None,
+                                  user: dict = Depends(require("settings:manage")),
+                                  file: UploadFile = File(...)):
+    """One-time upload of the public UPI payment QR. After success, further uploads are locked."""
+    settings = await get_settings()
+    org = dict(settings.get("organisation") or {})
+    upi = dict(org.get("upi") or {})
+    if upi.get("qr_locked"):
+        raise HTTPException(
+            status_code=409,
+            detail="Payment QR upload is deactivated — a QR was already uploaded once.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="QR image too large (max 8 MB).")
+    ctype = (file.content_type or "").lower()
+    name = (file.filename or "").lower()
+    if not (ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        raise HTTPException(status_code=400, detail="Upload a PNG or JPG QR image.")
+
+    # Normalize to PNG for consistent serving
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(data)).convert("RGB")
+        buf = _io.BytesIO()
+        im.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+    except Exception:
+        png_bytes = data
+
+    written = []
+    for path in _payment_qr_paths():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png_bytes)
+        written.append(str(path))
+
+    stamp = iso()
+    cache_bust = stamp.replace(":", "").replace("-", "").replace(".", "")[:18]
+    static_url = f"/images/payment-qr.png?v={cache_bust}"
+    upi.update({
+        "enabled": True,
+        "static_qr_url": static_url,
+        "qr_locked": True,
+        "qr_uploaded_at": stamp,
+        "qr_uploaded_by": user.get("email") or user.get("user_id") or "",
+    })
+    org["upi"] = upi
+    result = await db.application_settings.update_one(
+        {"id": "app_settings"},
+        {"$set": {"organisation.upi": upi, "updated_at": stamp}},
+    )
+    if result.matched_count == 0:
+        await db.application_settings.update_one(
+            {},
+            {"$set": {"organisation.upi": upi, "updated_at": stamp}},
+        )
+    await audit(
+        "payment_qr.upload",
+        actor=user,
+        entity_type="organisation.upi",
+        entity_id="payment_qr",
+        after={"url": static_url, "bytes": len(png_bytes), "paths": written},
+        request=request,
+    )
+    return {
+        "ok": True,
+        "locked": True,
+        "url": static_url,
+        "uploaded_at": stamp,
+        "message": "Payment QR saved and upload deactivated.",
+    }
+
+
 # =============================================================== CAMPAIGNS / CYCLES
 @router.get("/admin/campaigns")
 async def admin_list_campaigns(user: dict = Depends(require("settings:read", "reports:read"))):

@@ -386,8 +386,10 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
     payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "EOC One10"
     vpa = (upi.get("vpa") or "").strip()
     amount_rupees = f"{amount_paise / 100:.2f}"
+    # When a merchant QR was uploaded (qr_locked), never synthesize a simplified
+    # upi:// string — banks may reject it, and the static image is authoritative.
     qr_data = ""
-    if vpa:
+    if vpa and not upi.get("qr_locked"):
         from urllib.parse import quote
         qr_data = (
             f"upi://pay?pa={quote(vpa)}&pn={quote(payee)}&am={amount_rupees}"

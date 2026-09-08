@@ -171,7 +171,10 @@ async def admin_upload_payment_qr(request: Request = None,
     if not (ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
         raise HTTPException(status_code=400, detail="Upload a PNG or JPG QR image.")
 
-    # Normalize to PNG for consistent serving
+    # Normalize to PNG for consistent serving; try to decode VPA from the QR.
+    decoded_vpa = ""
+    decoded_payee = ""
+    decoded_uri = ""
     try:
         from PIL import Image
         import io as _io
@@ -179,6 +182,20 @@ async def admin_upload_payment_qr(request: Request = None,
         buf = _io.BytesIO()
         im.save(buf, format="PNG")
         png_bytes = buf.getvalue()
+        try:
+            from pyzbar.pyzbar import decode as _zbar_decode
+            from urllib.parse import parse_qs, urlparse, unquote
+            for sym in _zbar_decode(im) or []:
+                raw = (sym.data or b"").decode("utf-8", errors="ignore").strip()
+                if not raw.lower().startswith("upi://"):
+                    continue
+                decoded_uri = raw
+                qs = parse_qs(urlparse(raw).query)
+                decoded_vpa = unquote((qs.get("pa") or [""])[0]).strip()
+                decoded_payee = unquote((qs.get("pn") or [""])[0]).strip()
+                break
+        except Exception:
+            pass
     except Exception:
         png_bytes = data
 
@@ -197,7 +214,18 @@ async def admin_upload_payment_qr(request: Request = None,
         "qr_locked": True,
         "qr_uploaded_at": stamp,
         "qr_uploaded_by": user.get("email") or user.get("user_id") or "",
+        "instructions": (
+            "Scan the committee QR with any UPI app and pay the exact amount shown. "
+            "Then upload your payment screenshot and enter the UTR / UPI reference number. "
+            "Do not type the UPI ID manually."
+        ),
     })
+    if decoded_vpa:
+        upi["vpa"] = decoded_vpa
+    if decoded_payee:
+        upi["payee_name"] = decoded_payee
+    if decoded_uri:
+        upi["merchant_upi_uri"] = decoded_uri
     org["upi"] = upi
     result = await db.application_settings.update_one(
         {"id": "app_settings"},
@@ -213,7 +241,13 @@ async def admin_upload_payment_qr(request: Request = None,
         actor=user,
         entity_type="organisation.upi",
         entity_id="payment_qr",
-        after={"url": static_url, "bytes": len(png_bytes), "paths": written},
+        after={
+            "url": static_url,
+            "bytes": len(png_bytes),
+            "paths": written,
+            "vpa": decoded_vpa or upi.get("vpa"),
+            "payee_name": decoded_payee or upi.get("payee_name"),
+        },
         request=request,
     )
     return {
@@ -221,6 +255,8 @@ async def admin_upload_payment_qr(request: Request = None,
         "locked": True,
         "url": static_url,
         "uploaded_at": stamp,
+        "vpa": decoded_vpa or upi.get("vpa") or "",
+        "payee_name": decoded_payee or upi.get("payee_name") or "",
         "message": "Payment QR saved and upload deactivated.",
     }
 

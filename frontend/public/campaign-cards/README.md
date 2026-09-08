@@ -1,16 +1,25 @@
 # Door-to-door Nirghonto cards (set of 4)
 
-Print-ready A5 PNGs for One10 Durgotsav 2026 household campaign.
+Print-ready A5 PNGs for One10 Durgotsav 2026.
 
 | # | File | Content |
 |---|------|---------|
-| 1 | `01-cover-subscribe.png` | Cover + ₹3,500 + venue + date overview |
-| 2 | `02-sasthi-saptami.png` | Maha Sasthi & Saptami timings (Prachin) |
-| 3 | `03-ashtami-sandhi.png` | Maha Ashtami, Anjali, Sandhi 7:26–8:14 |
-| 4 | `04-navami-dashami.png` | Navami, Dashami/Visarjan + subscribe CTA |
+| 1 | `01-cover-subscribe.png` | Cover + ₹3,500 + venue + dates |
+| 2 | `02-sasthi-saptami.png` | Sasthi & Saptami timings |
+| 3 | `03-ashtami-sandhi.png` | Ashtami + Sandhi 7:26–8:14 AM |
+| 4 | `04-navami-dashami.png` | Navami, Dashami + subscribe CTA |
 
-Primary panjika: **প্রাচীন পঞ্জিকা** (matches Thakurmasai). Bisuddha Sandhi noted on card 3.
+## Website routes (after deploy)
 
-Regenerate: `python3 scripts/generate_nirghonto_cards.py`
+- Nirghonto cards page: `/nirghanto`
+- Subscribe & pay: `/subscribe`
+- Programme: `/events`
+- Home: `/`
 
-Source: Ei Samay Nirghonto + Thakurmasai confirmation.
+## Regenerate
+
+```bash
+python3 scripts/generate_nirghanto_cards.py
+```
+
+Also rebuilds aligned `highlights.jpg`, `experience.jpg`, and `hero-cover.jpg`.

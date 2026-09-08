@@ -120,9 +120,6 @@ async def subscribe(body: SubscribeIn, request: Request):
         "status": "payment_pending", "method": "upi_qr",
         "created_at": iso(),
     }
-    flags = settings.get("feature_flags") or {}
-    if flags.get("razorpay_public_checkout") and flags.get("payment_provider") == "razorpay":
-        intent["method"] = "razorpay"
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
                 entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid,

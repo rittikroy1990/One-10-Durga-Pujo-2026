@@ -255,14 +255,14 @@ ORGANISATION_DEFAULTS = {
         "ifsc": "ICIC0005722",
         "bank": "ICICI Bank",
     },
-    # UPI / QR payment (public subscribe). Update VPA if committee issues a dedicated UPI ID.
+    # UPI / QR payment (public subscribe) — from committee flyer QR
     "upi": {
         "enabled": True,
-        "vpa": "",  # optional; when empty QR uses bank account display + static image if present
-        "payee_name": "ONE 10 EVENT ORGANISING COMMITTEE",
+        "vpa": "8217011245.eazypay@icici",
+        "payee_name": "ONE10 DURGA PUJA",
         "static_qr_url": "/images/payment-qr.png",
         "instructions": (
-            "Scan the QR or transfer the exact amount to the committee bank account. "
+            "Scan the committee QR or transfer the exact amount to the UPI ID / bank account. "
             "Then upload your payment screenshot and enter the UTR / UPI reference number."
         ),
     },
@@ -603,23 +603,35 @@ async def ensure_settings():
             for k, v in org_patch.items():
                 org[k] = v
             patch["organisation"] = org
-        # Ensure UPI block exists for QR subscribe flow
-        if "upi" not in (patch.get("organisation") or org):
-            org = patch.get("organisation") or dict(org)
-            org["upi"] = ORGANISATION_DEFAULTS.get("upi")
+        # Ensure UPI block exists for QR subscribe flow; stamp flyer VPA when missing/empty
+        org = patch.get("organisation") or dict(org)
+        upi_def = ORGANISATION_DEFAULTS.get("upi") or {}
+        upi = dict(org.get("upi") or {})
+        upi_changed = False
+        if not org.get("upi"):
+            upi = dict(upi_def)
+            upi_changed = True
+        else:
+            for uk in ("enabled", "static_qr_url", "instructions"):
+                if uk not in upi and uk in upi_def:
+                    upi[uk] = upi_def[uk]
+                    upi_changed = True
+            if not (upi.get("vpa") or "").strip() and upi_def.get("vpa"):
+                upi["vpa"] = upi_def["vpa"]
+                upi["payee_name"] = upi_def.get("payee_name") or upi.get("payee_name")
+                upi_changed = True
+        if upi_changed:
+            org["upi"] = upi
             patch["organisation"] = org
 
-        # Merge new feature flags (payment_provider etc.) without wiping custom toggles
+        # Public checkout is QR/UPI only — do not use Razorpay for residents
         flags = dict(existing.get("feature_flags") or {})
         for fk, fv in DEFAULT_SETTINGS["feature_flags"].items():
             if fk not in flags:
                 flags[fk] = fv
-        # Prefer UPI QR as public default going forward
-        if flags.get("payment_provider") not in ("upi_qr", "razorpay"):
-            flags["payment_provider"] = "upi_qr"
-        if "razorpay_public_checkout" not in (existing.get("feature_flags") or {}):
-            flags["razorpay_public_checkout"] = False
-            flags["payment_provider"] = "upi_qr"
+        flags["payment_provider"] = "upi_qr"
+        flags["razorpay_public_checkout"] = False
+        if "llm_screenshot_auto_issue" not in flags:
             flags["llm_screenshot_auto_issue"] = True
         if flags != (existing.get("feature_flags") or {}):
             patch["feature_flags"] = flags

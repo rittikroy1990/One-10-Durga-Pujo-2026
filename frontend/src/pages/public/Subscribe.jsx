@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, Copy, QrCode,
 } from "lucide-react";
-import api, { API } from "../../lib/api";
+import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Label, Input, Select } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -32,11 +32,9 @@ export default function Subscribe() {
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
   const [intent, setIntent] = useState(null);
-  const [order, setOrder] = useState(null);
   const [upiSession, setUpiSession] = useState(null);
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
-  const [qrBroken, setQrBroken] = useState(false);
 
   const [form, setForm] = useState({
     primary_contact_name: "", mobile: "", tower_id: "", flat_id: "",
@@ -58,8 +56,6 @@ export default function Subscribe() {
   const base = cfg?.subscription?.base_amount_paise || 350000;
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const total = base + donationPaise;
-  const useUpi = (cfg?.feature_flags?.payment_provider || "upi_qr") === "upi_qr"
-    && !cfg?.feature_flags?.razorpay_public_checkout;
   const bank = upiSession?.payment?.bank_account || cfg?.payment?.bank_account || cfg?.organisation?.bank_account;
   const pay = upiSession?.payment;
 
@@ -90,15 +86,8 @@ export default function Subscribe() {
         donation_rupees: Number(form.donation_rupees || 0),
       });
       setIntent(r.data);
-      if (useUpi || r.data.payment_method === "upi_qr") {
-        const s = await api.get(`/payments/upi/session`, { params: { intent_id: r.data.intent_id } });
-        setUpiSession(s.data);
-        setOrder(null);
-      } else {
-        const o = await api.post("/payments/order", { intent_id: r.data.intent_id });
-        setOrder(o.data);
-        setUpiSession(null);
-      }
+      const s = await api.get(`/payments/upi/session`, { params: { intent_id: r.data.intent_id } });
+      setUpiSession(s.data);
       setStep(3);
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -140,61 +129,6 @@ export default function Subscribe() {
     }
   };
 
-  const payTest = async () => {
-    setBusy(true);
-    try {
-      const r = await api.post("/payments/simulate", { internal_order_id: order.internal_order_id });
-      if (r.data.status === "paid") {
-        toast.success(`Receipt ${r.data.receipt.receipt_no} issued`);
-        navigate(`/payment/status?token=${encodeURIComponent(order.status_token)}`);
-      } else if (r.data.status === "duplicate_payment") {
-        toast.warning("Excess payment queued for refund review.");
-      } else {
-        toast.error("Payment needs reconciliation. The committee will review it.");
-      }
-    } catch (e) {
-      toast.error("Payment could not be completed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const payReal = async () => {
-    await new Promise((res) => {
-      if (window.Razorpay) return res();
-      const s = document.createElement("script");
-      s.src = "https://checkout.razorpay.com/v1/checkout.js";
-      s.onload = res;
-      document.body.appendChild(s);
-    });
-    const rzp = new window.Razorpay({
-      key: order.key_id,
-      amount: order.amount,
-      currency: order.currency,
-      order_id: order.provider_order_id,
-      name: cfg?.campaign?.title || cfg?.platform?.name || "One 10 Events",
-      description: "Household subscription",
-      handler: async (resp) => {
-        try {
-          const v = await api.post("/payments/verify", {
-            internal_order_id: order.internal_order_id,
-            razorpay_order_id: resp.razorpay_order_id,
-            razorpay_payment_id: resp.razorpay_payment_id,
-            razorpay_signature: resp.razorpay_signature,
-          });
-          if (v.data.status === "paid") navigate(`/payment/status?token=${encodeURIComponent(order.status_token)}`);
-          else toast.warning("Payment is being verified. Please do not pay again.");
-        } catch {
-          toast.error("Verification failed.");
-        }
-      },
-    });
-    rzp.open();
-  };
-
-  const qrSrc = intent
-    ? `${API}/payments/upi/qr.png?intent_id=${encodeURIComponent(intent.intent_id)}`
-    : null;
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
 
   return (
@@ -329,14 +263,13 @@ export default function Subscribe() {
                     <QrCode className="h-4 w-4 text-vermilion-500" /> Scan & pay
                   </div>
                   <img
-                    src={qrBroken ? staticQr : (pay?.qr_data ? qrSrc : staticQr)}
-                    alt="Payment QR"
-                    className="h-48 w-48 rounded-lg border border-brown-800/10 object-contain"
+                    src={staticQr}
+                    alt="Committee UPI payment QR"
+                    className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
                     data-testid="payment-qr-img"
-                    onError={() => setQrBroken(true)}
                   />
                   <p className="mt-2 text-center text-xs text-brown-800/55">
-                    Pay the <b>exact</b> amount, then upload your screenshot below.
+                    Pay the <b>exact</b> amount (₹3,500 for subscription), then upload your screenshot below.
                   </p>
                 </div>
 
@@ -359,7 +292,15 @@ export default function Subscribe() {
                       </button>
                     </div>
                     <div><span className="text-brown-800/50">Bank</span><br />{bank?.bank}</div>
-                    {pay?.vpa && <div><span className="text-brown-800/50">UPI</span><br />{pay.vpa}</div>}
+                    {pay?.vpa && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span><span className="text-brown-800/50">UPI</span><br />{pay.vpa}</span>
+                        <button type="button" className="text-vermilion-600" onClick={() => copyText(pay.vpa, "UPI ID")} aria-label="Copy UPI">
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                    {pay?.payee_name && <div><span className="text-brown-800/50">Payee</span><br />{pay.payee_name}</div>}
                   </div>
                 </div>
               </div>
@@ -414,22 +355,10 @@ export default function Subscribe() {
             </div>
           )}
 
-          {step === 3 && order && (
-            <div className="space-y-5 text-center">
-              <div className="font-display text-3xl">Complete your payment</div>
-              <div className="text-brown-800/70">Amount: <span className="font-semibold text-vermilion-600">{formatPaise(order.amount)}</span></div>
-              {order.mode === "live" ? (
-                <Button variant="primary" size="lg" data-testid="pay-now-btn" onClick={payReal} disabled={busy}>Pay securely with Razorpay</Button>
-              ) : (
-                <div>
-                  <div className="mx-auto mb-3 max-w-md rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-                    Razorpay test mode is available for committee preview only.
-                  </div>
-                  <Button variant="primary" size="lg" data-testid="pay-test-btn" onClick={payTest} disabled={busy}>
-                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Pay (test simulation)"}
-                  </Button>
-                </div>
-              )}
+          {step === 3 && !upiSession && (
+            <div className="space-y-3 text-center text-sm text-brown-800/70">
+              <p>Could not start QR payment. Please go back and try again, or contact the EOC.</p>
+              <Button variant="subtle" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4" /> Back</Button>
             </div>
           )}
         </motion.div>

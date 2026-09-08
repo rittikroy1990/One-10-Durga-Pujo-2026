@@ -80,6 +80,8 @@ For local API testing without OAuth, see [auth_testing.md](auth_testing.md).
 
 Default Durgotsav 2026 subscription: **₹3,500** = ₹2,500 (Khuti/Durga/Lakshmi) + ₹300 (Kali) + ₹700 (Bijoya).
 
+Ritual calendar (confirmed with Thakurmasai): **16–21 Oct 2026** — Sasthi, Saptami, Saptami/Ashtami, Ashtami, Navami, Dashami.
+
 ## Production checklist (EOC)
 
 Before going live, confirm in Settings / env:

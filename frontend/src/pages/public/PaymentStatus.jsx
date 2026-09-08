@@ -18,7 +18,8 @@ export default function PaymentStatus() {
       try {
         const r = await api.get(`/payments/status/${token}`);
         setData(r.data);
-        if (r.data.status !== "paid" && tries < 20) {
+        const done = ["paid", "needs_review", "error", "reconciliation_required"].includes(r.data.status);
+        if (!done && tries < 20) {
           timer.current = setTimeout(() => setTries((t) => t + 1), 3000);
         }
       } catch {
@@ -31,7 +32,8 @@ export default function PaymentStatus() {
   }, [token, tries]);
 
   const paid = data?.status === "paid";
-  const recon = data?.status === "reconciliation_required";
+  const recon = data?.status === "reconciliation_required" || data?.status === "needs_review";
+  const processing = data?.status === "processing";
 
   return (
     <PublicLayout>
@@ -41,8 +43,13 @@ export default function PaymentStatus() {
           {paid && (
             <>
               <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-600" />
-              <h1 className="mt-3 font-display text-4xl">Payment verified</h1>
-              <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been issued.</p>
+              <h1 className="mt-3 font-display text-4xl">Receipt issued</h1>
+              <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been recorded.</p>
+              {data.bank_verified === false && (
+                <p className="mt-3 text-xs text-brown-800/55">
+                  Committee-recorded against your payment reference — not a bank settlement confirmation.
+                </p>
+              )}
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">
                   <Button variant="primary" data-testid="download-receipt-btn"><FileText className="h-4 w-4" /> Download receipt</Button>
@@ -53,7 +60,15 @@ export default function PaymentStatus() {
               </div>
             </>
           )}
-          {data && !paid && !recon && data.status !== "error" && (
+          {processing && (
+            <>
+              <Loader2 className="mx-auto h-14 w-14 animate-spin text-gold-500" />
+              <h1 className="mt-3 font-display text-4xl">Checking screenshot</h1>
+              <p className="mt-1 text-brown-800/70">{data.message}</p>
+              <p className="mt-2 text-sm font-semibold text-vermilion-600">Please do not pay again.</p>
+            </>
+          )}
+          {data && !paid && !recon && !processing && data.status !== "error" && (
             <>
               <Clock className="mx-auto h-14 w-14 text-gold-500" />
               <h1 className="mt-3 font-display text-4xl">{data.do_not_pay_again ? "Verification in progress" : "Awaiting payment"}</h1>
@@ -65,7 +80,9 @@ export default function PaymentStatus() {
             <>
               <AlertTriangle className="mx-auto h-14 w-14 text-amber-500" />
               <h1 className="mt-3 font-display text-4xl">Under review</h1>
-              <p className="mt-1 text-brown-800/70">This payment needs reconciliation. The committee will resolve it — please do not pay again.</p>
+              <p className="mt-1 text-brown-800/70">
+                {data.message || "This payment needs committee review. Please do not pay again."}
+              </p>
             </>
           )}
           {data?.status === "error" && <p className="text-vermilion-600">{data.message}</p>}

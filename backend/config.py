@@ -11,14 +11,166 @@ NOT_APPROVED = "NOT APPROVED FOR PRODUCTION"
 
 CYCLE_2026 = "cycle_2026"  # default / seed cycle id (kept for backward compatibility)
 
+# Ritual calendar confirmed with Thakurmasai (Oct 2026).
+# Detailed timings from Ei Samay Nirghonto — প্রাচীন পঞ্জিকা (primary; matches Thakurmasai days)
+# and বিশুদ্ধ সিদ্ধান্ত (alternate). Source:
+# https://eisamay.com/.../durga-puja-2026-dates-timings-.../200533534.cms
+DURGOTSAV_2026_PROGRAMME = [
+    {
+        "id": "day_sasthi", "date": "2026-10-16", "day": 16, "month_label": "Oct", "weekday": "Friday",
+        "bengali_date": "২৮ আশ্বিন", "tithi": "Sasthi", "title": "Maha Sasthi", "title_bn": "মহা ষষ্ঠী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "16 Oct, 1:42 AM",
+            "tithi_end": "17 Oct, 3:46 AM",
+            "highlights": [
+                "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
+                "সকাল ৮:৩০-এর মধ্যে সংকল্প ও ষষ্ঠী পুজো",
+                "সন্ধ্যায় বোধন, আমন্ত্রণ, বেলবরণ ও অধিবাস",
+            ],
+            "highlights_en": [
+                "Purvahna until 9:28 AM",
+                "Sankalpa & Sasthi puja by 8:30 AM",
+                "Evening: Bodhon, invitation, Belbaran & Adhibas",
+            ],
+        },
+    },
+    {
+        "id": "day_saptami", "date": "2026-10-17", "day": 17, "month_label": "Oct", "weekday": "Saturday",
+        "bengali_date": "২৯ আশ্বিন", "tithi": "Saptami", "title": "Maha Saptami", "title_bn": "মহা সপ্তমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "17 Oct, 3:46 AM",
+            "tithi_end": "18 Oct, 5:53 AM",
+            "note": "সপ্তমী তিথি অহোরাত্র (২ দিন)",
+            "highlights": [
+                "দিবা ৭:০৪-এর পরে নবপত্রিকা প্রবেশ ও স্থাপন",
+                "সপ্তমাদি কল্পারম্ভ ও সপ্তমী পুজো",
+                "পূর্বাহ্ন সকাল ৯:২৮ পর্যন্ত",
+            ],
+            "highlights_en": [
+                "Nabapatrika after 7:04 AM",
+                "Saptami kalparambha & prescribed puja",
+                "Purvahna until 9:28 AM",
+            ],
+        },
+    },
+    {
+        "id": "day_saptami_ashtami", "date": "2026-10-18", "day": 18, "month_label": "Oct", "weekday": "Sunday",
+        "bengali_date": "৩০ আশ্বিন", "tithi": "Saptami / Ashtami", "title": "Saptami / Ashtami",
+        "title_bn": "সপ্তমী / অষ্টমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "Saptami ends 5:53 AM · Ashtami begins",
+            "tithi_end": "Ashtami continues into 19 Oct",
+            "highlights": [
+                "ভোর ৫:৫৩-এর মধ্যে সপ্তমী অধিক পুজো",
+                "অষ্টমী তিথি শুরু সকাল ৫:৫৩",
+                "রাত ১০:৫৯–১১:৪৭ অর্ধরাত্রি বিহিত পুজো",
+            ],
+            "highlights_en": [
+                "Extra Saptami puja by 5:53 AM",
+                "Ashtami tithi begins 5:53 AM",
+                "Midnight puja 10:59–11:47 PM",
+            ],
+        },
+    },
+    {
+        "id": "day_ashtami", "date": "2026-10-19", "day": 19, "month_label": "Oct", "weekday": "Monday",
+        "bengali_date": "১ কার্তিক", "tithi": "Ashtami", "title": "Maha Ashtami", "title_bn": "মহাষ্টমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "18 Oct, 5:53 AM",
+            "tithi_end": "19 Oct, 7:50 AM",
+            "sandhi_start": "7:26 AM",
+            "sandhi_end": "8:14 AM",
+            "balidan": "7:50 AM",
+            "highlights": [
+                "সকাল ৭:০৫-এর মধ্যে মহাষ্টমী কল্পারম্ভ, অঞ্জলি",
+                "সন্ধিপুজো ৭:২৬ – ৮:১৪",
+                "বলিদান ৭:৫০ · বীরাষ্টমী ব্রত",
+            ],
+            "highlights_en": [
+                "Maha Ashtami kalparambha & Anjali by 7:05 AM",
+                "Sandhi Puja 7:26 – 8:14 AM",
+                "Balidan 7:50 AM · Virashtami brata",
+            ],
+            "bisuddha_sandhi": "বিশুদ্ধ সিদ্ধান্ত: সন্ধিপুজো ১০:২৮ – ১১:১৬",
+        },
+    },
+    {
+        "id": "day_navami", "date": "2026-10-20", "day": 20, "month_label": "Oct", "weekday": "Tuesday",
+        "bengali_date": "২ কার্তিক", "tithi": "Navami", "title": "Maha Navami", "title_bn": "মহানবমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "19 Oct, 7:50 AM",
+            "tithi_end": "20 Oct, 9:31 AM",
+            "highlights": [
+                "সকাল ৭:০৫-এর মধ্যে, পুনঃ ৮:৩১–৯:৩১ মহানবমী পুজো",
+                "দেবীর নবরাত্রি ব্রত সমাপন",
+                "দশমী তিথি শুরু সকাল ৯:৩১",
+            ],
+            "highlights_en": [
+                "Mahanaavami puja by 7:05 AM; again 8:31–9:31 AM",
+                "Navaratri brata concludes",
+                "Dashami tithi begins 9:31 AM",
+            ],
+        },
+    },
+    {
+        "id": "day_dashami", "date": "2026-10-21", "day": 21, "month_label": "Oct", "weekday": "Wednesday",
+        "bengali_date": "৩ কার্তিক", "tithi": "Dashami", "title": "Vijaya Dashami", "title_bn": "বিজয়া দশমী",
+        "nirghanto": {
+            "panjika": "prachin",
+            "tithi_start": "20 Oct, 9:31 AM",
+            "tithi_end": "21 Oct, 10:47 AM",
+            "highlights": [
+                "সকাল ৮:৩১-এর মধ্যে দশমী পুজো ও বিসর্জন প্রশস্ত",
+                "বিসর্জনান্তে অপরাজিতা পুজো",
+                "বিজয়া দশমী কৃত্য / দশেরা",
+            ],
+            "highlights_en": [
+                "Dashami puja & Visarjan preferred by 8:31 AM",
+                "Aparajita puja after Visarjan",
+                "Vijaya Dashami rites / Dussehra",
+            ],
+        },
+    },
+]
+
+DURGOTSAV_2026_NIRGHANTO_META = {
+    "primary_panjika": "prachin",
+    "primary_label": "প্রাচীন পঞ্জিকা",
+    "primary_label_en": "Prachin Panjika",
+    "alternate_label": "বিশুদ্ধ সিদ্ধান্ত",
+    "source": "Ei Samay Puja Nirghonto 2026 + Thakurmasai confirmation",
+    "source_url": "https://eisamay.com/astrology/religion-and-rituals/durga-puja-2026-dates-timings-sasthi-saptami-ashtami-navami-dashami-bisudhha-siddhanta-prachin-panjika-puja-nirghonto/200533534.cms",
+    "note_bn": "One10 প্রাচীন পঞ্জিকা / ঠাকুরমশাই নির্দেশ অনুসরণ করবে। বিশুদ্ধ সিদ্ধান্তে সন্ধিপুজো ১০:২৮–১১:১৬।",
+    "note_en": "One10 follows Prachin Panjika / Thakurmasai. Bisuddha Siddhanta Sandhi: 10:28–11:16 AM.",
+    "cards": [
+        {"id": "card_cover", "title": "Door-to-door cover", "file": "01-cover-subscribe.png"},
+        {"id": "card_sasthi_saptami", "title": "Sasthi & Saptami", "file": "02-sasthi-saptami.png"},
+        {"id": "card_ashtami_sandhi", "title": "Ashtami & Sandhi", "file": "03-ashtami-sandhi.png"},
+        {"id": "card_navami_dashami", "title": "Navami & Dashami", "file": "04-navami-dashami.png"},
+    ],
+}
+
 DURGOTSAV_2026_CAMPAIGN = {
     "title": "One10 Durgotsav 2026",
     "theme_line": "Amader Pujo \u2022 Amader One10",
     "inclusive_line": "This will be a Pujo for everyone.",
     "consecutive_year": 3,
     "venue": "Badminton court near the tennis court, in front of Tower 11",
-    "important_notice": "A receipt is issued only after payment is verified. Please do not share screenshots as proof of payment.",
-    "short_url": "one10events.example/subscribe",
+    "dates_label": "16–21 October 2026",
+    "start_date": "2026-10-16",
+    "end_date": "2026-10-21",
+    "programme": list(DURGOTSAV_2026_PROGRAMME),
+    "programme_source": "Confirmed with Thakurmasai · Prachin Panjika Nirghonto",
+    "nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
+    "important_notice": "Pay via the committee QR / bank transfer, then upload your payment screenshot with the UTR/reference. A receipt is issued after the screenshot is checked.",
+    "short_url": "https://one10events.in/subscribe",
+    "site_url": "https://one10events.in",
+    "nirghanto_url": "https://one10events.in/nirghanto",
     "hero_url": "/images/campaign/hero-cover.jpg",
 }
 
@@ -40,8 +192,12 @@ DURGOTSAV_2026_RECEIPT = {
         "This is a computer-generated receipt of the Events Organizations Committee of One10 "
         "and does not require a physical signature."
     ),
+    "verification_note": (
+        "Committee-recorded against the payment reference you submitted. "
+        "This is not a bank settlement confirmation."
+    ),
     "refund_policy_ref": "See /refund-policy",
-    "document_version": "v1.1",
+    "document_version": "v1.2",
     "tax_deductible": False,
     "letterhead_title": "Events Organizations Committee of One10",
     "letterhead_subtitle": "ONE10 Events Committee · Unregistered non-profit community association",
@@ -98,6 +254,17 @@ ORGANISATION_DEFAULTS = {
         "account_number": "572205000037",
         "ifsc": "ICIC0005722",
         "bank": "ICICI Bank",
+    },
+    # UPI / QR payment (public subscribe) — from committee flyer QR
+    "upi": {
+        "enabled": True,
+        "vpa": "8217011245.eazypay@icici",
+        "payee_name": "ONE10 DURGA PUJA",
+        "static_qr_url": "/images/payment-qr.png",
+        "instructions": (
+            "Scan the committee QR or transfer the exact amount to the UPI ID / bank account. "
+            "Then upload your payment screenshot and enter the UTR / UPI reference number."
+        ),
     },
     "governing_body_size": 11,
     "committee_term_years": 1,
@@ -295,6 +462,9 @@ DEFAULT_SETTINGS = {
         "otp_enabled": False,
         "email_enabled": False,
         "multi_campaign": True,
+        "payment_provider": "upi_qr",
+        "razorpay_public_checkout": False,
+        "llm_screenshot_auto_issue": True,
     },
     "approval_thresholds_paise": {
         "note": NOT_APPROVED,
@@ -309,7 +479,7 @@ DEFAULT_SETTINGS = {
         "note": NOT_APPROVED,
     },
     "policy_checklist": [
-        "Razorpay merchant in committee name (currently temporary third-party keys may be in use)",
+        "Confirm UPI VPA / static payment QR for public subscribe",
         "Approval thresholds and reconciliation confidence threshold",
         "Refund window and retention/secure-deletion policy confirmation",
         "Domain and email sender verification",
@@ -349,12 +519,13 @@ CHART_OF_ACCOUNTS = [
 
 # ---------------------------------------------------------------- Events / cost centres
 EVENTS = [
-    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI"},
-    {"id": "ev_durga", "name": "Durga Puja", "cost_centre": "DURGA"},
-    {"id": "ev_lakshmi", "name": "Lakshmi Puja", "cost_centre": "LAKSHMI"},
-    {"id": "ev_kali", "name": "Kali Puja", "cost_centre": "KALI"},
-    {"id": "ev_bijoya", "name": "Bijoya Sammilani", "cost_centre": "BIJOYA"},
-    {"id": "ev_common", "name": "Common / shared", "cost_centre": "COMMON"},
+    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI", "dates": "TBC"},
+    {"id": "ev_durga", "name": "Durga Puja", "cost_centre": "DURGA",
+     "dates": "16–21 October 2026 (Sasthi–Dashami)"},
+    {"id": "ev_lakshmi", "name": "Lakshmi Puja", "cost_centre": "LAKSHMI", "dates": "TBC"},
+    {"id": "ev_kali", "name": "Kali Puja", "cost_centre": "KALI", "dates": "TBC"},
+    {"id": "ev_bijoya", "name": "Bijoya Sammilani", "cost_centre": "BIJOYA", "dates": "TBC"},
+    {"id": "ev_common", "name": "Common / shared", "cost_centre": "COMMON", "dates": "—"},
 ]
 
 # ---------------------------------------------------------------- Towers & flats (demo master data)
@@ -432,6 +603,46 @@ async def ensure_settings():
             for k, v in org_patch.items():
                 org[k] = v
             patch["organisation"] = org
+        # Ensure UPI block exists for QR subscribe flow; stamp flyer VPA when missing/empty
+        org = patch.get("organisation") or dict(org)
+        upi_def = ORGANISATION_DEFAULTS.get("upi") or {}
+        upi = dict(org.get("upi") or {})
+        upi_changed = False
+        if not org.get("upi"):
+            upi = dict(upi_def)
+            upi_changed = True
+        else:
+            for uk in ("enabled", "static_qr_url", "instructions"):
+                if uk not in upi and uk in upi_def:
+                    upi[uk] = upi_def[uk]
+                    upi_changed = True
+            if not (upi.get("vpa") or "").strip() and upi_def.get("vpa"):
+                upi["vpa"] = upi_def["vpa"]
+                upi["payee_name"] = upi_def.get("payee_name") or upi.get("payee_name")
+                upi_changed = True
+        if upi_changed:
+            org["upi"] = upi
+            patch["organisation"] = org
+
+        # Public checkout is QR/UPI only — do not use Razorpay for residents
+        flags = dict(existing.get("feature_flags") or {})
+        for fk, fv in DEFAULT_SETTINGS["feature_flags"].items():
+            if fk not in flags:
+                flags[fk] = fv
+        flags["payment_provider"] = "upi_qr"
+        flags["razorpay_public_checkout"] = False
+        if "llm_screenshot_auto_issue" not in flags:
+            flags["llm_screenshot_auto_issue"] = True
+        if flags != (existing.get("feature_flags") or {}):
+            patch["feature_flags"] = flags
+
+        # Receipt verification note for QR/screenshot receipts
+        rc_existing = existing.get("receipt") or {}
+        if not rc_existing.get("verification_note"):
+            rc_merge = dict(rc_existing)
+            rc_merge["verification_note"] = DURGOTSAV_2026_RECEIPT["verification_note"]
+            rc_merge["document_version"] = DURGOTSAV_2026_RECEIPT["document_version"]
+            patch["receipt"] = rc_merge
 
         sp = existing.get("sponsorship") or {}
         if (
@@ -510,7 +721,7 @@ async def ensure_settings():
                 "consecutive_year": 1,
                 "venue": "TBC — EOC confirmation required",
                 "important_notice": "Subscriptions open only after EOC publishes this campaign.",
-                "short_url": "one10events.example/campaigns/diwali-milan-2026",
+                "short_url": "https://one10events.in/campaigns/diwali-milan-2026",
                 "hero_url": "https://images.pexels.com/photos/34431714/pexels-photo-34431714.jpeg",
             },
             {
@@ -532,13 +743,45 @@ async def ensure_settings():
             summary="Community Diwali Milan — subscription amount and venue pending EOC confirmation.",
         ))
 
-    # events
+    # events / cost centres — refresh names + known dates (programme calendar on campaign)
     for e in EVENTS:
         await db.events.update_one(
             {"id": e["id"]},
-            {"$setOnInsert": {**e, "cycle_id": CYCLE_2026, "dates": "TBC"}},
+            {
+                "$setOnInsert": {"id": e["id"], "cycle_id": CYCLE_2026},
+                "$set": {
+                    "name": e["name"],
+                    "cost_centre": e["cost_centre"],
+                    "dates": e.get("dates") or "TBC",
+                    "cycle_id": CYCLE_2026,
+                },
+            },
             upsert=True,
         )
+
+    # Keep active Durgotsav campaign programme dates in sync with Thakurmasai calendar.
+    camp_patch = {
+        "campaign.dates_label": DURGOTSAV_2026_CAMPAIGN["dates_label"],
+        "campaign.start_date": DURGOTSAV_2026_CAMPAIGN["start_date"],
+        "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
+        "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
+        "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        "campaign.important_notice": DURGOTSAV_2026_CAMPAIGN["important_notice"],
+        "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
+    }
+    await db.application_settings.update_one({"id": "app_settings"}, {"$set": camp_patch})
+    await db.annual_cycles.update_one(
+        {"id": CYCLE_2026},
+        {"$set": {
+            "campaign.dates_label": DURGOTSAV_2026_CAMPAIGN["dates_label"],
+            "campaign.start_date": DURGOTSAV_2026_CAMPAIGN["start_date"],
+            "campaign.end_date": DURGOTSAV_2026_CAMPAIGN["end_date"],
+            "campaign.programme": list(DURGOTSAV_2026_PROGRAMME),
+            "campaign.programme_source": DURGOTSAV_2026_CAMPAIGN["programme_source"],
+        "campaign.important_notice": DURGOTSAV_2026_CAMPAIGN["important_notice"],
+            "campaign.nirghanto": dict(DURGOTSAV_2026_NIRGHANTO_META),
+        }},
+    )
     # towers & flats (demo: 20 flats per tower) — shared estate master data
     if await db.towers.count_documents({}) == 0:
         for t in TOWERS:
@@ -620,6 +863,7 @@ async def list_campaigns(*, published_only: bool = False) -> list[dict]:
             "title": camp.get("title") or c.get("name"),
             "theme_line": camp.get("theme_line", ""),
             "venue": camp.get("venue", ""),
+            "dates_label": camp.get("dates_label", ""),
             "hero_url": camp.get("hero_url", ""),
             "base_amount_paise": sub.get("base_amount_paise", 0),
             "is_locked": bool(c.get("is_locked")),

@@ -1,5 +1,11 @@
 """Public (unauthenticated) routes: platform config, campaigns, master data, receipt verification."""
-from fastapi import APIRouter, HTTPException
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from db import db
 from config import get_settings, list_campaigns, get_active_cycle_id
@@ -139,4 +145,81 @@ async def verify_receipt(token: str):
         ),
         "method": r.get("method"),
         "campaign_title": r.get("campaign_title", ""),
+    }
+
+
+# --------------------------------------------------------------- Public PDF upload (≤6 MB)
+PDF_MAX_BYTES = 6 * 1024 * 1024
+
+
+def _pdf_upload_dirs() -> list[Path]:
+    """Persistent public/uploads + live CRA build copy when present."""
+    root = Path(__file__).resolve().parent.parent
+    dirs = [
+        root / "frontend" / "public" / "uploads" / "pdfs",
+        root / "backend" / "_uploads" / "pdfs",
+    ]
+    build = root / "frontend" / "build" / "uploads" / "pdfs"
+    if (root / "frontend" / "build").is_dir():
+        dirs.append(build)
+    return dirs
+
+
+@router.post("/upload-pdf")
+async def public_upload_pdf(file: UploadFile = File(...)):
+    """Accept a single PDF (max 6 MB) and publish it under /uploads/pdfs/."""
+    filename = (file.filename or "document.pdf").strip()
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > PDF_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="PDF must be 6 MB or smaller.")
+    if not data.startswith(b"%PDF"):
+        raise HTTPException(status_code=400, detail="File does not look like a valid PDF.")
+
+    safe_base = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).stem).strip("-._") or "document"
+    safe_base = safe_base[:80]
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stored_name = f"{safe_base}-{stamp}.pdf"
+
+    written = []
+    for folder in _pdf_upload_dirs():
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / stored_name
+        dest.write_bytes(data)
+        written.append(str(dest))
+
+    public_url = f"/uploads/pdfs/{stored_name}"
+    abs_url = f"{(os.environ.get('APP_URL') or 'https://one10events.in').rstrip('/')}{public_url}"
+    await db.pdf_uploads.insert_one({
+        "id": f"pdf_{uuid.uuid4().hex[:12]}",
+        "filename": stored_name,
+        "original_filename": filename,
+        "size": len(data),
+        "url": public_url,
+        "paths": written,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {
+        "ok": True,
+        "filename": stored_name,
+        "original_filename": filename,
+        "size": len(data),
+        "url": public_url,
+        "absolute_url": abs_url,
+        "message": "PDF uploaded.",
+    }
+
+
+@router.get("/upload-pdf")
+async def public_upload_pdf_info():
+    return {
+        "ok": True,
+        "max_bytes": PDF_MAX_BYTES,
+        "max_mb": 6,
+        "accept": "application/pdf",
+        "upload_page": "/upload-pdf",
+        "post": "/api/upload-pdf",
     }

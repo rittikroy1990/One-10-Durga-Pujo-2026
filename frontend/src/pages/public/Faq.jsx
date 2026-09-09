@@ -185,8 +185,10 @@ export default function Faq() {
 
           <FaqItem q="Where do I pay online?" id="faq-pay-where">
             <p>
-              Go to <PageLink to="/subscribe">Subscribe & Pay</PageLink>, fill household details, then on the
-              payment step scan the committee UPI QR (or tap Open in UPI app / GPay / PhonePe / Paytm).
+              Go to <PageLink to="/subscribe">Subscribe &amp; Pay</PageLink> (or Donate on{" "}
+              <PageLink to="/sponsors#donate">Donate / Sponsorship</PageLink>). When shown, use{" "}
+              <b>Pay with Cashfree</b> for UPI / cards / netbanking. You can still scan the committee UPI QR
+              or use bank transfer and upload screenshot + UTR.
             </p>
             <p>Prefer scanning with the UPI app camera if a deep link fails on your phone.</p>
           </FaqItem>

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import TechSupportBrand from "../../components/TechSupportBrand";
 import { formatPaise } from "../../lib/utils";
 
 const DIRECTORY = [
@@ -335,6 +336,10 @@ export default function Faq() {
             </p>
           </FaqItem>
         </section>
+
+        <div className="mt-14" data-testid="faq-tech-support">
+          <TechSupportBrand />
+        </div>
 
         <div className="mt-14 rounded-2xl border border-sun-400/40 bg-gradient-to-r from-sun-50 to-sky-100 p-6 text-center">
           <p className="font-display text-2xl text-brown-900">Ready to subscribe?</p>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X, Flower2 } from "lucide-react";
 import { Button } from "./ui";
+import TechSupportBrand from "./TechSupportBrand";
 import api from "../lib/api";
 
 const LINKS = [
@@ -113,8 +114,13 @@ export function PublicFooter() {
           </ul>
         </div>
       </div>
-      <div className="border-t border-gold-500/10 py-4 text-center text-xs text-ivory-100/40">
-        © {new Date().getFullYear()} {name}. Built for transparent, audit-ready collection.
+      <div className="border-t border-gold-500/15 bg-brown-900/40 px-5 py-8">
+        <div className="mx-auto max-w-7xl">
+          <TechSupportBrand />
+          <p className="mt-5 text-center text-xs text-ivory-100/40">
+            © {new Date().getFullYear()} {name}. Built for transparent, audit-ready collection · Website one10events.in
+          </p>
+        </div>
       </div>
     </footer>
   );

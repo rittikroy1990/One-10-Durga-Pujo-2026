@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import TechSupportBrand from "../../components/TechSupportBrand";
 
 export default function Legal({ type }) {
   const [cfg, setCfg] = useState(null);
@@ -54,6 +55,11 @@ export default function Legal({ type }) {
     <PublicLayout>
       <div className="mx-auto max-w-3xl px-5 py-16">
         <h1 className="font-display text-5xl text-ivory-100">{c.title}</h1>
+        {type === "contact" && (
+          <div className="mt-8" data-testid="contact-tech-support">
+            <TechSupportBrand />
+          </div>
+        )}
         <div className="mt-6 space-y-4 text-ivory-100/75 leading-relaxed">
           {c.body.map((p, i) => <p key={i}>{p}</p>)}
         </div>

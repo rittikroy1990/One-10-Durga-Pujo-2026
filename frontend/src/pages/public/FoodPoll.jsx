@@ -15,8 +15,12 @@ function pct(n, total) {
   return Math.round((n / total) * 100);
 }
 
-function shortDay(label = "") {
-  return label.replace(/^Maha\s+/i, "").replace(/^Vijaya\s+/i, "");
+function shortDay(day) {
+  if (!day) return "";
+  if (typeof day === "string") {
+    return day.replace(/^Maha\s+/i, "").replace(/^Vijaya\s+/i, "");
+  }
+  return day.short_label || shortDay(day.label || "");
 }
 
 function dietLabel(code) {
@@ -227,7 +231,11 @@ export default function FoodPoll() {
               Food Menu Poll
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-brown-800/70 sm:max-w-2xl sm:text-base">
-              Vote day-wise & meal-wise. Top picks shape the ultimate One 10 menu.
+              {data.meta?.subtitle || "Vote for Breakfast, Lunch & Dinner each day. Top picks shape the ultimate menu."}
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-brown-800/55 sm:max-w-2xl">
+              Calendar note: Saptami tithi spans <span className="font-semibold text-brown-800/70">17 Oct</span> into early{" "}
+              <span className="font-semibold text-brown-800/70">18 Oct</span> (Saptami / Ashtami bridge day) — that is why you see two Saptami-labelled days.
             </p>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
               <a
@@ -299,7 +307,7 @@ export default function FoodPoll() {
                       dayCode === d.code ? "bg-vermilion-500 text-white" : "bg-white text-brown-800/70"
                     }`}
                   >
-                    {shortDay(d.label)}
+                    {shortDay(d)}
                     <span className="ml-1 text-[10px] opacity-70">{d.date?.slice(8)}/{d.date?.slice(5, 7)}</span>
                   </button>
                 ))}
@@ -318,6 +326,11 @@ export default function FoodPoll() {
                   <div>
                     <h2 className="font-display text-2xl text-brown-900 sm:text-3xl">{day.label}</h2>
                     <p className="text-sm text-brown-800/60">{day.weekday} · {day.date}</p>
+                    {day.note && (
+                      <p className="mt-2 rounded-lg border border-sky-300/40 bg-sky-50 px-3 py-2 text-xs leading-relaxed text-brown-800/75">
+                        {day.note}
+                      </p>
+                    )}
                     {day.code === "ashtami" && data.meta?.ashtami_lunch_note && (
                       <p className="mt-2 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900/90">
                         {data.meta.ashtami_lunch_note}

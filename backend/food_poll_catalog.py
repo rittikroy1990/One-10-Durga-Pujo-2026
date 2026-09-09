@@ -11,7 +11,7 @@ PDF_URL = "/uploads/pdfs/PureVeg-and-Non-Veg-Food-Menu-1-20260909-134131.pdf"
 
 POLL_META = {
     "title": "Food Menu Poll — Durgotsav 2026",
-    "subtitle": "Vote day-wise & meal-wise. Top picks shape the ultimate One 10 menu.",
+    "subtitle": "Vote for each day 16–21 Oct (Breakfast, Lunch, Dinner). Top picks shape the ultimate One 10 menu.",
     "pdf_url": PDF_URL,
     "pdf_note": "Draft reference: Pure Veg (T6) & festive banquet (T7) committee menus.",
     "timings": {
@@ -24,12 +24,21 @@ POLL_META = {
 }
 
 DAYS = [
-    {"code": "sasthi", "label": "Maha Sasthi", "date": "2026-10-16", "weekday": "Friday", "order": 1},
-    {"code": "saptami", "label": "Maha Saptami", "date": "2026-10-17", "weekday": "Saturday", "order": 2},
-    {"code": "ashtami", "label": "Maha Ashtami", "date": "2026-10-19", "weekday": "Monday", "order": 3,
+    {"code": "sasthi", "label": "Maha Sasthi", "short_label": "Sasthi",
+     "date": "2026-10-16", "weekday": "Friday", "order": 1},
+    {"code": "saptami", "label": "Maha Saptami", "short_label": "Saptami",
+     "date": "2026-10-17", "weekday": "Saturday", "order": 2,
+     "note": "Saptami tithi runs overnight into 18 Oct (Prachin Panjika)."},
+    {"code": "saptami_ashtami", "label": "Saptami / Ashtami", "short_label": "Sap–Asht",
+     "date": "2026-10-18", "weekday": "Sunday", "order": 3,
+     "note": "Saptami ends 5:53 AM · Ashtami begins the same morning — not a second full Saptami day."},
+    {"code": "ashtami", "label": "Maha Ashtami", "short_label": "Ashtami",
+     "date": "2026-10-19", "weekday": "Monday", "order": 4,
      "note": "Sandhi / Ashtami focus — Khichuri-bhog style lunch traditionally complimentary."},
-    {"code": "nabami", "label": "Maha Nabami", "date": "2026-10-20", "weekday": "Tuesday", "order": 4},
-    {"code": "dashami", "label": "Vijaya Dashami", "date": "2026-10-21", "weekday": "Wednesday", "order": 5},
+    {"code": "nabami", "label": "Maha Nabami", "short_label": "Nabami",
+     "date": "2026-10-20", "weekday": "Tuesday", "order": 5},
+    {"code": "dashami", "label": "Vijaya Dashami", "short_label": "Dashami",
+     "date": "2026-10-21", "weekday": "Wednesday", "order": 6},
 ]
 
 MEALS = [
@@ -314,6 +323,9 @@ PDF_SUGGESTIONS = {
     ("saptami", "breakfast", "pure_veg"): _s("veg_chowmein_bf", "veg_manchurian_bf", "tea_coffee"),
     ("saptami", "lunch", "pure_veg"): _s("upma", "sambar", "coconut_chutney", "dahi_vada", "sweet_generic"),
     ("saptami", "dinner", "pure_veg"): _s("paneer_makhani", "yellow_dal_fry", "steam_rice", "tawa_roti", "cutlet_veg", "salad", "papad", "pickle", "sweet_generic", "chutney_generic"),
+    ("saptami_ashtami", "breakfast", "pure_veg"): _s("luchi_alurdom", "tea_coffee", "jilapi"),
+    ("saptami_ashtami", "lunch", "pure_veg"): _s("veg_pulao", "dal_makhani", "kadai_paneer", "salad", "papad", "sweet_generic"),
+    ("saptami_ashtami", "dinner", "pure_veg"): _s("steam_rice", "yellow_dal_fry", "alu_posto", "tawa_roti", "chutney_generic", "papad", "rosogolla"),
     ("ashtami", "lunch", "pure_veg"): _s("khichuri", "luchi", "cholar_dal", "labra", "beguni", "chutney_generic", "papad", "rosogolla"),
     ("ashtami", "dinner", "pure_veg"): _s("honey_chilli_potato", "fried_rice_veg", "chilli_paneer", "kimchi_salad", "sweet_generic"),
     ("nabami", "breakfast", "pure_veg"): _s("club_sandwich_veg", "french_fries", "tea_coffee"),
@@ -330,6 +342,9 @@ PDF_SUGGESTIONS = {
     ("saptami", "breakfast", "non_veg"): _s("veg_chowmein_bf", "veg_manchurian_bf", "tea_coffee"),
     ("saptami", "lunch", "non_veg"): _s("steam_rice", "moong_dal_fish_head", "moong_dal", "jhuri_aloo_bhaja", "chingri_potol_dorma", "potol_dorma_veg", "chicken_kosha", "fulkopi_aloo_rosha", "tomato_chutney", "papad", "chomchom"),
     ("saptami", "dinner", "non_veg"): _s("radhaballavi", "cholar_dal", "fish_finger", "cutlet_veg", "alur_dum", "steam_rice", "doi_katla", "sahi_paneer", "chutney_generic", "papad", "kalakand"),
+    ("saptami_ashtami", "breakfast", "non_veg"): _s("luchi_alurdom", "tea_coffee", "jilapi"),
+    ("saptami_ashtami", "lunch", "non_veg"): _s("steam_rice", "dal_makhani", "fish_fry", "chicken_kosha", "salad", "papad", "sweet_generic"),
+    ("saptami_ashtami", "dinner", "non_veg"): _s("jeera_rice", "baby_naan", "katla_kalia", "paneer_makhani", "chutney_generic", "papad", "rosogolla"),
     ("ashtami", "lunch", "non_veg"): _s("khichuri", "luchi", "cholar_dal", "alur_dum", "labra", "beguni", "chutney_generic", "papad", "rosogolla"),
     ("ashtami", "dinner", "non_veg"): _s("jeera_rice", "veg_chop", "salad", "paneer_makhani", "veg_kofta", "chutney_generic", "papad", "sweet_generic"),
     ("nabami", "breakfast", "non_veg"): _s("club_sandwich_veg", "french_fries", "tea_coffee"),

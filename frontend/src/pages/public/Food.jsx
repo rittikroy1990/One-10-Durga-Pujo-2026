@@ -1,10 +1,45 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { UtensilsCrossed, Check, Info } from "lucide-react";
+import {
+  UtensilsCrossed, Check, Info, ClipboardList, Vote, NotebookPen,
+} from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Input, Label, Select, Spinner } from "../../components/ui";
+
+const ACTIONS = [
+  {
+    id: "interest",
+    href: "#interest",
+    icon: ClipboardList,
+    title: "Gauge interest",
+    blurb: "Tell us which meals your family may join so the committee can plan quantities.",
+    cta: "Share interest",
+    testid: "food-goto-interest",
+    primary: false,
+  },
+  {
+    id: "poll",
+    to: "/food-poll",
+    icon: Vote,
+    title: "Menu poll",
+    blurb: "Vote on Breakfast, Lunch & Dinner dishes for each puja day.",
+    cta: "Choose the menu",
+    testid: "food-goto-poll",
+    primary: true,
+  },
+  {
+    id: "subscribe",
+    href: "#subscribe",
+    icon: NotebookPen,
+    title: "Food subscription",
+    blurb: "Register your flat for the meal plan. Payment opens later — amounts TBC.",
+    cta: "Register for meals",
+    testid: "food-goto-subscribe",
+    primary: false,
+  },
+];
 
 export default function Food() {
   const [menu, setMenu] = useState(null);
@@ -88,33 +123,76 @@ export default function Food() {
 
   return (
     <PublicLayout>
-      <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-20 pb-14">
+      <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-20 pb-10 sm:pb-14">
         <div className="mx-auto max-w-5xl px-4 sm:px-5">
-          <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Food subscription</p>
+          <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Community kitchen</p>
           <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">
-            {menu?.menu?.title || "Durgotsav Food Subscription"}
+            Durgotsav Food
           </h1>
           <p className="mt-2 max-w-2xl text-brown-800/70">
-            {menu?.menu?.subtitle || "Shashthi to Dashami — breakfast, lunch, evening snacks & dinner"}
+            Plan meals with the committee — share interest, vote on the menu, then register for the subscription.
           </p>
           <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50 px-3 py-2.5 text-sm text-amber-900/90">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{menu?.payment_note || "Payment is not open yet. Amounts are TBC."}</span>
           </div>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <Link to="/food-poll">
-              <Button variant="primary" size="lg" data-testid="food-goto-poll">
-                Vote for the ultimate menu
-              </Button>
-            </Link>
-            <a href="/uploads/pdfs/PureVeg-and-Non-Veg-Food-Menu-1-20260909-134131.pdf" target="_blank" rel="noreferrer">
-              <Button variant="outline" size="lg">Draft menu PDF</Button>
-            </a>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            {ACTIONS.map((a) => {
+              const Icon = a.icon;
+              const inner = (
+                <>
+                  <div className="flex items-start gap-3">
+                    <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
+                      a.primary ? "bg-vermilion-500 text-white" : "bg-sun-100 text-vermilion-600"
+                    }`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-display text-xl text-brown-900">{a.title}</div>
+                      <p className="mt-1 text-sm leading-relaxed text-brown-800/65">{a.blurb}</p>
+                    </div>
+                  </div>
+                  <span className={`mt-4 inline-flex min-h-[44px] w-full items-center justify-center rounded-full px-4 text-sm font-semibold ${
+                    a.primary
+                      ? "bg-vermilion-500 text-white"
+                      : "border border-sun-400/40 bg-white text-brown-900"
+                  }`}>
+                    {a.cta}
+                  </span>
+                </>
+              );
+              const className = "flex h-full flex-col justify-between rounded-2xl border border-sun-400/30 bg-white p-4 shadow-sm transition hover:border-vermilion-500/35 sm:p-5";
+              if (a.to) {
+                return (
+                  <Link key={a.id} to={a.to} data-testid={a.testid} className={className}>
+                    {inner}
+                  </Link>
+                );
+              }
+              return (
+                <a key={a.id} href={a.href} data-testid={a.testid} className={className}>
+                  {inner}
+                </a>
+              );
+            })}
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-5xl px-4 py-10 sm:px-5">
+      <section id="interest" className="scroll-mt-24 mx-auto max-w-5xl px-4 pt-8 sm:px-5">
+        <div className="rounded-2xl border border-sky-300/40 bg-sky-50/70 px-4 py-3 text-sm text-brown-800/75 sm:px-5">
+          <span className="font-semibold text-brown-900">Gauge interest</span>
+          {" — "}select the meals your flat may join, then add your details under Food subscription below.
+          Prefer to shape the dishes first?{" "}
+          <Link to="/food-poll" className="font-semibold text-vermilion-600 underline-offset-2 hover:underline">
+            Open the menu poll
+          </Link>
+          .
+        </div>
+      </section>
+
+      <section id="subscribe" className="scroll-mt-24 mx-auto max-w-5xl px-4 py-8 sm:px-5 sm:py-10">
         {!menu ? (
           <Spinner className="text-vermilion-500" />
         ) : done ? (
@@ -132,7 +210,7 @@ export default function Food() {
             <div className="overflow-x-auto rounded-2xl border border-sun-400/30 bg-white shadow-card">
               <div className="flex items-center justify-between gap-3 border-b border-sun-400/20 px-4 py-3">
                 <div className="flex items-center gap-2 font-display text-xl text-brown-900">
-                  <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Meal plan
+                  <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Meal interest
                 </div>
                 <button
                   type="button"
@@ -192,7 +270,10 @@ export default function Food() {
             </div>
 
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
-              <h2 className="font-display text-2xl text-brown-900">Your details</h2>
+              <h2 className="font-display text-2xl text-brown-900">Food subscription details</h2>
+              <p className="mt-1 text-sm text-brown-800/60">
+                Same form for interest gauging and meal-plan registration — you will not be charged until payment opens.
+              </p>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label required>Name</Label>
@@ -251,7 +332,7 @@ export default function Food() {
                 disabled={busy}
                 data-testid="food-register-btn"
               >
-                {busy ? "Saving…" : "Register interest (no payment)"}
+                {busy ? "Saving…" : "Submit registration"}
               </Button>
               <p className="mt-3 text-xs text-brown-800/50">
                 Food coupons are issued and printed by EOC admins only. You will not be charged until payment is activated.

@@ -250,7 +250,7 @@ export default function FoodPoll() {
                 to="/food"
                 className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-sun-400/40 bg-white/80 px-4 py-2.5 text-sm font-semibold text-brown-800/80"
               >
-                <UtensilsCrossed className="h-4 w-4" /> Food subscription
+                <UtensilsCrossed className="h-4 w-4" /> Back to Food
               </Link>
               <div className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-vermilion-500/10 px-4 py-2.5 text-sm font-semibold text-vermilion-700">
                 <Vote className="h-4 w-4" /> {voterCount} vote{voterCount === 1 ? "" : "s"}

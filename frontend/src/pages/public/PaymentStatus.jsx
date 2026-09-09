@@ -14,19 +14,21 @@ function absoluteUrl(path, origin = "") {
 }
 
 async function shareFileOrWhatsApp({ file, title, text, fallbackUrl }) {
-  if (typeof navigator !== "undefined" && navigator.share) {
-    const payload = file ? { files: [file], title, text } : { title, text };
-    const can = !file || !navigator.canShare || navigator.canShare({ files: [file] });
-    if (can) {
-      await navigator.share(payload);
-      return file ? "shared-file" : "shared-text";
-    }
-    await navigator.share({ title, text: fallbackUrl ? `${text}\n${fallbackUrl}` : text });
-    return "shared-text";
+  if (!file) {
+    throw new Error("Nothing to share");
   }
-  const waText = fallbackUrl ? `${text}\n${fallbackUrl}` : text;
-  window.open(`https://wa.me/?text=${encodeURIComponent(waText)}`, "_blank", "noopener,noreferrer");
-  return "whatsapp-link";
+  if (typeof navigator !== "undefined" && navigator.share) {
+    const can = !navigator.canShare || navigator.canShare({ files: [file] });
+    if (!can) throw new Error("This device cannot share files to WhatsApp");
+    // File only — no caption text/links in the WhatsApp bubble
+    await navigator.share({ files: [file], title: title || file.name });
+    return "shared-file";
+  }
+  // Last resort: open the file so the user can share it manually from the viewer
+  const objectUrl = URL.createObjectURL(file);
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  return "opened-file";
 }
 
 async function sharePaymentScreenshot({ screenshotUrl, receiptNo }) {
@@ -37,48 +39,25 @@ async function sharePaymentScreenshot({ screenshotUrl, receiptNo }) {
   const type = blob.type || "image/jpeg";
   const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("pdf") ? "pdf" : "jpg";
   const file = new File([blob], `payment-screenshot-${receiptNo || "one10"}.${ext}`, { type });
-  const text = receiptNo
-    ? `One 10 payment screenshot (receipt ${receiptNo}). Sharing the UPI/bank payment screenshot — not the PDF receipt.`
-    : "One 10 payment screenshot (UPI/bank proof — not the PDF receipt).";
   return shareFileOrWhatsApp({
     file,
-    title: "Payment screenshot",
-    text,
-    fallbackUrl: url,
+    title: file.name,
   });
 }
 
-async function shareReceiptOnWhatsApp({ receiptNo, verifyToken, bankVerified }) {
+async function shareReceiptOnWhatsApp({ receiptNo, verifyToken }) {
+  if (!verifyToken) throw new Error("Receipt is not ready to share");
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const pdfUrl = verifyToken ? absoluteUrl(`${API}/receipt/pdf/${verifyToken}`, origin) : "";
-  const verifyUrl = verifyToken ? absoluteUrl(`/receipt/verify/${verifyToken}`, origin) : "";
-  const text = [
-    `One 10 Durgotsav receipt ${receiptNo || ""}`.trim(),
-    bankVerified ? "Verified via Cashfree payment gateway." : "Payment recorded by the committee.",
-    verifyUrl ? `Verify: ${verifyUrl}` : "",
-    pdfUrl ? `Download PDF: ${pdfUrl}` : "",
-  ].filter(Boolean).join("\n");
-
-  let file = null;
-  if (pdfUrl) {
-    try {
-      const res = await fetch(pdfUrl, { credentials: "same-origin" });
-      if (res.ok) {
-        const blob = await res.blob();
-        file = new File([blob], `${receiptNo || "one10-receipt"}.pdf`, {
-          type: blob.type || "application/pdf",
-        });
-      }
-    } catch {
-      // text/link fallback below
-    }
-  }
-
+  const pdfUrl = absoluteUrl(`${API}/receipt/pdf/${verifyToken}`, origin);
+  const res = await fetch(pdfUrl, { credentials: "same-origin" });
+  if (!res.ok) throw new Error("Could not load receipt PDF");
+  const blob = await res.blob();
+  const file = new File([blob], `${receiptNo || "one10-receipt"}.pdf`, {
+    type: blob.type || "application/pdf",
+  });
   return shareFileOrWhatsApp({
     file,
-    title: `Receipt ${receiptNo || ""}`.trim(),
-    text,
-    fallbackUrl: pdfUrl || verifyUrl,
+    title: file.name,
   });
 }
 
@@ -213,18 +192,14 @@ export default function PaymentStatus() {
           screenshotUrl: shotPath,
           receiptNo: data.receipt_no,
         });
-        if (mode === "whatsapp-link") {
-          toast.message("Opened WhatsApp — pick a chat or group. Attach the screenshot if needed.");
-        }
       } else {
         mode = await shareReceiptOnWhatsApp({
           receiptNo: data.receipt_no,
           verifyToken: data.verify_token,
-          bankVerified: data.bank_verified === true,
         });
-        if (mode === "whatsapp-link") {
-          toast.message("Opened WhatsApp — pick a chat or group to send the receipt.");
-        }
+      }
+      if (mode === "opened-file") {
+        toast.message("File opened — use Share from there to send on WhatsApp.");
       }
     } catch (e) {
       if (e?.name !== "AbortError") {
@@ -295,8 +270,8 @@ export default function PaymentStatus() {
               {canShareWhatsApp && (
                 <p className="mt-3 text-xs leading-relaxed text-brown-800/55">
                   {hasScreenshot
-                    ? <>Shares your <b>payment screenshot</b> (not the PDF). Pick any WhatsApp chat or group.</>
-                    : <>Opens WhatsApp so you can pick any chat or group and share this receipt confirmation.</>}
+                    ? <>Shares only your <b>payment screenshot</b> file. Pick any WhatsApp chat or group.</>
+                    : <>Shares only the receipt <b>PDF</b> file — no extra text or links. Pick any WhatsApp chat or group.</>}
                 </p>
               )}
             </>

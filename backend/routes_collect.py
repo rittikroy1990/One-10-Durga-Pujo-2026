@@ -379,6 +379,31 @@ async def payment_status(token: str):
 
 
 # --------------------------------------------------------------- UPI QR + screenshot proof
+def _merchant_intent_url(upi: dict, amount_rupees: str) -> str:
+    """Build a tap-to-open UPI intent from the uploaded merchant QR.
+
+    Camera-scan works because the image carries merchant params (mc/tr). A
+    simplified upi://pay?pa=...&pn=...&am=... link often fails for EazyPay.
+    Prefer the exact decoded merchant URI and only add amount when missing.
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, unquote
+
+    raw = (upi.get("merchant_upi_uri") or "").strip()
+    if not raw.lower().startswith("upi://"):
+        return ""
+    parts = urlsplit(raw)
+    q = dict(parse_qsl(parts.query, keep_blank_values=True))
+    # Keep merchant identity fields intact; fill amount for one-tap convenience.
+    if amount_rupees and not (q.get("am") or "").strip():
+        q["am"] = amount_rupees
+    # Ensure cu is present for UPI apps.
+    if not (q.get("cu") or "").strip():
+        q["cu"] = "INR"
+    # Re-encode without altering pa/pn/tr/mc values beyond standard query encoding.
+    query = urlencode([(k, unquote(str(v))) for k, v in q.items()], doseq=False)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
 def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
     org = settings.get("organisation") or {}
     upi = org.get("upi") or {}
@@ -386,21 +411,24 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
     payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "EOC One10"
     vpa = (upi.get("vpa") or "").strip()
     amount_rupees = f"{amount_paise / 100:.2f}"
-    # When a merchant QR was uploaded (qr_locked), never synthesize a simplified
-    # upi:// string — banks may reject it, and the static image is authoritative.
+    merchant_uri = (upi.get("merchant_upi_uri") or "").strip()
+    # When a merchant QR was uploaded (qr_locked / merchant URI), never synthesize a
+    # simplified upi:// string — banks may reject it. Use the merchant URI for tap.
     qr_data = ""
-    if vpa and not upi.get("qr_locked"):
+    if vpa and not upi.get("qr_locked") and not merchant_uri:
         from urllib.parse import quote
         qr_data = (
             f"upi://pay?pa={quote(vpa)}&pn={quote(payee)}&am={amount_rupees}"
             f"&cu=INR&tn={quote(note or 'One10 subscription')}"
         )
+    intent_url = _merchant_intent_url(upi, amount_rupees) or qr_data
     return {
         "vpa": vpa,
         "payee_name": payee,
         "amount_paise": amount_paise,
         "amount_rupees": amount_rupees,
         "qr_data": qr_data,
+        "upi_intent_url": intent_url,
         "static_qr_url": upi.get("static_qr_url") or "/images/payment-qr.png",
         "instructions": upi.get("instructions") or "",
         "bank_account": {

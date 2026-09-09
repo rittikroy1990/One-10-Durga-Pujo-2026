@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, Copy, QrCode,
+  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, ExternalLink,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -56,7 +56,6 @@ export default function Subscribe() {
   const base = cfg?.subscription?.base_amount_paise || 350000;
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const total = base + donationPaise;
-  const bank = upiSession?.payment?.bank_account || cfg?.payment?.bank_account || cfg?.organisation?.bank_account;
   const pay = upiSession?.payment;
 
   const toggleInterest = (v) =>
@@ -64,13 +63,14 @@ export default function Subscribe() {
 
   const validStep1 = form.primary_contact_name && /^[6-9]\d{9}$/.test(form.mobile) && form.tower_id && form.flat_id;
 
-  const copyText = async (text, label) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(`${label} copied`);
-    } catch {
-      toast.error("Could not copy");
+  const openUpiApp = () => {
+    const url = (pay?.upi_intent_url || "").trim();
+    if (!url) {
+      toast.error("Open GPay / PhonePe and scan the QR on this page.");
+      return;
     }
+    // Merchant UPI deep link — must keep mc/tr from the uploaded QR (not a simplified VPA link).
+    window.location.href = url;
   };
 
   const submit = async () => {
@@ -137,7 +137,7 @@ export default function Subscribe() {
         <h1 className="font-display text-5xl text-ivory-100">Subscribe & Pay</h1>
         <p className="mt-2 text-ivory-100/70">
           {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
-          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Pay via QR / bank transfer, then upload your screenshot.
+          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Pay via UPI QR, then upload your screenshot.
         </p>
 
         <div className="mt-6 flex items-center gap-2 text-xs">
@@ -251,7 +251,7 @@ export default function Subscribe() {
           {step === 3 && upiSession && (
             <div className="space-y-5" data-testid="upi-pay-step">
               <div className="text-center">
-                <div className="font-display text-3xl">Pay via QR / bank transfer</div>
+                <div className="font-display text-3xl">Pay via UPI QR</div>
                 <div className="mt-1 text-brown-800/70">
                   Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
@@ -260,47 +260,61 @@ export default function Subscribe() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="flex flex-col items-center rounded-xl border border-gold-500/30 bg-white p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan & pay
+                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or tap to pay
                   </div>
-                  <img
-                    src={staticQr}
-                    alt="Committee UPI payment QR"
-                    className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
-                    data-testid="payment-qr-img"
-                  />
+                  {pay?.upi_intent_url ? (
+                    <a
+                      href={pay.upi_intent_url}
+                      data-testid="payment-qr-link"
+                      className="block"
+                      aria-label="Open UPI payment in your app"
+                    >
+                      <img
+                        src={staticQr}
+                        alt="Committee UPI payment QR — tap to open UPI app"
+                        className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
+                        data-testid="payment-qr-img"
+                      />
+                    </a>
+                  ) : (
+                    <img
+                      src={staticQr}
+                      alt="Committee UPI payment QR"
+                      className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
+                      data-testid="payment-qr-img"
+                    />
+                  )}
                   <p className="mt-2 text-center text-xs text-brown-800/55">
-                    Pay the <b>exact</b> amount (₹3,500 for subscription), then upload your screenshot below.
+                    On phone: <b>tap the QR</b> to open GPay / PhonePe. Or open your UPI app and scan it.
                   </p>
+                  {pay?.upi_intent_url && (
+                    <Button
+                      type="button"
+                      variant="admin"
+                      className="mt-3 w-full"
+                      data-testid="open-upi-app-btn"
+                      onClick={openUpiApp}
+                    >
+                      <ExternalLink className="h-4 w-4" /> Open in UPI app
+                    </Button>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-gold-500/30 bg-white p-4 text-sm">
-                  <div className="font-semibold text-brown-900">Bank details</div>
-                  <div className="mt-3 space-y-2 text-brown-800/80">
-                    <div className="flex items-start justify-between gap-2">
-                      <span><span className="text-brown-800/50">Name</span><br />{bank?.account_name}</span>
+                  <div className="font-semibold text-brown-900">How to pay</div>
+                  <div className="mt-3 space-y-3 text-brown-800/80">
+                    <div>
+                      <span className="text-brown-800/50">Payee</span>
+                      <br />
+                      {pay?.payee_name || "ONE 10 EVENT ORGANISING COMMITTEE"}
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span><span className="text-brown-800/50">A/C</span><br />{bank?.account_number}</span>
-                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.account_number || "", "Account number")} aria-label="Copy account">
-                        <Copy className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span><span className="text-brown-800/50">IFSC</span><br />{bank?.ifsc}</span>
-                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.ifsc || "", "IFSC")} aria-label="Copy IFSC">
-                        <Copy className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div><span className="text-brown-800/50">Bank</span><br />{bank?.bank}</div>
-                    {pay?.vpa && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span><span className="text-brown-800/50">UPI</span><br />{pay.vpa}</span>
-                        <button type="button" className="text-vermilion-600" onClick={() => copyText(pay.vpa, "UPI ID")} aria-label="Copy UPI">
-                          <Copy className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
-                    {pay?.payee_name && <div><span className="text-brown-800/50">Payee</span><br />{pay.payee_name}</div>}
+                    <p className="text-sm text-brown-800/70">
+                      Prefer <b>scanning with the UPI app camera</b> if tap-to-open fails on your phone.
+                      Do not type a UPI ID manually.
+                    </p>
+                    <p className="text-xs text-brown-800/55">
+                      Pay the exact amount shown above, then upload the screenshot + UTR below.
+                    </p>
                   </div>
                 </div>
               </div>

@@ -582,14 +582,18 @@ async def ensure_settings():
 
         for key, value in ORGANISATION_DEFAULTS.items():
             cur = org.get(key)
-            if key in ("contact_email", "contact_phone", "logo_url", "hero_url", "bank_account", "pan", "date_of_formation"):
+            if key in ("contact_email", "contact_phone", "logo_url", "hero_url", "bank_account", "upi", "pan", "date_of_formation"):
                 # Fill placeholders / missing MoA+proposal fields; keep non-placeholder custom contacts.
+                # Never replace a stored UPI / bank block wholesale — uploads add merchant_upi_uri, qr_locked, etc.
                 if key in ("logo_url", "hero_url"):
                     if not cur:
                         org_patch[key] = value
                 elif key == "bank_account":
                     if not cur or not (cur or {}).get("account_number"):
                         org_patch[key] = value
+                elif key == "upi":
+                    # Handled below with merge-only logic (preserve merchant QR fields).
+                    continue
                 elif _is_placeholder(cur) or key in ("pan", "date_of_formation"):
                     org_patch[key] = value
             elif key == "office_bearers":
@@ -620,6 +624,20 @@ async def ensure_settings():
                 upi["vpa"] = upi_def["vpa"]
                 upi["payee_name"] = upi_def.get("payee_name") or upi.get("payee_name")
                 upi_changed = True
+            # Persist merchant URI decoded from the uploaded QR when missing
+            if not (upi.get("merchant_upi_uri") or "").strip():
+                # Default ICICI EazyPay merchant payload matching the flyer / uploaded QR image
+                default_merchant = (
+                    "upi://pay?pa=8217011245.eazypay@icici"
+                    "&pn=M/S.ONE 10 EVENT ORGANISING COMMITEE "
+                    "&tr=EZYS8217011245&cu=INR&mc=8641"
+                )
+                if (upi.get("vpa") or "").strip() == "8217011245.eazypay@icici":
+                    upi["merchant_upi_uri"] = default_merchant
+                    upi["qr_locked"] = True if upi.get("qr_locked") is None else upi.get("qr_locked")
+                    if not (upi.get("payee_name") or "").strip() or upi.get("payee_name") == upi_def.get("payee_name"):
+                        upi["payee_name"] = "M/S.ONE 10 EVENT ORGANISING COMMITEE"
+                    upi_changed = True
         if upi_changed:
             org["upi"] = upi
             patch["organisation"] = org

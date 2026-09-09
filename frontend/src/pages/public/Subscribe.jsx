@@ -7,8 +7,10 @@ import {
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import CashfreePayPanel from "../../components/CashfreePayPanel";
 import { Button, Label, Input, Select } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
+import { cashfreeOnlinePaymentsAvailable } from "../../lib/cashfree";
 
 const OCCUPANCY = [
   { v: "owner_resident", l: "Owner — Resident" },
@@ -139,6 +141,7 @@ export default function Subscribe() {
   };
 
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
+  const cashfreeOn = cashfreeOnlinePaymentsAvailable(cfg?.payment);
 
   return (
     <PublicLayout>
@@ -146,7 +149,10 @@ export default function Subscribe() {
         <h1 className="font-display text-5xl text-ivory-100">Subscribe & Pay</h1>
         <p className="mt-2 text-ivory-100/70">
           {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
-          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Pay via UPI QR, then upload your screenshot.
+          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}.
+          {cashfreeOn
+            ? " Pay online with Cashfree, or use UPI QR / bank transfer."
+            : " Pay via UPI QR, then upload your screenshot."}
         </p>
 
         <div className="mt-6 flex items-center gap-2 text-xs">
@@ -260,10 +266,20 @@ export default function Subscribe() {
           {step === 3 && upiSession && (
             <div className="space-y-5" data-testid="upi-pay-step">
               <div className="text-center">
-                <div className="font-display text-3xl">Pay via UPI / bank</div>
+                <div className="font-display text-3xl">Pay for your subscription</div>
                 <div className="mt-1 text-brown-800/70">
                   Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
+              </div>
+
+              <CashfreePayPanel
+                intentId={intent?.intent_id}
+                cfg={cfg}
+                amountLabel={formatPaise(upiSession.total_amount)}
+              />
+
+              <div className="text-center text-xs font-semibold uppercase tracking-[0.2em] text-brown-800/45">
+                Or pay via UPI / bank
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">

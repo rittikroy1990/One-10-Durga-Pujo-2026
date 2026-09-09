@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import api from "../lib/api";
 import { Button, Label, Input, Select } from "./ui";
+import CashfreePayPanel from "./CashfreePayPanel";
 import { formatPaise } from "../lib/utils";
 
 const OCCUPANCY = [
@@ -344,6 +345,16 @@ export default function DonationFlow({ className = "" }) {
                 <div className="mt-1 text-brown-800/70">
                   Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
+              </div>
+
+              <CashfreePayPanel
+                intentId={intent?.intent_id}
+                cfg={cfg}
+                amountLabel={formatPaise(upiSession.total_amount)}
+              />
+
+              <div className="text-center text-xs font-semibold uppercase tracking-[0.2em] text-brown-800/45">
+                Or pay via UPI / bank
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">

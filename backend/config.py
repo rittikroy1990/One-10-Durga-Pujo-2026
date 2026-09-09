@@ -778,10 +778,14 @@ async def ensure_settings():
                     "name": e["name"],
                     "cost_centre": e["cost_centre"],
                     "dates": e.get("dates") or "TBC",
-                    "cycle_id": CYCLE_2026,
                 },
             },
             upsert=True,
+        )
+        # Ensure cycle_id exists on older rows without conflicting with $setOnInsert above.
+        await db.events.update_one(
+            {"id": e["id"], "cycle_id": {"$exists": False}},
+            {"$set": {"cycle_id": CYCLE_2026}},
         )
 
     # Keep active Durgotsav campaign programme dates in sync with Thakurmasai calendar.

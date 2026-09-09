@@ -48,7 +48,7 @@ export default function FoodPoll() {
   const [diet, setDiet] = useState("pure_veg");
   const [form, setForm] = useState({ name: "", mobile: "", notes: "" });
   const [picks, setPicks] = useState({});
-  const [addCat, setAddCat] = useState({});
+  const [addDish, setAddDish] = useState({});
   const [showResults, setShowResults] = useState(false);
 
   const load = async () => {
@@ -115,10 +115,11 @@ export default function FoodPoll() {
   };
 
   const addFromDropdown = (dCode, mCode) => {
-    const dishId = addCat[`${dCode}|${mCode}|dish`];
+    const key = `${dCode}|${mCode}`;
+    const dishId = addDish[key];
     if (!dishId) return toast.error("Pick a dish from the list");
     toggleDish(dCode, mCode, dishId);
-    setAddCat((p) => ({ ...p, [`${dCode}|${mCode}|dish`]: "" }));
+    setAddDish((p) => ({ ...p, [key]: "" }));
   };
 
   const selectionCount = useMemo(() => {
@@ -187,7 +188,9 @@ export default function FoodPoll() {
               {shortDay(d.day_label)}
             </div>
             <div className="mt-1 space-y-2">
-              {(d.meals || []).map((m) => (
+              {(d.meals || [])
+                .filter((m) => ["breakfast", "lunch", "dinner"].includes(m.meal_code))
+                .map((m) => (
                 <div key={m.meal_code} className="rounded-lg bg-white/80 px-2.5 py-2">
                   <div className="text-sm font-semibold text-brown-900">{m.meal_label}</div>
                   <ul className="mt-1 space-y-0.5 text-xs text-brown-800/70">
@@ -322,15 +325,16 @@ export default function FoodPoll() {
                     )}
                   </div>
 
-                  {(day.meals || []).map((meal) => {
+                  {(day.meals || [])
+                    .filter((m) => ["breakfast", "lunch", "dinner"].includes(m.code))
+                    .map((meal) => {
                     const selected = picks[day.code]?.[meal.code] || new Set();
                     const suggested = meal.streams?.[streamKey]?.suggested || [];
-                    const catKey = `${day.code}|${meal.code}|cat`;
-                    const dishKey = `${day.code}|${meal.code}|dish`;
-                    const cat = addCat[catKey] || "";
-                    const dishOptions = (data.dishes || []).filter(
-                      (d) => allowedDish(d) && (!cat || d.category === cat),
-                    );
+                    const dishKey = `${day.code}|${meal.code}`;
+                    const dishOptions = (data.dishes || [])
+                      .filter(allowedDish)
+                      .slice()
+                      .sort((a, b) => a.name.localeCompare(b.name));
                     const mealScores = (data.dishes || [])
                       .map((d) => ({
                         ...d,
@@ -386,17 +390,8 @@ export default function FoodPoll() {
                         </p>
                         <div className="mt-2 grid gap-2">
                           <Select
-                            value={cat}
-                            onChange={(e) => setAddCat((p) => ({ ...p, [catKey]: e.target.value, [dishKey]: "" }))}
-                          >
-                            <option value="">All categories</option>
-                            {(data.categories || []).map((c) => (
-                              <option key={c.code} value={c.code}>{c.label}</option>
-                            ))}
-                          </Select>
-                          <Select
-                            value={addCat[dishKey] || ""}
-                            onChange={(e) => setAddCat((p) => ({ ...p, [dishKey]: e.target.value }))}
+                            value={addDish[dishKey] || ""}
+                            onChange={(e) => setAddDish((p) => ({ ...p, [dishKey]: e.target.value }))}
                             data-testid={`poll-add-dish-${meal.code}`}
                           >
                             <option value="">Choose a dish…</option>

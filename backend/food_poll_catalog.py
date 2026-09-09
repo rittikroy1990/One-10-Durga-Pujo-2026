@@ -17,7 +17,6 @@ POLL_META = {
     "timings": {
         "breakfast": "9:00 AM – 11:00 AM",
         "lunch": "1:00 PM – 3:00 PM",
-        "evening": "5:30 PM – 7:00 PM",
         "dinner": "8:30 PM – 11:00 PM",
     },
     "max_dishes_per_meal": 8,
@@ -36,8 +35,7 @@ DAYS = [
 MEALS = [
     {"code": "breakfast", "label": "Breakfast", "order": 1, "icon": "sunrise"},
     {"code": "lunch", "label": "Lunch", "order": 2, "icon": "sun"},
-    {"code": "evening", "label": "Evening snacks", "order": 3, "icon": "cloud-sun"},
-    {"code": "dinner", "label": "Dinner", "order": 4, "icon": "moon"},
+    {"code": "dinner", "label": "Dinner", "order": 3, "icon": "moon"},
 ]
 
 DIETS = [
@@ -342,11 +340,6 @@ PDF_SUGGESTIONS = {
     ("dashami", "dinner", "non_veg"): _s("peas_polau", "egg_devil", "paneer_pasinda", "salad", "chicken_korma", "gobi_masala", "sweet_generic"),
 }
 
-# Sensible evening defaults (not heavily in PDF) — same for both streams
-for day in ("sasthi", "saptami", "ashtami", "nabami", "dashami"):
-    PDF_SUGGESTIONS[(day, "evening", "pure_veg")] = _s("phuchka", "tea_biscuits", "jhalmuri")
-    PDF_SUGGESTIONS[(day, "evening", "non_veg")] = _s("phuchka", "roll_egg", "tea_biscuits")
-
 
 def build_catalog() -> dict:
     dish_by_id = {d["id"]: d for d in DISHES}
@@ -364,17 +357,10 @@ def build_catalog() -> dict:
             meals_out.append({**meal, "timing": POLL_META["timings"].get(meal["code"]), "streams": streams})
         days_out.append({**day, "meals": meals_out})
 
-    # Filter helpers for UI dropdowns
-    by_category = {}
-    for d in DISHES:
-        by_category.setdefault(d["category"], []).append(d)
-
     return {
         "meta": POLL_META,
         "days": days_out,
         "meals": MEALS,
         "diets": DIETS,
-        "categories": CATEGORIES,
         "dishes": DISHES,
-        "dishes_by_category": by_category,
     }

@@ -8,11 +8,13 @@ from util import iso
 from audit import audit, next_formatted
 from auth import require
 from docs import food_coupon_pdf
-from food_poll_catalog import build_catalog, DISHES, POLL_META
+from food_poll_catalog import build_catalog, DISHES, POLL_META, MEALS, DAYS
 
 router = APIRouter(prefix="/api")
 
 _DISH_IDS = {d["id"] for d in DISHES}
+_DAY_CODES = {d["code"] for d in DAYS}
+_MEAL_CODES = {m["code"] for m in MEALS}
 _MAX_PER_MEAL = int(POLL_META.get("max_dishes_per_meal") or 8)
 
 
@@ -329,7 +331,7 @@ async def food_poll_vote(body: dict = Body(...), request: Request = None):
     for raw in picks_in:
         day = (raw.get("day_code") or "").strip()
         meal = (raw.get("meal_code") or "").strip()
-        if not day or not meal:
+        if day not in _DAY_CODES or meal not in _MEAL_CODES:
             continue
         slot = f"{day}|{meal}"
         if slot in seen_slots:

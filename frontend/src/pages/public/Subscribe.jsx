@@ -146,8 +146,8 @@ export default function Subscribe() {
   return (
     <PublicLayout>
       <div className="mx-auto max-w-3xl px-5 py-12">
-        <h1 className="font-display text-5xl text-ivory-100">Subscribe & Pay</h1>
-        <p className="mt-2 text-ivory-100/70">
+        <h1 className="font-display text-5xl text-brown-900">Subscribe & Pay</h1>
+        <p className="mt-2 text-brown-800/70">
           {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
           {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}.
           {cashfreeOn
@@ -157,14 +157,14 @@ export default function Subscribe() {
 
         <div className="mt-6 flex items-center gap-2 text-xs">
           {["Household", "Confirm", "Pay"].map((s, i) => (
-            <div key={s} className={`flex items-center gap-2 ${step >= i + 1 ? "text-gold-400" : "text-ivory-100/40"}`}>
-              <span className={`grid h-6 w-6 place-items-center rounded-full border ${step >= i + 1 ? "border-gold-400 bg-gold-500/20" : "border-ivory-100/30"}`}>{i + 1}</span>
-              {s}{i < 2 && <span className="mx-1 h-px w-8 bg-ivory-100/20" />}
+            <div key={s} className={`flex items-center gap-2 ${step >= i + 1 ? "text-vermilion-600" : "text-brown-800/35"}`}>
+              <span className={`grid h-6 w-6 place-items-center rounded-full border ${step >= i + 1 ? "border-vermilion-500 bg-vermilion-500/10" : "border-brown-800/20"}`}>{i + 1}</span>
+              {s}{i < 2 && <span className="mx-1 h-px w-6 bg-brown-800/15" />}
             </div>
           ))}
         </div>
 
-        <motion.div key={step} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mt-8 rounded-2xl border border-gold-500/25 bg-ivory-200 p-6 text-brown-900">
+        <motion.div key={step} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mt-8 rounded-2xl border border-sun-400/30 bg-white p-6 text-brown-900">
           {step === 1 && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="sm:col-span-2">

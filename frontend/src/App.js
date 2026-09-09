@@ -17,6 +17,7 @@ import Participate from "./pages/public/Participate";
 import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
+import Faq from "./pages/public/Faq";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 
 import Login from "./pages/admin/Login";
@@ -47,6 +48,7 @@ function AppRoutes() {
       <Route path="/nirghanto" element={<Nirghanto />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
+      <Route path="/faq" element={<Faq />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />

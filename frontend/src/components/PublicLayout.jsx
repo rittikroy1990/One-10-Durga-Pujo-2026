@@ -110,6 +110,7 @@ export function PublicFooter() {
           <ul className="space-y-1.5 text-sm">
             <li><Link to="/privacy" className="hover:text-ivory-100">Privacy Policy</Link></li>
             <li><Link to="/terms" className="hover:text-ivory-100">Terms</Link></li>
+            <li><Link to="/refunds" className="hover:text-ivory-100">Refunds</Link></li>
             <li><Link to="/contact" className="hover:text-ivory-100">Contact Committee</Link></li>
           </ul>
         </div>

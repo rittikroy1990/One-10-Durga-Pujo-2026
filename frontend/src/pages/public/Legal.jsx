@@ -33,9 +33,21 @@ export default function Legal({ type }) {
           ? `The current ${camp.title} per-family subscription is ${formatBreakup(sub)}.`
           : "Campaign subscription amounts are shown on the Subscribe page for the active campaign.",
         "Additional voluntary donations are recorded separately from the base subscription. No surplus is distributed to members as profit.",
-        "Online payments are processed via UPI QR / bank transfer as shown on the Subscribe page. A receipt is issued only after the payment is verified — a browser success screen or screenshot is not proof of settlement.",
+        "Online payments may be processed via Cashfree Payment Gateway, UPI QR, or bank transfer as shown on the Subscribe / Donate pages. A receipt is issued only after the payment is verified — a browser success screen or screenshot is not proof of settlement.",
         "Significant expenditure requires advance approval by designated office bearers. Bank operations follow the Committee’s joint-signature mandate.",
+        "Refunds and cancellations follow the Refunds & Cancellations policy published on this portal.",
       ].filter(Boolean),
+    },
+    refunds: {
+      title: "Refunds & Cancellations",
+      body: [
+        `Payments to ${organiser} are voluntary contributions toward community festivals and related committee activities.`,
+        "Household subscription and donation payments are generally non-refundable once a verified receipt has been issued, because funds are committed to festival procurement and operations.",
+        "If a payment was duplicated, made in error, or not credited to the correct household, write to the Committee with your receipt number / UTR within 7 days of payment. Eligible cases may be corrected by transfer to the right account, credit note, or refund after convenor approval.",
+        "Online gateway payments (including Cashfree) that fail or are cancelled before success are not charged; incomplete checkouts do not create a receipt.",
+        "Approved refunds are processed to the original payment method or the committee bank channel used, typically within 7–14 working days after approval.",
+        `For refund queries contact ${organiser} via the Contact page on this website, quoting your receipt number and mobile.`,
+      ],
     },
     contact: {
       title: "Contact the Committee",

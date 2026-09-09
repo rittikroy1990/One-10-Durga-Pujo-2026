@@ -1,9 +1,45 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2, Share2 } from "lucide-react";
 import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
+
+async function sharePaymentScreenshot({ screenshotUrl, receiptNo, absoluteApiBase }) {
+  const url = screenshotUrl.startsWith("http")
+    ? screenshotUrl
+    : `${(absoluteApiBase || "").replace(/\/$/, "")}${screenshotUrl.startsWith("/") ? "" : "/"}${screenshotUrl}`;
+
+  const res = await fetch(url, { credentials: "same-origin" });
+  if (!res.ok) throw new Error("Could not load payment screenshot");
+  const blob = await res.blob();
+  const type = blob.type || "image/jpeg";
+  const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : type.includes("pdf") ? "pdf" : "jpg";
+  const file = new File([blob], `payment-screenshot-${receiptNo || "one10"}.${ext}`, { type });
+
+  const shareData = {
+    files: [file],
+    title: "Payment screenshot",
+    text: receiptNo
+      ? `One 10 payment screenshot (receipt ${receiptNo}). Sharing the UPI/bank payment screenshot — not the PDF receipt.`
+      : "One 10 payment screenshot (UPI/bank proof — not the PDF receipt).",
+  };
+
+  if (typeof navigator !== "undefined" && navigator.share) {
+    const canFiles = !navigator.canShare || navigator.canShare({ files: [file] });
+    if (canFiles) {
+      await navigator.share(shareData);
+      return "shared";
+    }
+    await navigator.share({ title: shareData.title, text: `${shareData.text}\n${url}` });
+    return "shared-text";
+  }
+
+  const wa = `https://wa.me/?text=${encodeURIComponent(`${shareData.text}\n${url}`)}`;
+  window.open(wa, "_blank", "noopener,noreferrer");
+  return "whatsapp-link";
+}
 
 export default function PaymentStatus() {
   const [params] = useSearchParams();
@@ -11,6 +47,7 @@ export default function PaymentStatus() {
   const cashfreeOrderId = params.get("cashfree_order_id");
   const [data, setData] = useState(null);
   const [tries, setTries] = useState(0);
+  const [sharing, setSharing] = useState(false);
   const timer = useRef();
   const verifiedRef = useRef(false);
 
@@ -30,6 +67,8 @@ export default function PaymentStatus() {
             message: "Cashfree payment recorded and receipt issued.",
             bank_verified: true,
             do_not_pay_again: true,
+            has_payment_screenshot: false,
+            screenshot_url: null,
           });
           return;
         }
@@ -52,8 +91,13 @@ export default function PaymentStatus() {
       try {
         const r = await api.get(`/payments/status/${token}`);
         setData((prev) => {
-          // Prefer already-confirmed paid from Cashfree verify.
-          if (prev?.status === "paid" && r.data.status !== "paid") return prev;
+          if (prev?.status === "paid" && r.data.status !== "paid") {
+            return {
+              ...prev,
+              has_payment_screenshot: r.data.has_payment_screenshot ?? prev.has_payment_screenshot,
+              screenshot_url: r.data.screenshot_url || prev.screenshot_url,
+            };
+          }
           return r.data;
         });
         const done = ["paid", "needs_review", "error", "reconciliation_required"].includes(r.data.status);
@@ -72,6 +116,31 @@ export default function PaymentStatus() {
   const paid = data?.status === "paid";
   const recon = data?.status === "reconciliation_required" || data?.status === "needs_review";
   const processing = data?.status === "processing";
+  const canShareShot = Boolean(paid && (data?.screenshot_url || data?.has_payment_screenshot) && token);
+
+  const onShareWhatsApp = async () => {
+    if (!token) return toast.error("Missing payment session.");
+    setSharing(true);
+    try {
+      const shotPath = data.screenshot_url || `/api/payments/status/${encodeURIComponent(token)}/screenshot`;
+      const mode = await sharePaymentScreenshot({
+        screenshotUrl: shotPath,
+        receiptNo: data.receipt_no,
+        absoluteApiBase: typeof window !== "undefined" ? window.location.origin : "",
+      });
+      if (mode === "whatsapp-link") {
+        toast.message("Opened WhatsApp — the screenshot link is in the message. Attach the image if needed.");
+      }
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        // user cancelled share sheet
+      } else {
+        toast.error(e?.message || "Could not share payment screenshot.");
+      }
+    } finally {
+      setSharing(false);
+    }
+  };
 
   return (
     <PublicLayout>
@@ -93,11 +162,30 @@ export default function PaymentStatus() {
                   Verified via Cashfree payment gateway.
                 </p>
               )}
-              <div className="mt-6 flex flex-wrap justify-center gap-3">
-                <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">
-                  <Button variant="primary" data-testid="download-receipt-btn"><FileText className="h-4 w-4" /> Download receipt</Button>
+              <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer" className="sm:inline-flex">
+                  <Button variant="primary" className="w-full sm:w-auto" data-testid="download-receipt-btn">
+                    <FileText className="h-4 w-4" /> Download receipt
+                  </Button>
                 </a>
+                {canShareShot && (
+                  <Button
+                    variant="subtle"
+                    className="w-full sm:w-auto"
+                    data-testid="share-screenshot-whatsapp-btn"
+                    onClick={onShareWhatsApp}
+                    disabled={sharing}
+                  >
+                    {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                    {sharing ? "Opening share…" : "Share screenshot on WhatsApp"}
+                  </Button>
+                )}
               </div>
+              {canShareShot && (
+                <p className="mt-3 text-xs leading-relaxed text-brown-800/55">
+                  Shares your <b>payment screenshot</b> (not the PDF receipt). Pick any WhatsApp chat or group in the share sheet.
+                </p>
+              )}
             </>
           )}
           {processing && (

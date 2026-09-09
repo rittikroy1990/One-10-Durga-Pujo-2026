@@ -3,6 +3,9 @@ and manual (cash/bank-transfer/cheque) maker-checker modes."""
 from fastapi import APIRouter, Depends, Request, HTTPException, Body, Response
 from pydantic import BaseModel, Field
 from typing import Optional
+from pathlib import Path
+import mimetypes
+import re
 
 import json
 
@@ -22,6 +25,53 @@ from notify import notify
 router = APIRouter(prefix="/api")
 
 OCCUPANCY = {"owner_resident", "tenant_resident", "owner_non_resident", "other"}
+
+_PROOF_DIR = Path(__file__).resolve().parent.parent / "frontend" / "public" / "uploads" / "payment-proofs"
+
+
+def _safe_ext(filename: str, content_type: str) -> str:
+    name = (filename or "").rsplit(".", 1)
+    ext = name[-1].lower() if len(name) > 1 else ""
+    if ext in {"jpg", "jpeg", "png", "webp", "gif", "pdf"}:
+        return "jpg" if ext == "jpeg" else ext
+    guess = mimetypes.guess_extension(content_type or "") or ".jpg"
+    return guess.lstrip(".").lower() or "jpg"
+
+
+def _save_local_payment_proof(sub_id: str, data: bytes, filename: str, content_type: str) -> dict:
+    """Always keep a local copy so residents can share the screenshot on WhatsApp."""
+    _PROOF_DIR.mkdir(parents=True, exist_ok=True)
+    ext = _safe_ext(filename, content_type)
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", sub_id) or "proof"
+    path = _PROOF_DIR / f"{safe_id}.{ext}"
+    path.write_bytes(data)
+    rel = f"/uploads/payment-proofs/{path.name}"
+    return {
+        "proof_local_path": str(path),
+        "proof_public_url": rel,
+        "proof_content_type": content_type or mimetypes.guess_type(path.name)[0] or "image/jpeg",
+        "proof_filename": filename or path.name,
+    }
+
+
+async def _screenshot_meta_for_intent(intent_id: str) -> dict | None:
+    submission = await db.upi_submissions.find_one(
+        {"intent_id": intent_id},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    if not submission:
+        return None
+    if submission.get("proof_public_url") or submission.get("proof_local_path") or submission.get("proof_doc_id"):
+        return {
+            "submission_id": submission.get("id"),
+            "proof_doc_id": submission.get("proof_doc_id"),
+            "proof_public_url": submission.get("proof_public_url"),
+            "proof_local_path": submission.get("proof_local_path"),
+            "proof_content_type": submission.get("proof_content_type") or "image/jpeg",
+            "proof_filename": submission.get("proof_filename") or "payment-screenshot.jpg",
+        }
+    return None
 
 
 class SubscribeIn(BaseModel):
@@ -809,6 +859,7 @@ async def payment_status(token: str):
     else:
         status = intent["status"]
         message = "Awaiting payment screenshot."
+    shot = await _screenshot_meta_for_intent(intent_id) if status in ("paid", "needs_review", "processing") else None
     return {
         "status": status,
         "intent_status": intent["status"],
@@ -823,7 +874,70 @@ async def payment_status(token: str):
         "submission_status": submission.get("status") if submission else None,
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,
+        "has_payment_screenshot": bool(shot),
+        "screenshot_url": f"/api/payments/status/{token}/screenshot" if shot else None,
     }
+
+
+@router.get("/payments/status/{token}/screenshot")
+async def payment_status_screenshot(token: str):
+    """Token-gated payment screenshot for WhatsApp / native share (not the receipt PDF)."""
+    intent_id = read_status_token(token)
+    if not intent_id:
+        raise HTTPException(status_code=404, detail="Invalid or expired status token.")
+    shot = await _screenshot_meta_for_intent(intent_id)
+    if not shot:
+        raise HTTPException(status_code=404, detail="No payment screenshot on file for this payment.")
+
+    # Prefer local copy (reliable for share)
+    local = shot.get("proof_local_path")
+    if local and Path(local).is_file():
+        data = Path(local).read_bytes()
+        return Response(
+            content=data,
+            media_type=shot.get("proof_content_type") or "image/jpeg",
+            headers={
+                "Content-Disposition": f'inline; filename="{shot.get("proof_filename") or "payment-screenshot.jpg"}"',
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    # Fallback to object storage document
+    doc_id = shot.get("proof_doc_id")
+    if doc_id:
+        from storage import get_object
+        rec = await db.documents.find_one({"id": doc_id, "is_deleted": False})
+        if rec and rec.get("storage_path"):
+            try:
+                data, ctype = get_object(rec["storage_path"])
+                return Response(
+                    content=data,
+                    media_type=rec.get("content_type") or ctype or "image/jpeg",
+                    headers={
+                        "Content-Disposition": f'inline; filename="{rec.get("original_filename") or "payment-screenshot.jpg"}"',
+                        "Cache-Control": "private, max-age=300",
+                    },
+                )
+            except Exception:
+                pass
+
+    pub = shot.get("proof_public_url")
+    if pub:
+        # Relative public path under /uploads
+        root = Path(__file__).resolve().parent.parent / "frontend" / "public"
+        candidate = root / pub.lstrip("/")
+        if candidate.is_file():
+            data = candidate.read_bytes()
+            return Response(
+                content=data,
+                media_type=shot.get("proof_content_type") or "image/jpeg",
+                headers={
+                    "Content-Disposition": f'inline; filename="{shot.get("proof_filename") or "payment-screenshot.jpg"}"',
+                    "Cache-Control": "private, max-age=300",
+                },
+            )
+
+    raise HTTPException(status_code=404, detail="Payment screenshot file is not available.")
 
 
 # --------------------------------------------------------------- UPI QR + screenshot proof
@@ -996,6 +1110,9 @@ async def upi_submit(request: Request):
     }
     await db.upi_submissions.insert_one(dict(submission))
 
+    local_meta = _save_local_payment_proof(sub_id, data, filename, content_type)
+    await db.upi_submissions.update_one({"id": sub_id}, {"$set": local_meta})
+
     proof_doc_id = None
     try:
         doc = await save_document(
@@ -1004,8 +1121,9 @@ async def upi_submit(request: Request):
             uploaded_by="resident", content_type=content_type,
         )
         proof_doc_id = doc["id"]
+        await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_doc_id": proof_doc_id}})
     except Exception as e:
-        # Still continue — keep bytes path via LLM only; store failure note
+        # Local copy already saved — continue even if object storage is down
         await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
 
     llm = extract_payment_screenshot(data, content_type=content_type)

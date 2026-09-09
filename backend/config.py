@@ -259,10 +259,17 @@ ORGANISATION_DEFAULTS = {
     "upi": {
         "enabled": True,
         "vpa": "8217011245.eazypay@icici",
-        "payee_name": "ONE10 DURGA PUJA",
+        "payee_name": "M/S.ONE 10 EVENT ORGANISING COMMITEE",
         "static_qr_url": "/images/payment-qr.png",
+        # Full merchant payload encoded in the flyer / uploaded QR (required for tap-to-open).
+        "merchant_upi_uri": (
+            "upi://pay?pa=8217011245.eazypay@icici"
+            "&pn=M/S.ONE 10 EVENT ORGANISING COMMITEE "
+            "&tr=EZYS8217011245&cu=INR&mc=8641"
+        ),
+        "qr_locked": True,
         "instructions": (
-            "Scan the committee QR or transfer the exact amount to the UPI ID / bank account. "
+            "Scan the committee QR or tap Open in UPI app. "
             "Then upload your payment screenshot and enter the UTR / UPI reference number."
         ),
     },

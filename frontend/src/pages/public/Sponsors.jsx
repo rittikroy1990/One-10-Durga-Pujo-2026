@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   ArrowRight, Handshake, Building2, Users, Megaphone, Mail, Phone, Landmark, Heart,
@@ -111,9 +111,6 @@ export default function Sponsors() {
               >
                 <Handshake className="h-5 w-5" /> Brand sponsorship
               </Button>
-              <Link to="/subscribe">
-                <Button variant="outline" size="lg">Household subscribe</Button>
-              </Link>
             </div>
           </motion.div>
         </div>

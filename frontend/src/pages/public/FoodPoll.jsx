@@ -15,12 +15,22 @@ function pct(n, total) {
   return Math.round((n / total) * 100);
 }
 
+function shortDay(label = "") {
+  return label.replace(/^Maha\s+/i, "").replace(/^Vijaya\s+/i, "");
+}
+
+function dietLabel(code) {
+  if (code === "nonveg") return "non-veg";
+  if (code === "egg") return "egg";
+  return "";
+}
+
 function VoteBar({ label, votes, max, accent = "bg-vermilion-500" }) {
-  const width = max ? Math.max(6, Math.round((votes / max) * 100)) : 0;
+  const width = max ? Math.max(8, Math.round((votes / max) * 100)) : 0;
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="truncate font-medium text-brown-900">{label}</span>
+        <span className="min-w-0 truncate font-medium text-brown-900">{label}</span>
         <span className="shrink-0 tabular-nums text-brown-800/55">{votes}</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-sky-100">
@@ -37,10 +47,9 @@ export default function FoodPoll() {
   const [dayCode, setDayCode] = useState("sasthi");
   const [diet, setDiet] = useState("pure_veg");
   const [form, setForm] = useState({ name: "", mobile: "", notes: "" });
-  // picks[day][meal] = Set of dish ids
   const [picks, setPicks] = useState({});
   const [addCat, setAddCat] = useState({});
-  const [showResults, setShowResults] = useState(true);
+  const [showResults, setShowResults] = useState(false);
 
   const load = async () => {
     try {
@@ -54,7 +63,6 @@ export default function FoodPoll() {
 
   useEffect(() => { load(); }, []);
 
-  // Prefill PDF suggestions when diet changes / catalog loads
   useEffect(() => {
     if (!data) return;
     setPicks(() => {
@@ -107,7 +115,6 @@ export default function FoodPoll() {
   };
 
   const addFromDropdown = (dCode, mCode) => {
-    const cat = addCat[`${dCode}|${mCode}|cat`];
     const dishId = addCat[`${dCode}|${mCode}|dish`];
     if (!dishId) return toast.error("Pick a dish from the list");
     toggleDish(dCode, mCode, dishId);
@@ -157,7 +164,7 @@ export default function FoodPoll() {
   if (!data) {
     return (
       <PublicLayout>
-        <div className="grid min-h-[50vh] place-items-center">
+        <div className="grid min-h-[50vh] place-items-center px-4">
           <Loader2 className="h-8 w-8 animate-spin text-vermilion-500" />
         </div>
       </PublicLayout>
@@ -166,317 +173,323 @@ export default function FoodPoll() {
 
   const streamKey = diet === "pure_veg" ? "pure_veg" : "non_veg";
 
+  const ResultsPanel = (
+    <div className="rounded-2xl border border-sun-400/30 bg-gradient-to-b from-white to-amber-50/40 p-4">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-5 w-5 shrink-0 text-vermilion-500" />
+        <h2 className="font-display text-xl text-brown-900 sm:text-2xl">Ultimate menu</h2>
+      </div>
+      <p className="mt-1 text-xs text-brown-800/55">Top voted dishes · updates live</p>
+      <div className="mt-4 max-h-[55vh] space-y-4 overflow-y-auto overscroll-contain pr-1 sm:max-h-[70vh]">
+        {(data.proposed_menu || []).map((d) => (
+          <div key={d.day_code}>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-vermilion-500">
+              {shortDay(d.day_label)}
+            </div>
+            <div className="mt-1 space-y-2">
+              {(d.meals || []).map((m) => (
+                <div key={m.meal_code} className="rounded-lg bg-white/80 px-2.5 py-2">
+                  <div className="text-sm font-semibold text-brown-900">{m.meal_label}</div>
+                  <ul className="mt-1 space-y-0.5 text-xs text-brown-800/70">
+                    {(m.top_dishes || []).slice(0, 4).map((dish) => (
+                      <li key={dish.id} className="flex justify-between gap-2">
+                        <span className="min-w-0">{dish.name}</span>
+                        {dish.votes > 0 && <span className="shrink-0 tabular-nums text-brown-800/40">{dish.votes}</span>}
+                      </li>
+                    ))}
+                    {!(m.top_dishes || []).length && <li className="text-brown-800/40">No votes yet</li>}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {data.diet_counts && (
+        <div className="mt-4 border-t border-sun-400/25 pt-3 text-xs leading-relaxed text-brown-800/60">
+          Diet mix: Veg {pct(data.diet_counts.pure_veg, voterCount)}% · Egg{" "}
+          {pct(data.diet_counts.eggetarian, voterCount)}% · Non-veg {pct(data.diet_counts.non_veg, voterCount)}%
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <PublicLayout>
-      <section className="relative overflow-hidden border-b border-sun-400/25 bg-gradient-to-br from-amber-50 via-white to-sky-50 pt-20 pb-10">
-        <div className="pointer-events-none absolute -right-20 top-10 h-64 w-64 rounded-full bg-vermilion-500/10 blur-3xl" />
-        <div className="relative mx-auto max-w-6xl px-4 sm:px-5">
-          <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Community vote</p>
-          <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl md:text-6xl">
-            {data.meta?.title || "Food Menu Poll"}
-          </h1>
-          <p className="mt-3 max-w-2xl text-brown-800/70">
-            {data.meta?.subtitle} Pick favourites day-wise & meal-wise — live tallies build the ultimate menu.
-          </p>
-          <div className="mt-5 flex flex-wrap gap-3">
-            <a
-              href={data.meta?.pdf_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 rounded-full border border-sun-400/40 bg-white px-4 py-2 text-sm font-semibold text-brown-900 shadow-sm"
-            >
-              <FileText className="h-4 w-4 text-vermilion-500" /> View draft menu PDF
-            </a>
-            <Link
-              to="/food"
-              className="inline-flex items-center gap-2 rounded-full border border-sun-400/40 bg-white/80 px-4 py-2 text-sm font-semibold text-brown-800/80"
-            >
-              <UtensilsCrossed className="h-4 w-4" /> Food subscription interest
-            </Link>
-            <div className="inline-flex items-center gap-2 rounded-full bg-vermilion-500/10 px-4 py-2 text-sm font-semibold text-vermilion-700">
-              <Vote className="h-4 w-4" /> {voterCount} vote{voterCount === 1 ? "" : "s"} so far
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-5 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-6">
-          {/* Voter + diet */}
-          <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-sm">
-            <h2 className="font-display text-2xl text-brown-900">Your details</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <Label required htmlFor="fp-name">Name</Label>
-                <Input id="fp-name" data-testid="poll-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" />
-              </div>
-              <div>
-                <Label required htmlFor="fp-mobile">Mobile</Label>
-                <Input id="fp-mobile" data-testid="poll-mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })} placeholder="10-digit mobile" />
-              </div>
-            </div>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-brown-800/45">Diet preference</p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              {(data.diets || []).map((d) => (
-                <button
-                  key={d.code}
-                  type="button"
-                  data-testid={`poll-diet-${d.code}`}
-                  onClick={() => setDiet(d.code)}
-                  className={`rounded-xl border px-3 py-3 text-left transition ${
-                    diet === d.code
-                      ? "border-vermilion-500 bg-vermilion-500/10 shadow-sm"
-                      : "border-sun-400/30 bg-sky-50/50 hover:border-vermilion-400/40"
-                  }`}
-                >
-                  <div className="font-semibold text-brown-900">{d.label}</div>
-                  <div className="mt-0.5 text-xs text-brown-800/55">{d.blurb}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Day tabs */}
-          <div className="sticky top-16 z-20 -mx-4 overflow-x-auto bg-sky-50/95 px-4 py-3 backdrop-blur sm:top-20 sm:mx-0 sm:rounded-2xl sm:border sm:border-sun-400/25 sm:px-3">
-            <div className="flex min-w-max gap-2">
-              {(data.days || []).map((d) => (
-                <button
-                  key={d.code}
-                  type="button"
-                  data-testid={`poll-day-${d.code}`}
-                  onClick={() => setDayCode(d.code)}
-                  className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    dayCode === d.code ? "bg-vermilion-500 text-white" : "bg-white text-brown-800/70 hover:bg-sun-50"
-                  }`}
-                >
-                  {d.label}
-                  <span className="ml-1.5 text-[10px] opacity-70">{d.date?.slice(5)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {day && (
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={`${day.code}-${diet}`}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                className="space-y-5"
+      <div className="overflow-x-hidden pb-28 sm:pb-10">
+        <section className="relative border-b border-sun-400/25 bg-gradient-to-br from-amber-50 via-white to-sky-50 pt-[4.75rem] pb-6 sm:pt-20 sm:pb-10">
+          <div className="mx-auto max-w-3xl px-4 sm:max-w-6xl sm:px-5">
+            <p className="text-[10px] uppercase tracking-[0.3em] text-vermilion-500">Community vote</p>
+            <h1 className="mt-1.5 font-display text-[1.85rem] leading-tight text-brown-900 sm:text-5xl">
+              Food Menu Poll
+            </h1>
+            <p className="mt-2 text-sm leading-relaxed text-brown-800/70 sm:max-w-2xl sm:text-base">
+              Vote day-wise & meal-wise. Top picks shape the ultimate One 10 menu.
+            </p>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
+              <a
+                href={data.meta?.pdf_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-sun-400/40 bg-white px-4 py-2.5 text-sm font-semibold text-brown-900 shadow-sm"
               >
+                <FileText className="h-4 w-4 text-vermilion-500" /> View draft menu
+              </a>
+              <Link
+                to="/food"
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full border border-sun-400/40 bg-white/80 px-4 py-2.5 text-sm font-semibold text-brown-800/80"
+              >
+                <UtensilsCrossed className="h-4 w-4" /> Food subscription
+              </Link>
+              <div className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-vermilion-500/10 px-4 py-2.5 text-sm font-semibold text-vermilion-700">
+                <Vote className="h-4 w-4" /> {voterCount} vote{voterCount === 1 ? "" : "s"}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="mx-auto grid max-w-3xl gap-5 px-4 py-6 sm:max-w-6xl sm:gap-8 sm:px-5 sm:py-10 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="min-w-0 space-y-5">
+            <div className="rounded-2xl border border-sun-400/30 bg-white p-4 shadow-sm sm:p-5">
+              <h2 className="font-display text-xl text-brown-900 sm:text-2xl">Your details</h2>
+              <div className="mt-3 grid gap-3">
                 <div>
-                  <h2 className="font-display text-3xl text-brown-900">{day.label}</h2>
-                  <p className="text-sm text-brown-800/60">
-                    {day.weekday} · {day.date}
-                    {day.note ? ` · ${day.note}` : ""}
-                  </p>
-                  {day.code === "ashtami" && (
-                    <p className="mt-2 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs text-amber-900/90">
-                      {data.meta?.ashtami_lunch_note}
-                    </p>
-                  )}
+                  <Label required htmlFor="fp-name">Name</Label>
+                  <Input id="fp-name" data-testid="poll-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" autoComplete="name" />
                 </div>
+                <div>
+                  <Label required htmlFor="fp-mobile">Mobile</Label>
+                  <Input id="fp-mobile" data-testid="poll-mobile" inputMode="numeric" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })} placeholder="10-digit mobile" autoComplete="tel" />
+                </div>
+              </div>
+              <p className="mt-4 text-[10px] font-semibold uppercase tracking-wider text-brown-800/45">Diet preference</p>
+              <div className="mt-2 grid gap-2">
+                {(data.diets || []).map((d) => (
+                  <button
+                    key={d.code}
+                    type="button"
+                    data-testid={`poll-diet-${d.code}`}
+                    onClick={() => setDiet(d.code)}
+                    className={`min-h-[52px] rounded-xl border px-3 py-3 text-left transition ${
+                      diet === d.code
+                        ? "border-vermilion-500 bg-vermilion-500/10 shadow-sm"
+                        : "border-sun-400/30 bg-sky-50/50"
+                    }`}
+                  >
+                    <div className="font-semibold text-brown-900">{d.label}</div>
+                    <div className="mt-0.5 text-xs text-brown-800/55">{d.blurb}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                {(day.meals || []).map((meal) => {
-                  const selected = picks[day.code]?.[meal.code] || new Set();
-                  const suggested = meal.streams?.[streamKey]?.suggested || [];
-                  const catKey = `${day.code}|${meal.code}|cat`;
-                  const dishKey = `${day.code}|${meal.code}|dish`;
-                  const cat = addCat[catKey] || "";
-                  const dishOptions = (data.dishes || []).filter(
-                    (d) => allowedDish(d) && (!cat || d.category === cat),
-                  );
-                  // Live bars for this meal
-                  const mealScores = (data.dishes || [])
-                    .map((d) => ({
-                      ...d,
-                      votes: tallies[`${day.code}|${meal.code}|${d.id}`] || 0,
-                    }))
-                    .filter((d) => d.votes > 0)
-                    .sort((a, b) => b.votes - a.votes)
-                    .slice(0, 5);
-                  const maxVotes = mealScores[0]?.votes || 1;
+            {/* Day tabs — snap scroll on phone */}
+            <div className="sticky top-[3.6rem] z-20 -mx-4 border-y border-sun-400/20 bg-sky-50/95 backdrop-blur sm:top-20 sm:mx-0 sm:rounded-2xl sm:border sm:border-sun-400/25">
+              <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-4 py-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-3">
+                {(data.days || []).map((d) => (
+                  <button
+                    key={d.code}
+                    type="button"
+                    data-testid={`poll-day-${d.code}`}
+                    onClick={() => setDayCode(d.code)}
+                    className={`snap-start shrink-0 rounded-full px-3.5 py-2.5 text-sm font-semibold transition ${
+                      dayCode === d.code ? "bg-vermilion-500 text-white" : "bg-white text-brown-800/70"
+                    }`}
+                  >
+                    {shortDay(d.label)}
+                    <span className="ml-1 text-[10px] opacity-70">{d.date?.slice(8)}/{d.date?.slice(5, 7)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                  return (
-                    <div
-                      key={meal.code}
-                      className="rounded-2xl border border-sun-400/30 bg-white p-4 sm:p-5"
-                      data-testid={`poll-meal-${day.code}-${meal.code}`}
-                    >
-                      <div className="flex flex-wrap items-end justify-between gap-2">
-                        <div>
-                          <h3 className="font-display text-2xl text-brown-900">{meal.label}</h3>
-                          <p className="text-xs text-brown-800/50">{meal.timing}</p>
+            {day && (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`${day.code}-${diet}`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="min-w-0 space-y-4"
+                >
+                  <div>
+                    <h2 className="font-display text-2xl text-brown-900 sm:text-3xl">{day.label}</h2>
+                    <p className="text-sm text-brown-800/60">{day.weekday} · {day.date}</p>
+                    {day.code === "ashtami" && data.meta?.ashtami_lunch_note && (
+                      <p className="mt-2 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900/90">
+                        {data.meta.ashtami_lunch_note}
+                      </p>
+                    )}
+                  </div>
+
+                  {(day.meals || []).map((meal) => {
+                    const selected = picks[day.code]?.[meal.code] || new Set();
+                    const suggested = meal.streams?.[streamKey]?.suggested || [];
+                    const catKey = `${day.code}|${meal.code}|cat`;
+                    const dishKey = `${day.code}|${meal.code}|dish`;
+                    const cat = addCat[catKey] || "";
+                    const dishOptions = (data.dishes || []).filter(
+                      (d) => allowedDish(d) && (!cat || d.category === cat),
+                    );
+                    const mealScores = (data.dishes || [])
+                      .map((d) => ({
+                        ...d,
+                        votes: tallies[`${day.code}|${meal.code}|${d.id}`] || 0,
+                      }))
+                      .filter((d) => d.votes > 0)
+                      .sort((a, b) => b.votes - a.votes)
+                      .slice(0, 5);
+                    const maxVotes = mealScores[0]?.votes || 1;
+
+                    return (
+                      <div
+                        key={meal.code}
+                        className="min-w-0 rounded-2xl border border-sun-400/30 bg-white p-3.5 sm:p-5"
+                        data-testid={`poll-meal-${day.code}-${meal.code}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <h3 className="font-display text-xl text-brown-900 sm:text-2xl">{meal.label}</h3>
+                            <p className="text-xs text-brown-800/50">{meal.timing}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-brown-800/60">
+                            {selected.size}/{maxPerMeal}
+                          </span>
                         </div>
-                        <span className="rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-brown-800/60">
-                          {selected.size}/{maxPerMeal} selected
-                        </span>
-                      </div>
 
-                      <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.25em] text-vermilion-500">
-                        Draft menu (from PDF) — tap to toggle
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {suggested.filter(allowedDish).map((d) => {
-                          const on = selected.has(d.id);
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() => toggleDish(day.code, meal.code, d.id)}
-                              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition ${
-                                on
-                                  ? "border-vermilion-500 bg-vermilion-500 text-white"
-                                  : "border-sun-400/40 bg-sun-50/80 text-brown-900 hover:border-vermilion-400"
-                              }`}
-                            >
-                              {on ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-                              {d.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <p className="mt-5 text-[10px] font-semibold uppercase tracking-[0.25em] text-brown-800/40">
-                        Add more from the full list
-                      </p>
-                      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                        <Select
-                          value={cat}
-                          onChange={(e) => setAddCat((p) => ({ ...p, [catKey]: e.target.value, [dishKey]: "" }))}
-                          className="sm:w-48"
-                        >
-                          <option value="">All categories</option>
-                          {(data.categories || []).map((c) => (
-                            <option key={c.code} value={c.code}>{c.label}</option>
-                          ))}
-                        </Select>
-                        <Select
-                          value={addCat[dishKey] || ""}
-                          onChange={(e) => setAddCat((p) => ({ ...p, [dishKey]: e.target.value }))}
-                          className="flex-1"
-                          data-testid={`poll-add-dish-${meal.code}`}
-                        >
-                          <option value="">Choose a dish…</option>
-                          {dishOptions.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}{d.from_pdf ? " · PDF" : ""}{d.diet !== "veg" ? ` · ${d.diet}` : ""}
-                            </option>
-                          ))}
-                        </Select>
-                        <Button type="button" variant="outline" onClick={() => addFromDropdown(day.code, meal.code)}>
-                          <Plus className="h-4 w-4" /> Add
-                        </Button>
-                      </div>
-
-                      {selected.size > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {[...selected].map((id) => {
-                            const d = dishMap[id];
-                            if (!d) return null;
+                        <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.2em] text-vermilion-500">
+                          Suggested picks — tap to toggle
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {suggested.filter(allowedDish).map((d) => {
+                            const on = selected.has(d.id);
                             return (
-                              <span
-                                key={id}
-                                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-sm text-emerald-900"
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => toggleDish(day.code, meal.code, d.id)}
+                                className={`inline-flex min-h-[40px] max-w-full items-center gap-1.5 rounded-full border px-3 py-2 text-left text-sm leading-snug transition ${
+                                  on
+                                    ? "border-vermilion-500 bg-vermilion-500 text-white"
+                                    : "border-sun-400/40 bg-sun-50/80 text-brown-900"
+                                }`}
                               >
-                                {d.name}
-                                <button type="button" aria-label={`Remove ${d.name}`} onClick={() => toggleDish(day.code, meal.code, id)}>
-                                  <X className="h-3.5 w-3.5" />
-                                </button>
-                              </span>
+                                {on ? <Check className="h-3.5 w-3.5 shrink-0" /> : <Plus className="h-3.5 w-3.5 shrink-0" />}
+                                <span>{d.name}</span>
+                              </button>
                             );
                           })}
                         </div>
-                      )}
 
-                      {mealScores.length > 0 && (
-                        <div className="mt-5 rounded-xl bg-sky-50/80 p-3">
-                          <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-brown-800/50">
-                            <BarChart3 className="h-3.5 w-3.5" /> Live leaders — {meal.label}
-                          </div>
-                          <div className="space-y-2">
-                            {mealScores.map((d) => (
-                              <VoteBar key={d.id} label={d.name} votes={d.votes} max={maxVotes} />
+                        <p className="mt-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-brown-800/40">
+                          Add more dishes
+                        </p>
+                        <div className="mt-2 grid gap-2">
+                          <Select
+                            value={cat}
+                            onChange={(e) => setAddCat((p) => ({ ...p, [catKey]: e.target.value, [dishKey]: "" }))}
+                          >
+                            <option value="">All categories</option>
+                            {(data.categories || []).map((c) => (
+                              <option key={c.code} value={c.code}>{c.label}</option>
                             ))}
-                          </div>
+                          </Select>
+                          <Select
+                            value={addCat[dishKey] || ""}
+                            onChange={(e) => setAddCat((p) => ({ ...p, [dishKey]: e.target.value }))}
+                            data-testid={`poll-add-dish-${meal.code}`}
+                          >
+                            <option value="">Choose a dish…</option>
+                            {dishOptions.map((d) => {
+                              const extra = dietLabel(d.diet);
+                              return (
+                                <option key={d.id} value={d.id}>
+                                  {d.name}{extra ? ` (${extra})` : ""}
+                                </option>
+                              );
+                            })}
+                          </Select>
+                          <Button type="button" variant="outline" className="w-full min-h-[44px]" onClick={() => addFromDropdown(day.code, meal.code)}>
+                            <Plus className="h-4 w-4" /> Add dish
+                          </Button>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </motion.div>
-            </AnimatePresence>
-          )}
 
-          <div className="sticky bottom-4 z-20 rounded-2xl border border-vermilion-500/30 bg-white/95 p-4 shadow-lg backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-display text-xl text-brown-900">{selectionCount} dish picks</div>
-                <p className="text-xs text-brown-800/55">Same mobile can update vote anytime</p>
-              </div>
-              <Button variant="primary" size="lg" data-testid="poll-submit" onClick={submit} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Vote className="h-4 w-4" />}
-                {busy ? "Saving…" : "Submit my votes"}
-              </Button>
-            </div>
-            {submitted && (
-              <p className="mt-2 text-sm text-emerald-700">{submitted.message} · {submitted.voter_count} total voters</p>
-            )}
-          </div>
-        </div>
+                        {selected.size > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {[...selected].map((id) => {
+                              const d = dishMap[id];
+                              if (!d) return null;
+                              return (
+                                <span
+                                  key={id}
+                                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-emerald-50 px-3 py-1.5 text-sm text-emerald-900"
+                                >
+                                  <span className="min-w-0">{d.name}</span>
+                                  <button type="button" className="shrink-0 p-0.5" aria-label={`Remove ${d.name}`} onClick={() => toggleDish(day.code, meal.code, id)}>
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
 
-        {/* Ultimate menu sidebar */}
-        <aside className="lg:sticky lg:top-24 lg:self-start">
-          <button
-            type="button"
-            className="mb-2 flex w-full items-center justify-between rounded-xl border border-sun-400/30 bg-white px-4 py-3 text-left lg:hidden"
-            onClick={() => setShowResults((v) => !v)}
-          >
-            <span className="font-display text-lg text-brown-900">Ultimate menu so far</span>
-            <ChevronDown className={`h-4 w-4 transition ${showResults ? "rotate-180" : ""}`} />
-          </button>
-          <div className={`${showResults ? "block" : "hidden"} rounded-2xl border border-sun-400/30 bg-gradient-to-b from-white to-amber-50/40 p-4 lg:block`}>
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-vermilion-500" />
-              <h2 className="font-display text-2xl text-brown-900">Ultimate menu</h2>
-            </div>
-            <p className="mt-1 text-xs text-brown-800/55">
-              Top voted dishes per meal · updates as people vote
-            </p>
-            <div className="mt-4 space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-              {(data.proposed_menu || []).map((d) => (
-                <div key={d.day_code}>
-                  <div className="text-xs font-semibold uppercase tracking-wider text-vermilion-500">
-                    {d.day_label}
-                  </div>
-                  <div className="mt-1 space-y-2">
-                    {(d.meals || []).map((m) => (
-                      <div key={m.meal_code} className="rounded-lg bg-white/80 px-2.5 py-2">
-                        <div className="text-sm font-semibold text-brown-900">{m.meal_label}</div>
-                        <ul className="mt-1 space-y-0.5 text-xs text-brown-800/70">
-                          {(m.top_dishes || []).slice(0, 5).map((dish) => (
-                            <li key={dish.id} className="flex justify-between gap-2">
-                              <span>{dish.name}</span>
-                              {dish.votes > 0 && <span className="tabular-nums text-brown-800/40">{dish.votes}</span>}
-                            </li>
-                          ))}
-                          {!(m.top_dishes || []).length && <li className="text-brown-800/40">No votes yet</li>}
-                        </ul>
+                        {mealScores.length > 0 && (
+                          <div className="mt-4 rounded-xl bg-sky-50/80 p-3">
+                            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-brown-800/50">
+                              <BarChart3 className="h-3.5 w-3.5" /> Live leaders
+                            </div>
+                            <div className="space-y-2">
+                              {mealScores.map((d) => (
+                                <VoteBar key={d.id} label={d.name} votes={d.votes} max={maxVotes} />
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {data.diet_counts && (
-              <div className="mt-4 border-t border-sun-400/25 pt-3 text-xs text-brown-800/60">
-                Diet mix: Veg {pct(data.diet_counts.pure_veg, voterCount)}% · Egg{" "}
-                {pct(data.diet_counts.eggetarian, voterCount)}% · Non-veg {pct(data.diet_counts.non_veg, voterCount)}%
-              </div>
+                    );
+                  })}
+                </motion.div>
+              </AnimatePresence>
             )}
+
+            {/* Mobile ultimate menu accordion */}
+            <div className="xl:hidden">
+              <button
+                type="button"
+                className="flex min-h-[48px] w-full items-center justify-between rounded-xl border border-sun-400/30 bg-white px-4 py-3 text-left"
+                onClick={() => setShowResults((v) => !v)}
+              >
+                <span className="font-display text-lg text-brown-900">Ultimate menu so far</span>
+                <ChevronDown className={`h-4 w-4 transition ${showResults ? "rotate-180" : ""}`} />
+              </button>
+              {showResults && <div className="mt-3">{ResultsPanel}</div>}
+            </div>
           </div>
-        </aside>
+
+          <aside className="hidden min-w-0 xl:sticky xl:top-24 xl:block xl:self-start">
+            {ResultsPanel}
+          </aside>
+        </div>
+      </div>
+
+      {/* Fixed mobile submit bar */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-vermilion-500/20 bg-white/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_30px_rgba(44,24,16,0.08)] backdrop-blur sm:static sm:inset-auto sm:z-20 sm:mx-auto sm:mb-8 sm:max-w-3xl sm:rounded-2xl sm:border sm:border-vermilion-500/30 sm:p-4 sm:shadow-lg xl:max-w-6xl">
+        <div className="mx-auto flex max-w-3xl flex-col gap-2 sm:max-w-none sm:flex-row sm:items-center sm:justify-between sm:gap-3 xl:px-5">
+          <div className="min-w-0">
+            <div className="font-display text-lg leading-none text-brown-900 sm:text-xl">{selectionCount} dish picks</div>
+            <p className="mt-0.5 text-[11px] text-brown-800/55">Same mobile can update anytime</p>
+          </div>
+          <Button variant="primary" size="lg" className="w-full min-h-[48px] sm:w-auto" data-testid="poll-submit" onClick={submit} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Vote className="h-4 w-4" />}
+            {busy ? "Saving…" : "Submit my votes"}
+          </Button>
+        </div>
+        {submitted && (
+          <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-emerald-700 sm:text-left xl:px-5">
+            {submitted.message}
+          </p>
+        )}
       </div>
     </PublicLayout>
   );

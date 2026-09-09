@@ -13,7 +13,7 @@ POLL_META = {
     "title": "Food Menu Poll — Durgotsav 2026",
     "subtitle": "Vote day-wise & meal-wise. Top picks shape the ultimate One 10 menu.",
     "pdf_url": PDF_URL,
-    "pdf_note": "Draft reference: Pure Veg (T6) & festive banquet (T7) menus from the committee PDF.",
+    "pdf_note": "Draft reference: Pure Veg (T6) & festive banquet (T7) committee menus.",
     "timings": {
         "breakfast": "9:00 AM – 11:00 AM",
         "lunch": "1:00 PM – 3:00 PM",

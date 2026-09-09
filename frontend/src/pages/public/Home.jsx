@@ -58,9 +58,9 @@ export default function Home() {
                   Subscribe & Pay <ArrowRight className="h-5 w-5" />
                 </Button>
               </Link>
-              <Link to="/sponsors">
+              <Link to="/sponsors#donate">
                 <Button variant="outline" size="lg" data-testid="hero-sponsors-btn">
-                  Sponsorship
+                  Donate / Sponsorship
                 </Button>
               </Link>
               <Link to="/receipt/find">

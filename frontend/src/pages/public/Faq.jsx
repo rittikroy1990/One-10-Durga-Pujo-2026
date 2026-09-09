@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight, HelpCircle, MapPin, CreditCard, Receipt, UtensilsCrossed,
-  CalendarDays, Download, Handshake, Users, ShieldCheck, Building2, Phone, Heart,
+  CalendarDays, Download, Users, ShieldCheck, Building2, Phone, Heart,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -12,11 +12,10 @@ import { formatPaise } from "../../lib/utils";
 const DIRECTORY = [
   { to: "/", label: "Home", blurb: "Campaign overview, venue & how to join", icon: HelpCircle },
   { to: "/subscribe", label: "Subscribe & Pay", blurb: "Family subscription · UPI QR / bank transfer", icon: CreditCard },
-  { to: "/donate", label: "Donate", blurb: "Voluntary gift — resident or other donor", icon: Heart },
+  { to: "/sponsors#donate", label: "Donate / Sponsorship", blurb: "Voluntary gift or brand partnership packages", icon: Heart },
   { to: "/events", label: "Programme", blurb: "Day-by-day ritual calendar & venue", icon: CalendarDays },
   { to: "/nirghanto", label: "Nirghonto", blurb: "Printable PDF / PNG puja timing cards", icon: Download },
   { to: "/food", label: "Food", blurb: "Community food / meal subscription", icon: UtensilsCrossed },
-  { to: "/sponsors", label: "Sponsors", blurb: "Brand partnership packages", icon: Handshake },
   { to: "/participate", label: "Participate", blurb: "Volunteer, perform, family activities", icon: Users },
   { to: "/receipt/find", label: "Find Receipt", blurb: "Look up your verified digital receipt", icon: Receipt },
   { to: "/transparency", label: "Transparency", blurb: "Public finance summary (when published)", icon: ShieldCheck },
@@ -165,9 +164,9 @@ export default function Faq() {
 
           <FaqItem q="Can we add a donation?" id="faq-donation">
             <p>
-              Yes — use the separate <PageLink to="/donate">Donate</PageLink> page. One 10 residents select
-              tower &amp; flat; other donors use a simpler form. Family subscription stays on{" "}
-              <PageLink to="/subscribe">Subscribe &amp; Pay</PageLink> only.
+              Yes — open <PageLink to="/sponsors#donate">Donate / Sponsorship</PageLink> and choose individual
+              donation. One 10 residents select tower &amp; flat; other donors use a simpler form. Family
+              subscription stays on <PageLink to="/subscribe">Subscribe &amp; Pay</PageLink> only.
             </p>
           </FaqItem>
 
@@ -186,8 +185,10 @@ export default function Faq() {
 
           <FaqItem q="Where do I pay online?" id="faq-pay-where">
             <p>
-              Go to <PageLink to="/subscribe">Subscribe & Pay</PageLink>, fill household details, then on the
-              payment step scan the committee UPI QR (or tap Open in UPI app / GPay / PhonePe / Paytm).
+              Go to <PageLink to="/subscribe">Subscribe &amp; Pay</PageLink> (or Donate on{" "}
+              <PageLink to="/sponsors#donate">Donate / Sponsorship</PageLink>). When shown, use{" "}
+              <b>Pay with Cashfree</b> for UPI / cards / netbanking. You can still scan the committee UPI QR
+              or use bank transfer and upload screenshot + UTR.
             </p>
             <p>Prefer scanning with the UPI app camera if a deep link fails on your phone.</p>
           </FaqItem>
@@ -291,8 +292,8 @@ export default function Faq() {
 
           <FaqItem q="Where are sponsorship packages?" id="faq-sponsors">
             <p>
-              See <PageLink to="/sponsors">Sponsors</PageLink> for partnership options and committee contact for
-              brands.
+              Open <PageLink to="/sponsors#sponsorship">Donate / Sponsorship</PageLink>, switch to Brand
+              sponsorship for packages and committee contact for brands.
             </p>
           </FaqItem>
         </section>

@@ -1,5 +1,6 @@
 """One10 Durgotsav 2026 Portal — FastAPI application entrypoint."""
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -7,6 +8,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from db import ensure_indexes
 from config import ensure_settings
@@ -19,6 +21,7 @@ import routes_finance
 import routes_procure
 import routes_ops
 import routes_gov
+import routes_food
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("one10")
@@ -34,8 +37,13 @@ app.add_middleware(
 )
 
 for module in (routes_public, routes_collect, routes_manual, routes_finance,
-               routes_procure, routes_ops, routes_gov):
+               routes_procure, routes_ops, routes_gov, routes_food):
     app.include_router(module.router)
+
+# Public uploaded PDFs (and other files under frontend/public/uploads)
+_UPLOADS = Path(__file__).resolve().parent.parent / "frontend" / "public" / "uploads"
+_UPLOADS.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS)), name="uploads")
 
 
 @app.on_event("startup")

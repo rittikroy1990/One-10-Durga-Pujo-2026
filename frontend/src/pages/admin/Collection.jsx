@@ -4,6 +4,7 @@ import { FileText, Check, Plus, RefreshCw, Undo2, FileDown } from "lucide-react"
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
+import ExportCsvButton from "../../components/ExportCsvButton";
 
 export default function Collection() {
   const [tab, setTab] = useState("households");
@@ -88,30 +89,77 @@ function Receipts() {
     }
   };
 
+  const exportCols = [
+    { key: "receipt_no", label: "Receipt No" },
+    { key: "issued_at", label: "Timestamp (IST)", exportValue: (r) => formatDateIST(r.issued_at) },
+    { key: "payer_name", label: "Payer" },
+    { key: "tower_name", label: "Tower" },
+    { key: "flat_number", label: "Flat" },
+    { key: "total_amount", label: "Total (₹)", exportValue: (r) => (Number(r.total_amount || 0) / 100).toFixed(2) },
+    { key: "method", label: "Method" },
+    { key: "status", label: "Status", exportValue: (r) => r.refund_status || r.status || "" },
+  ];
+
   return (
     <Card><CardBody>
-      <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <ExportCsvButton
+          filename="receipts.csv"
+          columns={exportCols}
+          items={items}
+          data-testid="receipts-export-csv"
+        />
+        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+      </div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
-        <Table><THead><TR><TH>Receipt No</TH><TH>Payer</TH><TH>Household</TH><TH right>Total</TH><TH>Method</TH><TH>Status</TH><TH>Issued</TH><TH>PDF</TH><TH>Audit</TH></TR></THead>
-          <tbody>{items.map((r) => (
-            <TR key={r.id}><TD>{r.receipt_no}</TD><TD>{r.payer_name}</TD><TD>{r.tower_name}, {r.flat_number}</TD>
-              <TD right>{formatPaise(r.total_amount)}</TD><TD className="capitalize">{(r.method || "").replace(/_/g, " ")}</TD>
-              <TD><StatusBadge status={r.refund_status || r.status} /></TD>
-              <TD className="whitespace-nowrap text-xs">{formatDateIST(r.issued_at)}</TD>
-              <TD><a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600"><FileText className="h-4 w-4" /></a></TD>
-              <TD>
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  data-testid={`receipt-audit-${r.receipt_no}`}
-                  onClick={() => downloadTrail(r.receipt_no)}
-                  title="Download timestamped audit trail"
-                >
-                  <FileDown className="h-4 w-4" />
-                </Button>
-              </TD>
-            </TR>
-          ))}</tbody></Table>
+        <div className="overflow-x-auto">
+          <Table>
+            <THead>
+              <TR>
+                <TH>Receipt No</TH>
+                <TH>Timestamp</TH>
+                <TH>Payer</TH>
+                <TH>Household</TH>
+                <TH right>Total</TH>
+                <TH>Method</TH>
+                <TH>Status</TH>
+                <TH>PDF</TH>
+                <TH>Audit</TH>
+              </TR>
+            </THead>
+            <tbody>
+              {items.map((r) => (
+                <TR key={r.id}>
+                  <TD className="font-medium">{r.receipt_no}</TD>
+                  <TD className="whitespace-nowrap text-xs tabular-nums" data-testid={`receipt-ts-${r.receipt_no}`}>
+                    {formatDateIST(r.issued_at)}
+                  </TD>
+                  <TD>{r.payer_name}</TD>
+                  <TD>{r.tower_name}, {r.flat_number}</TD>
+                  <TD right>{formatPaise(r.total_amount)}</TD>
+                  <TD className="capitalize">{(r.method || "").replace(/_/g, " ")}</TD>
+                  <TD><StatusBadge status={r.refund_status || r.status} /></TD>
+                  <TD>
+                    <a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600">
+                      <FileText className="h-4 w-4" />
+                    </a>
+                  </TD>
+                  <TD>
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      data-testid={`receipt-audit-${r.receipt_no}`}
+                      onClick={() => downloadTrail(r.receipt_no)}
+                      title="Download timestamped audit trail"
+                    >
+                      <FileDown className="h-4 w-4" />
+                    </Button>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
     </CardBody></Card>
   );

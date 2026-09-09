@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useSearchParams, Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2 } from "lucide-react";
 import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -97,9 +97,6 @@ export default function PaymentStatus() {
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">
                   <Button variant="primary" data-testid="download-receipt-btn"><FileText className="h-4 w-4" /> Download receipt</Button>
                 </a>
-                <Link to={`/receipt/verify/${data.verify_token}`}>
-                  <Button variant="subtle">Verify online</Button>
-                </Link>
               </div>
             </>
           )}

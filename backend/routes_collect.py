@@ -404,6 +404,24 @@ def _merchant_intent_url(upi: dict, amount_rupees: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _upi_app_links(intent_url: str) -> dict:
+    """Map a generic upi:// intent to common Android app deep links."""
+    if not intent_url or not intent_url.lower().startswith("upi://"):
+        return {}
+    # upi://pay?...  →  <scheme>://upi/pay?...  or app-specific hosts
+    suffix = intent_url.split("://", 1)[-1]  # pay?...
+    query = suffix.split("?", 1)[-1] if "?" in suffix else ""
+    return {
+        "upi": intent_url,
+        "gpay": f"gpay://upi/pay?{query}",
+        "tez": f"tez://upi/pay?{query}",
+        "phonepe": f"phonepe://pay?{query}",
+        "paytm": f"paytmmp://pay?{query}",
+        "bhim": f"bhim://pay?{query}",
+        "amazon_pay": f"amazonpay://upi/pay?{query}",
+    }
+
+
 def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
     org = settings.get("organisation") or {}
     upi = org.get("upi") or {}
@@ -429,6 +447,7 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
         "amount_rupees": amount_rupees,
         "qr_data": qr_data,
         "upi_intent_url": intent_url,
+        "upi_app_links": _upi_app_links(intent_url),
         "static_qr_url": upi.get("static_qr_url") or "/images/payment-qr.png",
         "instructions": upi.get("instructions") or "",
         "bank_account": {

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, ExternalLink,
+  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, ExternalLink, Copy,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -57,20 +57,30 @@ export default function Subscribe() {
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const total = base + donationPaise;
   const pay = upiSession?.payment;
+  const bank = pay?.bank_account || cfg?.organisation?.bank_account;
+  const appLinks = pay?.upi_app_links || {};
 
   const toggleInterest = (v) =>
     set("interests", form.interests.includes(v) ? form.interests.filter((x) => x !== v) : [...form.interests, v]);
 
   const validStep1 = form.primary_contact_name && /^[6-9]\d{9}$/.test(form.mobile) && form.tower_id && form.flat_id;
 
-  const openUpiApp = () => {
-    const url = (pay?.upi_intent_url || "").trim();
-    if (!url) {
+  const copyText = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
+  const openUpiApp = (url) => {
+    const target = (url || pay?.upi_intent_url || "").trim();
+    if (!target) {
       toast.error("Open GPay / PhonePe and scan the QR on this page.");
       return;
     }
-    // Merchant UPI deep link — must keep mc/tr from the uploaded QR (not a simplified VPA link).
-    window.location.href = url;
+    window.location.href = target;
   };
 
   const submit = async () => {
@@ -251,7 +261,7 @@ export default function Subscribe() {
           {step === 3 && upiSession && (
             <div className="space-y-5" data-testid="upi-pay-step">
               <div className="text-center">
-                <div className="font-display text-3xl">Pay via UPI QR</div>
+                <div className="font-display text-3xl">Pay via UPI / bank</div>
                 <div className="mt-1 text-brown-800/70">
                   Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
@@ -260,7 +270,7 @@ export default function Subscribe() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="flex flex-col items-center rounded-xl border border-gold-500/30 bg-white p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or tap to pay
+                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or open UPI app
                   </div>
                   {pay?.upi_intent_url ? (
                     <a
@@ -285,35 +295,69 @@ export default function Subscribe() {
                     />
                   )}
                   <p className="mt-2 text-center text-xs text-brown-800/55">
-                    On phone: <b>tap the QR</b> to open GPay / PhonePe. Or open your UPI app and scan it.
+                    Prefer scanning with the UPI app camera if a deep link fails on your phone.
                   </p>
-                  {pay?.upi_intent_url && (
-                    <Button
-                      type="button"
-                      variant="admin"
-                      className="mt-3 w-full"
-                      data-testid="open-upi-app-btn"
-                      onClick={openUpiApp}
-                    >
-                      <ExternalLink className="h-4 w-4" /> Open in UPI app
-                    </Button>
-                  )}
+                  <div className="mt-3 grid w-full grid-cols-2 gap-2">
+                    {[
+                      ["GPay", appLinks.gpay || appLinks.tez || pay?.upi_intent_url],
+                      ["PhonePe", appLinks.phonepe || pay?.upi_intent_url],
+                      ["Paytm", appLinks.paytm || pay?.upi_intent_url],
+                      ["BHIM / any UPI", appLinks.upi || pay?.upi_intent_url],
+                    ].filter(([, href]) => href).map(([label, href]) => (
+                      <Button
+                        key={label}
+                        type="button"
+                        variant="admin"
+                        className="w-full text-xs"
+                        data-testid={`open-upi-${label.split(" ")[0].toLowerCase()}`}
+                        onClick={() => openUpiApp(href)}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" /> {label}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="rounded-xl border border-gold-500/30 bg-white p-4 text-sm">
-                  <div className="font-semibold text-brown-900">How to pay</div>
-                  <div className="mt-3 space-y-3 text-brown-800/80">
+                  <div className="font-semibold text-brown-900">Bank / net banking</div>
+                  <div className="mt-3 space-y-2 text-brown-800/80">
                     <div>
-                      <span className="text-brown-800/50">Payee</span>
+                      <span className="text-brown-800/50">Account name</span>
                       <br />
-                      {pay?.payee_name || "ONE 10 EVENT ORGANISING COMMITTEE"}
+                      {bank?.account_name || "ONE 10 EVENT ORGANISING COMMITTEE"}
                     </div>
-                    <p className="text-sm text-brown-800/70">
-                      Prefer <b>scanning with the UPI app camera</b> if tap-to-open fails on your phone.
-                      Do not type a UPI ID manually.
-                    </p>
-                    <p className="text-xs text-brown-800/55">
-                      Pay the exact amount shown above, then upload the screenshot + UTR below.
+                    <div className="flex items-center justify-between gap-2">
+                      <span>
+                        <span className="text-brown-800/50">A/C number</span>
+                        <br />
+                        <span data-testid="bank-account-number">{bank?.account_number || "572205000037"}</span>
+                      </span>
+                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.account_number || "572205000037", "Account number")} aria-label="Copy account">
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span>
+                        <span className="text-brown-800/50">IFSC</span>
+                        <br />
+                        <span data-testid="bank-ifsc">{bank?.ifsc || "ICIC0005722"}</span>
+                      </span>
+                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.ifsc || "ICIC0005722", "IFSC")} aria-label="Copy IFSC">
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div>
+                      <span className="text-brown-800/50">Bank</span>
+                      <br />
+                      {bank?.bank || "ICICI Bank"}
+                    </div>
+                    <div>
+                      <span className="text-brown-800/50">UPI ID (scan preferred)</span>
+                      <br />
+                      {pay?.vpa || "8217011245.eazypay@icici"}
+                    </div>
+                    <p className="pt-1 text-xs text-brown-800/55">
+                      For NEFT / IMPS / net banking, transfer the exact amount and upload the receipt screenshot + UTR below.
                     </p>
                   </div>
                 </div>

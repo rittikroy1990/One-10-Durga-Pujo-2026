@@ -246,7 +246,7 @@ export default function Subscribe() {
               </label>
               <label className="flex items-start gap-2.5 text-sm">
                 <input type="checkbox" data-testid="sub-terms" checked={form.terms_consent} onChange={(e) => set("terms_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I agree to the <a href="/terms" className="text-vermilion-600 underline">payment & refund terms</a>.
+                I agree to the <a href="/terms" className="text-vermilion-600 underline">payment terms</a>.
               </label>
 
               <div className="flex justify-between">

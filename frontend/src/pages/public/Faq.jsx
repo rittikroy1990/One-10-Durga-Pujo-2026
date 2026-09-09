@@ -21,7 +21,6 @@ const DIRECTORY = [
   { to: "/contact", label: "Contact", blurb: "Committee phone & address", icon: Phone },
   { to: "/privacy", label: "Privacy", blurb: "What data we collect", icon: ShieldCheck },
   { to: "/terms", label: "Terms", blurb: "Payment & contribution terms", icon: Building2 },
-  { to: "/refund-policy", label: "Refunds", blurb: "Duplicate payment / refund process", icon: Receipt },
   { to: "/admin/login", label: "Committee login", blurb: "EOC portal for office bearers", icon: Building2 },
 ];
 
@@ -239,13 +238,6 @@ export default function Faq() {
               always return via <PageLink to="/receipt/find">Find Receipt</PageLink> once a receipt number is issued.
             </p>
           </FaqItem>
-
-          <FaqItem q="Refunds?" id="faq-refund">
-            <p>
-              See the <PageLink to="/refund-policy">Refund Policy</PageLink>. Duplicate payments are the usual
-              case; contact the committee with your UTR.
-            </p>
-          </FaqItem>
         </section>
 
         {/* Programme */}
@@ -336,10 +328,9 @@ export default function Faq() {
             </ul>
           </FaqItem>
 
-          <FaqItem q="Privacy, terms, transparency?" id="faq-legal">
+          <FaqItem q="Privacy and terms?" id="faq-legal">
             <p>
               <PageLink to="/privacy">Privacy Policy</PageLink> · <PageLink to="/terms">Payment & Terms</PageLink> ·{" "}
-              <PageLink to="/refund-policy">Refund Policy</PageLink> ·{" "}
               <PageLink to="/transparency">Transparency</PageLink>
             </p>
           </FaqItem>

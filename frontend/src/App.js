@@ -52,7 +52,6 @@ function AppRoutes() {
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />
-      <Route path="/refund-policy" element={<Legal type="refund" />} />
       <Route path="/contact" element={<Legal type="contact" />} />
       <Route path="/upload-qr" element={<UploadPaymentQr />} />
 

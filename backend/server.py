@@ -21,6 +21,7 @@ import routes_finance
 import routes_procure
 import routes_ops
 import routes_gov
+import routes_food
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("one10")
@@ -36,7 +37,7 @@ app.add_middleware(
 )
 
 for module in (routes_public, routes_collect, routes_manual, routes_finance,
-               routes_procure, routes_ops, routes_gov):
+               routes_procure, routes_ops, routes_gov, routes_food):
     app.include_router(module.router)
 
 # Public uploaded PDFs (and other files under frontend/public/uploads)

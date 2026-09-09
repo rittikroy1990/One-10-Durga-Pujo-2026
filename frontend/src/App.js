@@ -21,6 +21,8 @@ import Faq from "./pages/public/Faq";
 import Donate from "./pages/public/Donate";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 import UploadPdf from "./pages/public/UploadPdf";
+import Food from "./pages/public/Food";
+import FoodPoll from "./pages/public/FoodPoll";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
@@ -44,6 +46,7 @@ function AppRoutes() {
       <Route path="/" element={<Home />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
+      <Route path="/food" element={<Food />} />
       <Route path="/payment/status" element={<PaymentStatus />} />
       <Route path="/receipt/find" element={<ReceiptFind />} />
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />
@@ -58,6 +61,8 @@ function AppRoutes() {
       <Route path="/contact" element={<Legal type="contact" />} />
       <Route path="/upload-qr" element={<UploadPaymentQr />} />
       <Route path="/upload-pdf" element={<UploadPdf />} />
+      <Route path="/food-poll" element={<FoodPoll />} />
+      <Route path="/food/vote" element={<FoodPoll />} />
 
       <Route path="/admin/login" element={<Login />} />
       <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>

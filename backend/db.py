@@ -46,4 +46,6 @@ async def ensure_indexes():
     await db.number_sequences.create_index("key", unique=True)
     await db.audit_events.create_index("seq", unique=True)
     await db.audit_events.create_index("created_at")
+    await db.food_poll_votes.create_index([("cycle_id", 1), ("mobile", 1)], unique=True, sparse=True)
+    await db.food_subscriptions.create_index("created_at")
     await db.journal_entries.create_index("journal_no", unique=True, sparse=True)

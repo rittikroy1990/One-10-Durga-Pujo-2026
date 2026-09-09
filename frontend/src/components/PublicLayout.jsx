@@ -10,6 +10,7 @@ const LINKS = [
   { to: "/events", label: "Programme" },
   { to: "/nirghanto", label: "Nirghonto" },
   { to: "/sponsors", label: "Donate / Sponsorship" },
+  { to: "/food-poll", label: "Food Poll" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
   { to: "/faq", label: "FAQ" },

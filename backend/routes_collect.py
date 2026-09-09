@@ -36,7 +36,7 @@ class SubscribeIn(BaseModel):
     email: Optional[str] = None
     alternate_contact: Optional[str] = None
     family_display_name: Optional[str] = None
-    donation_rupees: float = 0
+    donation_rupees: float = 0  # ignored — use /donate; kept for older clients
     interests: list[str] = []
     accessibility_request: Optional[str] = None
     comments: Optional[str] = None
@@ -44,6 +44,27 @@ class SubscribeIn(BaseModel):
     payer_name: Optional[str] = None
     payer_mobile: Optional[str] = None
     payer_relationship: Optional[str] = None
+
+
+class DonateIn(BaseModel):
+    """Standalone voluntary donation — decoupled from family subscription."""
+    donor_type: str  # "resident" | "other"
+    donor_name: str
+    mobile: str
+    email: Optional[str] = None
+    donation_rupees: float
+    accuracy_confirmed: bool
+    privacy_consent: bool
+    terms_consent: bool
+    # Resident-only
+    tower_id: Optional[str] = None
+    flat_id: Optional[str] = None
+    occupancy_type: Optional[str] = None
+    # Other / non-resident
+    city: Optional[str] = None
+    organisation: Optional[str] = None
+    notes: Optional[str] = None
+    relation_to_one10: Optional[str] = None
 
 
 async def _components(settings, donation_paise):
@@ -74,7 +95,8 @@ async def subscribe(body: SubscribeIn, request: Request):
     comp_sum = sum(c["amount_paise"] for c in settings["subscription"]["components"])
     if comp_sum != base:
         raise HTTPException(status_code=500, detail="Component allocation misconfigured.")
-    donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
+    # Subscription checkout is base-only; voluntary gifts go through /donate.
+    donation = 0
 
     # Reuse the cycle+tower+flat household when present; never block a new payment.
     household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": body.tower_id,
@@ -136,6 +158,137 @@ async def subscribe(body: SubscribeIn, request: Request):
     }
 
 
+@router.post("/donate")
+async def donate(body: DonateIn, request: Request):
+    """Create a donation-only payment intent (resident or non-resident)."""
+    settings = await get_settings()
+    cycle_id = await get_active_cycle_id()
+    if settings["cycle"].get("is_locked"):
+        raise HTTPException(status_code=423, detail="This campaign cycle is locked.")
+    sub = settings.get("subscription") or {}
+    if sub.get("allow_donation") is False:
+        raise HTTPException(status_code=403, detail="Donations are not open for this campaign.")
+    if not (body.accuracy_confirmed and body.privacy_consent and body.terms_consent):
+        raise HTTPException(status_code=400, detail="All confirmations and consents are required.")
+    if not valid_indian_mobile(body.mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+    donor_type = (body.donor_type or "").strip().lower()
+    if donor_type not in ("resident", "other"):
+        raise HTTPException(status_code=400, detail="Choose whether you are a One 10 resident or other.")
+    name = (body.donor_name or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter the donor full name.")
+
+    donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
+    min_paise = int(sub.get("donation_min_paise") or 10000)  # default ₹100
+    if donation < min_paise:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Minimum donation is {fmt_inr(min_paise)}.",
+        )
+
+    tower_name = ""
+    flat_number = ""
+    if donor_type == "resident":
+        if not body.tower_id or not body.flat_id:
+            raise HTTPException(status_code=400, detail="Select your tower and flat.")
+        occ = body.occupancy_type or "owner_resident"
+        if occ not in OCCUPANCY:
+            raise HTTPException(status_code=400, detail="Invalid occupancy type.")
+        tower = await db.towers.find_one({"id": body.tower_id})
+        flat = await db.flats.find_one({"id": body.flat_id, "tower_id": body.tower_id})
+        if not tower or not flat:
+            raise HTTPException(status_code=400, detail="Invalid tower/flat selection.")
+        tower_name = tower["name"]
+        flat_number = flat["number"]
+        household = await db.households.find_one({
+            "cycle_id": cycle_id, "tower_id": body.tower_id, "flat_id": body.flat_id,
+            "is_deleted": {"$ne": True},
+        })
+        if not household:
+            hid = new_id("hh")
+            household = {
+                "id": hid, "cycle_id": cycle_id, "tower_id": body.tower_id, "tower_name": tower_name,
+                "flat_id": body.flat_id, "flat_number": flat_number,
+                "occupancy_type": occ, "family_members": 1,
+                "primary_name": name, "primary_mobile": body.mobile,
+                "email": body.email or "", "comments": body.notes or "",
+                "created_at": iso(), "is_deleted": False, "source": "donation",
+            }
+            await db.households.insert_one(dict(household))
+            await db.people.insert_one({
+                "id": new_id("person"), "household_id": hid, "name": name,
+                "mobile": body.mobile, "role": "primary", "created_at": iso(),
+            })
+        else:
+            hid = household["id"]
+            tower_name = household.get("tower_name") or tower_name
+            flat_number = household.get("flat_number") or flat_number
+    else:
+        # Non-resident / other — synthetic household so receipts & UPI path stay consistent.
+        hid = new_id("hh")
+        ext_flat = new_id("xflat")
+        tower_name = "External donor"
+        flat_number = "—"
+        household = {
+            "id": hid, "cycle_id": cycle_id,
+            "tower_id": "external", "tower_name": tower_name,
+            "flat_id": ext_flat, "flat_number": flat_number,
+            "occupancy_type": "other", "family_members": 1,
+            "primary_name": name, "primary_mobile": body.mobile,
+            "email": body.email or "",
+            "city": (body.city or "").strip(),
+            "organisation": (body.organisation or "").strip(),
+            "relation_to_one10": (body.relation_to_one10 or "").strip(),
+            "comments": body.notes or "",
+            "is_external_donor": True,
+            "created_at": iso(), "is_deleted": False, "source": "donation",
+        }
+        await db.households.insert_one(dict(household))
+        await db.people.insert_one({
+            "id": new_id("person"), "household_id": hid, "name": name,
+            "mobile": body.mobile, "role": "donor", "created_at": iso(),
+        })
+
+    for ctype, granted in (("privacy", body.privacy_consent), ("terms", body.terms_consent)):
+        await db.consents.insert_one({
+            "id": new_id("cons"), "household_id": hid, "type": ctype,
+            "version": (settings.get("receipt") or {}).get("document_version") or "v1",
+            "granted": granted, "granted_at": iso(),
+        })
+
+    intent = {
+        "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid,
+        "kind": "donation",
+        "donor_type": donor_type,
+        "base_amount": 0, "donation_amount": donation, "total_amount": donation,
+        "components": [],
+        "payer_is_member": donor_type == "resident",
+        "payer_name": name, "payer_mobile": body.mobile, "payer_relationship": "donor",
+        "status": "payment_pending", "method": "upi_qr",
+        "notes": body.notes or "",
+        "created_at": iso(),
+    }
+    await db.subscription_intents.insert_one(dict(intent))
+    await audit(
+        "donation.intent.create",
+        entity_type="subscription_intent",
+        entity_id=intent["id"],
+        after={"total": donation, "donor_type": donor_type, "household": hid},
+        request=request,
+    )
+    return {
+        "intent_id": intent["id"],
+        "status_token": status_token(intent["id"]),
+        "kind": "donation",
+        "donor_type": donor_type,
+        "donation_amount": donation,
+        "total_amount": donation,
+        "household": {"tower_name": tower_name, "flat_number": flat_number},
+        "payment_method": "upi_qr",
+    }
+
+
 # --------------------------------------------------------------- Payment order + verify + webhook
 @router.post("/payments/order")
 async def create_order(body: dict = Body(...)):
@@ -191,36 +344,50 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
                     entity_id=intent["id"], after={"payment_id": provider_payment_id})
         return None
 
-    household = await db.households.find_one({"id": intent["household_id"]}, {"_id": 0})
+    household = await db.households.find_one({"id": intent["household_id"]}, {"_id": 0}) or {}
     settings = await get_settings()
     cycle_id = intent.get("cycle_id") or await get_active_cycle_id()
     n, receipt_no = await next_formatted("receipt", settings["receipt"]["prefix"], 6)
     rid = new_id("rcpt")
-    lines = [{"account_code": debit_account, "debit": intent["total_amount"], "credit": 0}]
-    for comp in intent["components"]:
-        lines.append({"account_code": comp["account_code"], "debit": 0, "credit": comp["amount_paise"]})
-    if intent["donation_amount"]:
-        lines.append({"account_code": "4100", "debit": 0, "credit": intent["donation_amount"]})
+    kind = intent.get("kind") or "subscription"
+    if kind == "donation":
+        lines = [
+            {"account_code": debit_account, "debit": intent["total_amount"], "credit": 0},
+            {"account_code": "4100", "debit": 0, "credit": intent["total_amount"]},
+        ]
+        narration = f"Donation receipt {receipt_no} ({method})"
+    else:
+        lines = [{"account_code": debit_account, "debit": intent["total_amount"], "credit": 0}]
+        for comp in intent.get("components") or []:
+            lines.append({"account_code": comp["account_code"], "debit": 0, "credit": comp["amount_paise"]})
+        if intent.get("donation_amount"):
+            lines.append({"account_code": "4100", "debit": 0, "credit": intent["donation_amount"]})
+        narration = f"Subscription receipt {receipt_no} ({method})"
     journal = await post_journal(source_type="receipt", source_id=rid,
-                                 narration=f"Subscription receipt {receipt_no} ({method})",
+                                 narration=narration,
                                  lines=lines, actor="system")
     campaign_title = settings.get("campaign", {}).get("title") or settings.get("cycle", {}).get("name") or "One 10 Events"
     receipt = {
         "id": rid, "receipt_no": receipt_no, "cycle_id": cycle_id,
-        "household_id": intent["household_id"], "intent_id": intent["id"],
-        "payment_id": provider_payment_id, "kind": "subscription",
+        "household_id": intent.get("household_id"), "intent_id": intent["id"],
+        "payment_id": provider_payment_id, "kind": kind,
         "payer_name": intent.get("payer_name") or household.get("primary_name"),
-        "tower_name": household.get("tower_name"), "flat_number": household.get("flat_number"),
-        "base_amount": intent["base_amount"], "donation_amount": intent["donation_amount"],
-        "total_amount": intent["total_amount"], "components": intent["components"],
+        "payer_mobile": intent.get("payer_mobile") or household.get("primary_mobile") or "",
+        "tower_name": household.get("tower_name") or ("External donor" if kind == "donation" else ""),
+        "flat_number": household.get("flat_number") or ("—" if kind == "donation" else ""),
+        "base_amount": intent.get("base_amount") or 0,
+        "donation_amount": intent.get("donation_amount") or 0,
+        "total_amount": intent["total_amount"],
+        "components": intent.get("components") or [],
         "method": method, "masked_ref": masked_ref, "status": "issued",
         "journal_id": journal["id"], "issued_at": iso(),
         "campaign_title": campaign_title,
+        "donor_type": intent.get("donor_type") or "",
     }
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
-                after={"receipt_no": receipt_no, "total": receipt["total_amount"]}, request=request)
+                after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind}, request=request)
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
                  subject=f"Your {campaign_title} receipt {receipt_no}",
                  data={"receipt_no": receipt_no})
@@ -708,8 +875,12 @@ async def find_receipt(body: dict = Body(...), request: Request = None):
     r = await db.receipts.find_one({"receipt_no": receipt_no}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="No receipt found with those details.")
-    household = await db.households.find_one({"id": r["household_id"]})
-    if not household or household.get("primary_mobile") != mobile:
+    household = await db.households.find_one({"id": r.get("household_id")}) if r.get("household_id") else None
+    mobile_ok = (
+        (household and household.get("primary_mobile") == mobile)
+        or (r.get("payer_mobile") == mobile)
+    )
+    if not mobile_ok:
         raise HTTPException(status_code=404, detail="No receipt found with those details.")
     await audit("receipt.lookup", entity_type="receipt", entity_id=r["id"], request=request)
     return {"receipt_no": r["receipt_no"], "verify_token": r["verify_token"],

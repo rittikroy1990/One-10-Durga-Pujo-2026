@@ -54,8 +54,7 @@ export default function Subscribe() {
   }, [form.tower_id]);
 
   const base = cfg?.subscription?.base_amount_paise || 350000;
-  const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
-  const total = base + donationPaise;
+  const total = base;
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
   const appLinks = pay?.upi_app_links || {};
@@ -93,7 +92,7 @@ export default function Subscribe() {
       const r = await api.post("/subscribe", {
         ...form,
         family_members: Number(form.family_members),
-        donation_rupees: Number(form.donation_rupees || 0),
+        donation_rupees: 0,
       });
       setIntent(r.data);
       const s = await api.get(`/payments/upi/session`, { params: { intent_id: r.data.intent_id } });
@@ -220,16 +219,16 @@ export default function Subscribe() {
           {step === 2 && (
             <div className="space-y-5">
               <div className="rounded-xl border border-gold-500/30 bg-white p-4">
-                <div className="text-sm text-brown-800/60">Base subscription</div>
+                <div className="text-sm text-brown-800/60">Family subscription</div>
                 <div className="flex items-center justify-between">
                   <span className="font-display text-2xl">{formatPaise(base)}</span>
                   <span className="text-xs text-brown-800/50">Fixed for 2026 · ₹2,500 + ₹300 + ₹700</span>
                 </div>
-                <div className="mt-4">
-                  <Label htmlFor="don">Additional voluntary donation (optional)</Label>
-                  <Input id="don" data-testid="sub-donation" type="number" min={0} value={form.donation_rupees} onChange={(e) => set("donation_rupees", e.target.value)} placeholder="0" />
-                  <p className="mt-1 text-xs text-brown-800/50">Recorded separately from the base subscription.</p>
-                </div>
+                <p className="mt-3 text-sm text-brown-800/65">
+                  Want to give an extra voluntary gift? Use the separate{" "}
+                  <a href="/donate" className="font-semibold text-vermilion-600 underline">Donate</a> page
+                  (One 10 residents and other donors).
+                </p>
                 <div className="mt-4 flex items-center justify-between border-t border-brown-800/10 pt-3">
                   <span className="font-semibold">Total payable</span>
                   <span data-testid="sub-total" className="font-display text-3xl text-vermilion-600">{formatPaise(total)}</span>

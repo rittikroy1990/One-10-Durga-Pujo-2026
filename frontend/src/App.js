@@ -18,6 +18,7 @@ import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
 import Faq from "./pages/public/Faq";
+import Donate from "./pages/public/Donate";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 
 import Login from "./pages/admin/Login";
@@ -41,6 +42,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/subscribe" element={<Subscribe />} />
+      <Route path="/donate" element={<Donate />} />
       <Route path="/payment/status" element={<PaymentStatus />} />
       <Route path="/receipt/find" element={<ReceiptFind />} />
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />

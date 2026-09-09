@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight, HelpCircle, MapPin, CreditCard, Receipt, UtensilsCrossed,
-  CalendarDays, Download, Handshake, Users, ShieldCheck, Building2, Phone,
+  CalendarDays, Download, Handshake, Users, ShieldCheck, Building2, Phone, Heart,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -12,6 +12,7 @@ import { formatPaise } from "../../lib/utils";
 const DIRECTORY = [
   { to: "/", label: "Home", blurb: "Campaign overview, venue & how to join", icon: HelpCircle },
   { to: "/subscribe", label: "Subscribe & Pay", blurb: "Family subscription · UPI QR / bank transfer", icon: CreditCard },
+  { to: "/donate", label: "Donate", blurb: "Voluntary gift — resident or other donor", icon: Heart },
   { to: "/events", label: "Programme", blurb: "Day-by-day ritual calendar & venue", icon: CalendarDays },
   { to: "/nirghanto", label: "Nirghonto", blurb: "Printable PDF / PNG puja timing cards", icon: Download },
   { to: "/food", label: "Food", blurb: "Community food / meal subscription", icon: UtensilsCrossed },
@@ -164,8 +165,9 @@ export default function Faq() {
 
           <FaqItem q="Can we add a donation?" id="faq-donation">
             <p>
-              Yes. On <PageLink to="/subscribe">Subscribe & Pay</PageLink> you can add an optional voluntary
-              donation on top of the base {amount}. Donations are recorded separately.
+              Yes — use the separate <PageLink to="/donate">Donate</PageLink> page. One 10 residents select
+              tower &amp; flat; other donors use a simpler form. Family subscription stays on{" "}
+              <PageLink to="/subscribe">Subscribe &amp; Pay</PageLink> only.
             </p>
           </FaqItem>
 

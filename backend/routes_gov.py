@@ -60,7 +60,8 @@ async def auth_session(body: dict = Body(...), response: Response = None):
 
 @router.get("/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
-    return {**user, "permissions": sorted(user_permissions(user))}
+    safe = {k: v for k, v in user.items() if k not in ("password_hash", "_id")}
+    return {**safe, "permissions": sorted(user_permissions(user))}
 
 
 @router.post("/auth/logout")

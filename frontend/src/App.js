@@ -54,7 +54,11 @@ function AppRoutes() {
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />
+      <Route path="/terms-and-conditions" element={<Legal type="terms" />} />
+      <Route path="/refunds" element={<Legal type="refunds" />} />
+      <Route path="/refunds-and-cancellations" element={<Legal type="refunds" />} />
       <Route path="/contact" element={<Legal type="contact" />} />
+      <Route path="/contact-us" element={<Legal type="contact" />} />
       <Route path="/upload-qr" element={<UploadPaymentQr />} />
 
       <Route path="/admin/login" element={<Login />} />

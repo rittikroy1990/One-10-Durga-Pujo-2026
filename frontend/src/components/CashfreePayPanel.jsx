@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { CreditCard, Loader2 } from "lucide-react";
 import api from "../lib/api";
@@ -10,7 +11,7 @@ import {
 } from "../lib/cashfree";
 
 /**
- * Cashfree online checkout CTA (Ancholkatha gateway, temporary).
+ * Cashfree online checkout CTA.
  * Renders nothing when Cashfree is not enabled in /api/config.
  */
 export default function CashfreePayPanel({
@@ -36,9 +37,13 @@ export default function CashfreePayPanel({
         mode: r.data.mode || mode,
         redirectTarget: "_self",
       });
-      // If checkout stays in-page and returns an error object
       if (result?.error) {
-        toast.error(result.error.message || "Cashfree checkout was cancelled.");
+        const msg = result.error.message || "Cashfree checkout was cancelled.";
+        if (/not enabled or approved|whitelist/i.test(msg)) {
+          toast.error("Cashfree domain not approved yet. Whitelist https://one10events.in in the Cashfree merchant dashboard (Developers → Whitelisting).");
+        } else {
+          toast.error(msg);
+        }
       }
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -77,9 +82,21 @@ export default function CashfreePayPanel({
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
             {busy ? "Opening Cashfree…" : "Pay with Cashfree"}
           </Button>
-          <p className="mt-2 text-xs text-brown-800/55">
-            Temporary gateway via Anchol Katha Cashfree. Receipt issues after payment succeeds.
-          </p>
+          {mode === "production" ? (
+            <p className="mt-2 text-xs leading-relaxed text-amber-800/90">
+              Live checkout needs <strong>https://one10events.in</strong> whitelisted in Cashfree
+              (Merchant Dashboard → Developers → Whitelisting). Until approved you may see a “Broken Link” error — use UPI QR below as backup.{" "}
+              <Link to="/refunds" className="font-semibold underline-offset-2 hover:underline">Refunds policy</Link>
+              {" · "}
+              <Link to="/terms" className="font-semibold underline-offset-2 hover:underline">Terms</Link>
+              {" · "}
+              <Link to="/contact" className="font-semibold underline-offset-2 hover:underline">Contact</Link>
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-brown-800/55">
+              Receipt issues after payment succeeds.
+            </p>
+          )}
         </div>
       </div>
     </div>

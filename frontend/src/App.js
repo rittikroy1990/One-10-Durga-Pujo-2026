@@ -19,11 +19,13 @@ import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
 import Faq from "./pages/public/Faq";
 import Donate from "./pages/public/Donate";
+import Food from "./pages/public/Food";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
 import Collection from "./pages/admin/Collection";
+import FoodAdmin from "./pages/admin/FoodAdmin";
 import Reconciliation from "./pages/admin/Reconciliation";
 import Accounting from "./pages/admin/Accounting";
 import Procurement from "./pages/admin/Procurement";
@@ -43,6 +45,7 @@ function AppRoutes() {
       <Route path="/" element={<Home />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
+      <Route path="/food" element={<Food />} />
       <Route path="/payment/status" element={<PaymentStatus />} />
       <Route path="/receipt/find" element={<ReceiptFind />} />
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />
@@ -61,6 +64,7 @@ function AppRoutes() {
       <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>
         <Route index element={<Dashboard />} />
         <Route path="collection" element={<Collection />} />
+        <Route path="food" element={<FoodAdmin />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="procurement" element={<Procurement />} />

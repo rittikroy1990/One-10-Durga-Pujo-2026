@@ -272,8 +272,8 @@ export default function Faq() {
 
           <FaqItem q="Where do I register for food / meals?" id="faq-food">
             <p>
-              Open <PageLink to="/food">Food</PageLink>, select meals for the published days, and submit with
-              your tower / flat details. Follow any payment instructions shown on that page.
+              Open <PageLink to="/food">Food</PageLink>, pick Breakfast / Lunch / Dinner for the puja days,
+              and submit your tower / flat details. Payment opens later — amounts are TBC until then.
             </p>
           </FaqItem>
         </section>

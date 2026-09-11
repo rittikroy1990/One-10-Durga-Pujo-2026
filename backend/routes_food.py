@@ -1,7 +1,11 @@
 """Food subscriptions — public register + admin list (coupons/poll kept for compatibility)."""
+import csv
+import io
+import re
 from copy import deepcopy
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response, UploadFile, File
+from fastapi.responses import StreamingResponse
 
 from db import db, new_id, clean, NO_ID
 from config import get_settings, get_active_cycle_id
@@ -145,6 +149,276 @@ async def food_register(body: dict = Body(...), request: Request = None):
 async def admin_list_food(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
     items = await db.food_subscriptions.find({}, NO_ID).sort("created_at", -1).to_list(2000)
     return {"items": items, "payment_enabled": False}
+
+
+_BASE_TEMPLATE_COLS = [
+    "id",
+    "name",
+    "mobile",
+    "tower_name",
+    "flat_number",
+    "family_members",
+    "notes",
+    "payment_status",
+    "status",
+]
+_TRUTHY = {"y", "yes", "1", "true", "t", "x", "✓", "✔"}
+
+
+def _meal_slot_headers(food: dict) -> list[str]:
+    food = _strip_evening_menu(food or {})
+    headers = []
+    for day in food.get("days") or []:
+        dcode = (day.get("code") or "").strip()
+        if not dcode:
+            continue
+        for meal in day.get("meals") or []:
+            mcode = (meal.get("code") or "").strip()
+            if mcode:
+                headers.append(f"{dcode}_{mcode}")
+    return headers
+
+
+def _normalize_header(h: str) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", (h or "").strip().lower()).strip("_")
+
+
+def _is_truthy(val) -> bool:
+    if val is None:
+        return False
+    s = str(val).strip().lower()
+    return s in _TRUTHY
+
+
+def _parse_spreadsheet(content: bytes, filename: str) -> list[list]:
+    name = (filename or "").lower()
+    if name.endswith(".xlsx") or name.endswith(".xls"):
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        return [[("" if c is None else c) for c in r] for r in ws.iter_rows(values_only=True)]
+    text = content.decode("utf-8-sig", errors="replace")
+    return list(csv.reader(io.StringIO(text)))
+
+
+def _row_dict(header: list[str], row: list) -> dict:
+    out = {}
+    for i, key in enumerate(header):
+        if not key:
+            continue
+        out[key] = row[i] if i < len(row) else ""
+    return out
+
+
+def _selections_from_row(food: dict, row: dict, meal_headers: list[str]) -> list | None:
+    """Return selections from Y/N meal columns, or None if file has no meal columns."""
+    present = [h for h in meal_headers if h in row]
+    if not present:
+        # Also accept a compact "meals" column: day|meal;day|meal
+        raw = str(row.get("meals") or "").strip()
+        if not raw:
+            return None
+        keys = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
+        return _normalize_selections(food, keys)
+
+    keys = []
+    for h in present:
+        if _is_truthy(row.get(h)):
+            if "_" in h:
+                day, meal = h.split("_", 1)
+                keys.append(f"{day}|{meal}")
+    return _normalize_selections(food, keys)
+
+
+def _payment_status_from_cell(val: str) -> str:
+    s = (val or "").strip().lower()
+    if s in {"paid", "captured", "settled", "yes", "y", "1"}:
+        return "paid"
+    if s in {"unpaid", "not_open", "not open", "pending", "no", "n", "0"}:
+        return "not_open"
+    if s:
+        return s.replace(" ", "_")
+    return "not_open"
+
+
+@router.get("/admin/food-subscriptions/template")
+async def admin_food_template(
+    include_data: bool = True,
+    user: dict = Depends(require("households:read", "ops:read", "receipts:read")),
+):
+    """CSV template for offline capture. Fill meal columns with Y/N, then upload."""
+    s = await get_settings()
+    food = _strip_evening_menu(s.get("food_subscription") or {})
+    meal_headers = _meal_slot_headers(food)
+    headers = _BASE_TEMPLATE_COLS + meal_headers
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+
+    # Instruction / example blank row guidance as comment-like first data hint
+    if include_data:
+        items = await db.food_subscriptions.find({}, NO_ID).sort("created_at", -1).to_list(5000)
+        for item in items:
+            chosen = {
+                f"{(sel.get('day_code') or '')}_{(sel.get('meal_code') or '')}"
+                for sel in (item.get("selections") or [])
+            }
+            row = [
+                item.get("id") or "",
+                item.get("name") or "",
+                item.get("mobile") or "",
+                item.get("tower_name") or "",
+                item.get("flat_number") or "",
+                item.get("family_members") or 1,
+                item.get("notes") or "",
+                item.get("payment_status") or "not_open",
+                item.get("status") or "registered",
+            ]
+            row.extend(["Y" if h in chosen else "" for h in meal_headers])
+            writer.writerow(row)
+    else:
+        # One blank sample row so Excel opens with columns ready
+        writer.writerow([""] * len(headers))
+
+    data = buf.getvalue().encode("utf-8-sig")
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="food_subscription_template.csv"'},
+    )
+
+
+@router.post("/admin/food-subscriptions/import")
+async def admin_food_import(
+    file: UploadFile = File(...),
+    request: Request = None,
+    user: dict = Depends(require("households:write", "ops:manage", "receipts:manage")),
+):
+    """Upload filled template (CSV/XLSX) to create or update food subscriptions."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file.")
+
+    rows = _parse_spreadsheet(content, file.filename or "upload.csv")
+    if not rows or len(rows) < 2:
+        raise HTTPException(status_code=400, detail="File needs a header row and at least one data row.")
+
+    header = [_normalize_header(str(h)) for h in rows[0]]
+    if "name" not in header or "mobile" not in header:
+        raise HTTPException(status_code=400, detail="Template must include name and mobile columns.")
+
+    s = await get_settings()
+    food = s.get("food_subscription") or {}
+    if not food:
+        raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
+    meal_headers = _meal_slot_headers(food)
+    cycle_id = await get_active_cycle_id()
+
+    created = updated = skipped = 0
+    errors = []
+
+    for idx, raw in enumerate(rows[1:], start=2):
+        if not any(str(x).strip() for x in (raw or [])):
+            continue
+        row = _row_dict(header, raw)
+        name = str(row.get("name") or "").strip()
+        mobile = "".join(c for c in str(row.get("mobile") or "") if c.isdigit())[-10:]
+        if not name or len(mobile) != 10:
+            skipped += 1
+            errors.append({"row": idx, "error": "Name and valid 10-digit mobile required"})
+            continue
+
+        selections = _selections_from_row(food, row, meal_headers)
+        sid = str(row.get("id") or "").strip()
+        existing = None
+        if sid:
+            existing = await db.food_subscriptions.find_one({"id": sid})
+        if not existing:
+            existing = await db.food_subscriptions.find_one({"mobile": mobile}, sort=[("created_at", -1)])
+
+        family_members = 1
+        try:
+            family_members = max(1, int(float(str(row.get("family_members") or 1).strip() or 1)))
+        except Exception:
+            family_members = 1
+
+        payment_status = _payment_status_from_cell(str(row.get("payment_status") or ""))
+        status = (str(row.get("status") or "").strip() or (existing or {}).get("status") or "registered")
+        notes = str(row.get("notes") or "").strip()[:500]
+        tower_name = str(row.get("tower_name") or "").strip()
+        flat_number = str(row.get("flat_number") or "").strip()
+
+        patch = {
+            "name": name,
+            "mobile": mobile,
+            "tower_name": tower_name,
+            "flat_number": flat_number,
+            "family_members": family_members,
+            "notes": notes,
+            "payment_status": payment_status,
+            "status": status,
+            "updated_at": iso(),
+        }
+        if selections is not None:
+            if not selections:
+                skipped += 1
+                errors.append({"row": idx, "error": "Select at least one meal (put Y in meal columns)"})
+                continue
+            patch["selections"] = selections
+            patch["selection_count"] = len(selections)
+
+        if existing:
+            await db.food_subscriptions.update_one({"id": existing["id"]}, {"$set": patch})
+            updated += 1
+            await audit(
+                "food.subscription.import_update",
+                actor=user,
+                entity_type="food_subscription",
+                entity_id=existing["id"],
+                after={"name": name, "mobile": mobile[-4:], "selection_count": patch.get("selection_count")},
+                reason=f"Template upload row {idx}",
+                request=request,
+            )
+        else:
+            if selections is None or not selections:
+                skipped += 1
+                errors.append({"row": idx, "error": "New rows need at least one meal marked Y"})
+                continue
+            new_sid = new_id("food")
+            doc = {
+                "id": new_sid,
+                "cycle_id": cycle_id,
+                "tower_id": "",
+                "flat_id": "",
+                "amount_status": "TBC",
+                "total_amount_paise": None,
+                "coupon_id": None,
+                "coupon_no": None,
+                "created_at": iso(),
+                "source": "admin_import",
+                **patch,
+            }
+            await db.food_subscriptions.insert_one(doc)
+            created += 1
+            await audit(
+                "food.subscription.import_create",
+                actor=user,
+                entity_type="food_subscription",
+                entity_id=new_sid,
+                after={"name": name, "mobile": mobile[-4:], "selection_count": len(selections)},
+                reason=f"Template upload row {idx}",
+                request=request,
+            )
+
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors[:50],
+        "message": f"Import done — {created} created, {updated} updated, {skipped} skipped.",
+    }
 
 
 @router.get("/admin/food-subscriptions/{sid}")

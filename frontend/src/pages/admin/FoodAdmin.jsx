@@ -62,23 +62,21 @@ export default function FoodAdmin() {
     return { total, people, paid, unpaid, meals };
   }, [items]);
 
-  const downloadTemplate = async (includeData = true) => {
+  const downloadTemplate = async () => {
     setDownloading(true);
     try {
       const r = await api.get("/admin/food-subscriptions/template", {
-        params: { include_data: includeData },
+        params: { include_data: true },
         responseType: "blob",
       });
       const blob = new Blob([r.data], { type: "text/csv;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = includeData
-        ? "food_subscriptions_template.csv"
-        : "food_subscription_blank_template.csv";
+      a.download = "food_subscriptions_template.csv";
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(includeData ? "Template with current data downloaded" : "Blank template downloaded");
+      toast.success("Template downloaded");
     } catch {
       toast.error("Could not download template");
     } finally {
@@ -161,19 +159,10 @@ export default function FoodAdmin() {
               variant="admin"
               size="sm"
               disabled={downloading}
-              onClick={() => downloadTemplate(true)}
+              onClick={downloadTemplate}
               data-testid="food-template-download-btn"
             >
               <Download className="h-4 w-4" /> {downloading ? "Preparing…" : "Download template"}
-            </Button>
-            <Button
-              variant="subtle"
-              size="sm"
-              disabled={downloading}
-              onClick={() => downloadTemplate(false)}
-              data-testid="food-template-blank-btn"
-            >
-              <Download className="h-4 w-4" /> Blank template
             </Button>
             <Button
               variant="admin"

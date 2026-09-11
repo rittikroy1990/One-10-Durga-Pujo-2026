@@ -46,7 +46,7 @@ def _strip_evening_menu(food: dict) -> dict:
 
 def _menu_lookup(food: dict) -> dict:
     """Map day_code|meal_code → meal meta from config (B/L/D only)."""
-    food = _strip_evening_menu(food)
+    food = _apply_default_prices(food)
     out = {}
     for day in food.get("days") or []:
         for meal in day.get("meals") or []:
@@ -78,34 +78,89 @@ def _normalize_selections(food: dict, selections: list) -> list:
     return cleaned
 
 
+DEFAULT_MEAL_PRICES_PAISE = {
+    "breakfast": 6000,   # ₹60
+    "lunch": 30000,      # ₹300
+    "dinner": 30000,     # ₹300
+}
+
+
+def _apply_default_prices(food: dict) -> dict:
+    """Ensure B/L/D meals have amount_paise + ₹ labels when missing."""
+    out = _strip_evening_menu(food or {})
+    for day in out.get("days") or []:
+        for meal in day.get("meals") or []:
+            code = meal.get("code") or ""
+            if meal.get("amount_paise") in (None, "", 0) and code in DEFAULT_MEAL_PRICES_PAISE:
+                meal["amount_paise"] = DEFAULT_MEAL_PRICES_PAISE[code]
+            paise = meal.get("amount_paise")
+            if paise not in (None, ""):
+                try:
+                    rupees = int(paise) // 100
+                    meal["amount_label"] = f"₹{rupees}"
+                    meal["amount_status"] = "fixed"
+                except Exception:
+                    pass
+    return out
+
+
+def _meal_price_map(food: dict) -> dict:
+    food = _apply_default_prices(food)
+    prices = {}
+    for day in food.get("days") or []:
+        for meal in day.get("meals") or []:
+            code = meal.get("code")
+            if code and code not in prices:
+                prices[code] = {
+                    "code": code,
+                    "label": meal.get("label") or code.title(),
+                    "amount_paise": meal.get("amount_paise"),
+                    "amount_label": meal.get("amount_label") or "TBC",
+                }
+    return prices
+
+
 @router.get("/food/menu")
 async def food_menu():
     s = await get_settings()
-    food = _strip_evening_menu(s.get("food_subscription") or {})
+    food = _apply_default_prices(s.get("food_subscription") or {})
     return {
         "menu": food,
         "payment_enabled": bool(food.get("payment_enabled")),
-        "payment_note": food.get("payment_note") or "Payment is not open yet.",
+        "payment_note": food.get("payment_note") or "Pay via UPI QR after registering.",
+        "meal_prices": list(_meal_price_map(food).values()),
     }
 
 
 @router.post("/food/register")
 async def food_register(body: dict = Body(...), request: Request = None):
-    """Public registration of food subscription interest — no payment."""
+    """Public food subscription — optional mobile; UPI QR payment when enabled."""
     s = await get_settings()
-    food = s.get("food_subscription") or {}
+    food = _apply_default_prices(s.get("food_subscription") or {})
     if not food:
         raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
 
     name = (body.get("name") or "").strip()
-    mobile = "".join(c for c in str(body.get("mobile") or "") if c.isdigit())[-10:]
-    if not name or len(mobile) != 10:
-        raise HTTPException(status_code=400, detail="Name and a valid 10-digit mobile are required.")
+    mobile_raw = "".join(c for c in str(body.get("mobile") or "") if c.isdigit())
+    mobile = mobile_raw[-10:] if mobile_raw else ""
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+    if mobile and len(mobile) != 10:
+        raise HTTPException(status_code=400, detail="If provided, mobile must be a valid 10-digit number.")
 
     selections = _normalize_selections(food, body.get("selections") or [])
     if not selections:
         raise HTTPException(status_code=400, detail="Select at least one meal.")
 
+    total_paise = 0
+    for sel in selections:
+        paise = sel.get("amount_paise")
+        if paise in (None, ""):
+            total_paise = None
+            break
+        total_paise += int(paise)
+
+    payment_enabled = bool(food.get("payment_enabled")) and total_paise is not None and total_paise > 0
     cycle_id = await get_active_cycle_id()
     sid = new_id("food")
     doc = {
@@ -121,34 +176,166 @@ async def food_register(body: dict = Body(...), request: Request = None):
         "notes": (body.get("notes") or "").strip()[:500],
         "selections": selections,
         "selection_count": len(selections),
-        "amount_status": "TBC",
-        "total_amount_paise": None,
-        "payment_status": "not_open",
+        "amount_status": "fixed" if total_paise is not None else "TBC",
+        "total_amount_paise": total_paise,
+        "payment_status": "pending" if payment_enabled else "not_open",
         "status": "registered",
         "coupon_id": None,
         "coupon_no": None,
+        "intent_id": None,
         "created_at": iso(),
         "updated_at": iso(),
         "source": "public",
     }
+
+    intent_id = None
+    status_tok = None
+    if payment_enabled:
+        # Lightweight household so UPI receipt path stays consistent
+        hid = new_id("hh")
+        await db.households.insert_one({
+            "id": hid, "cycle_id": cycle_id,
+            "tower_id": doc["tower_id"] or "food",
+            "tower_name": doc["tower_name"] or "Food subscription",
+            "flat_id": doc["flat_id"] or new_id("xflat"),
+            "flat_number": doc["flat_number"] or "—",
+            "occupancy_type": "other", "family_members": doc["family_members"],
+            "primary_name": name, "primary_mobile": mobile or "",
+            "is_food_subscriber": True, "created_at": iso(), "is_deleted": False,
+            "source": "food_subscription",
+        })
+        intent_id = new_id("intent")
+        intent = {
+            "id": intent_id, "cycle_id": cycle_id, "household_id": hid,
+            "kind": "food_subscription",
+            "food_subscription_id": sid,
+            "base_amount": total_paise, "donation_amount": 0, "total_amount": total_paise,
+            "components": [],
+            "payer_name": name, "payer_mobile": mobile or "",
+            "status": "payment_pending", "method": "upi_qr",
+            "notes": doc["notes"], "created_at": iso(),
+        }
+        await db.subscription_intents.insert_one(dict(intent))
+        doc["intent_id"] = intent_id
+        from tokens import status_token as _status_token
+        status_tok = _status_token(intent_id)
+
     await db.food_subscriptions.insert_one(doc)
     await audit(
         "food.subscription.register",
         actor="public",
         entity_type="food_subscription",
         entity_id=sid,
-        after={"name": name, "mobile": mobile[-4:], "selection_count": len(selections)},
-        reason="Public food subscription interest (payment not open)",
+        after={
+            "name": name,
+            "mobile": (mobile[-4:] if mobile else ""),
+            "selection_count": len(selections),
+            "total_amount_paise": total_paise,
+            "payment_enabled": payment_enabled,
+        },
+        reason="Public food subscription",
         request=request,
     )
-    return {"ok": True, "id": sid, "status": "registered", "payment_enabled": False,
-            "message": "Registered. Payment is not open yet — amounts are TBC."}
+    return {
+        "ok": True,
+        "id": sid,
+        "status": "registered",
+        "payment_enabled": payment_enabled,
+        "total_amount_paise": total_paise,
+        "intent_id": intent_id,
+        "status_token": status_tok,
+        "message": (
+            "Registered. Pay via UPI QR and upload your payment screenshot."
+            if payment_enabled else
+            "Registered. Payment is not open yet."
+        ),
+    }
+
+
+@router.get("/admin/food-subscriptions/prices")
+async def admin_food_prices(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
+    s = await get_settings()
+    food = _apply_default_prices(s.get("food_subscription") or {})
+    return {
+        "payment_enabled": bool(food.get("payment_enabled")),
+        "payment_note": food.get("payment_note") or "",
+        "prices": list(_meal_price_map(food).values()),
+    }
+
+
+@router.put("/admin/food-subscriptions/prices")
+async def admin_update_food_prices(
+    body: dict = Body(...),
+    request: Request = None,
+    user: dict = Depends(require("households:write", "ops:manage", "receipts:manage")),
+):
+    """Update breakfast/lunch/dinner prices (rupees) and optionally open payment."""
+    s = await get_settings()
+    food = dict(s.get("food_subscription") or {})
+    if not food:
+        raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
+
+    prices_in = body.get("prices") or {}
+    # Accept {breakfast: 60, lunch: 300, dinner: 300} in rupees
+    paise_map = {}
+    for code in ("breakfast", "lunch", "dinner"):
+        if code not in prices_in:
+            continue
+        try:
+            rupees = float(prices_in[code])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid price for {code}")
+        if rupees < 0:
+            raise HTTPException(status_code=400, detail=f"Price for {code} cannot be negative")
+        paise_map[code] = int(round(rupees * 100))
+
+    days = []
+    for day in food.get("days") or []:
+        meals = []
+        for meal in day.get("meals") or []:
+            m = dict(meal)
+            code = m.get("code")
+            if code in paise_map:
+                m["amount_paise"] = paise_map[code]
+                m["amount_label"] = f"₹{paise_map[code] // 100}"
+                m["amount_status"] = "fixed"
+            meals.append(m)
+        d = dict(day)
+        d["meals"] = meals
+        days.append(d)
+    food["days"] = days
+
+    if "payment_enabled" in body:
+        food["payment_enabled"] = bool(body.get("payment_enabled"))
+    if "payment_note" in body:
+        food["payment_note"] = str(body.get("payment_note") or "")[:300]
+    if food.get("payment_enabled") and not food.get("payment_note"):
+        food["payment_note"] = "Pay via UPI QR after selecting meals, then upload your payment screenshot."
+
+    await db.application_settings.update_one({}, {"$set": {"food_subscription": food}}, upsert=True)
+    await audit(
+        "food.prices.update",
+        actor=user,
+        entity_type="food_subscription",
+        entity_id="menu",
+        after={"prices": paise_map, "payment_enabled": food.get("payment_enabled")},
+        request=request,
+    )
+    food = _apply_default_prices(food)
+    return {
+        "ok": True,
+        "payment_enabled": bool(food.get("payment_enabled")),
+        "payment_note": food.get("payment_note") or "",
+        "prices": list(_meal_price_map(food).values()),
+    }
 
 
 @router.get("/admin/food-subscriptions")
 async def admin_list_food(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
     items = await db.food_subscriptions.find({}, NO_ID).sort("created_at", -1).to_list(2000)
-    return {"items": items, "payment_enabled": False}
+    s = await get_settings()
+    food = s.get("food_subscription") or {}
+    return {"items": items, "payment_enabled": bool(food.get("payment_enabled"))}
 
 
 _BASE_TEMPLATE_COLS = [

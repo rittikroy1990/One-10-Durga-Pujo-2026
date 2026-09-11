@@ -64,50 +64,12 @@ async function shareReceiptOnWhatsApp({ receiptNo, verifyToken }) {
 export default function PaymentStatus() {
   const [params] = useSearchParams();
   const token = params.get("token");
-  const cashfreeOrderId = params.get("cashfree_order_id");
   const [data, setData] = useState(null);
   const [tries, setTries] = useState(0);
   const [sharing, setSharing] = useState(false);
   const [acking, setAcking] = useState(false);
   const timer = useRef();
-  const verifiedRef = useRef(false);
 
-  useEffect(() => {
-    if (!cashfreeOrderId || verifiedRef.current) return;
-    verifiedRef.current = true;
-    (async () => {
-      try {
-        const r = await api.post("/payments/cashfree/verify", {
-          cashfree_order_id: cashfreeOrderId,
-        });
-        if (r.data?.status === "paid") {
-          setData({
-            status: "paid",
-            receipt_no: r.data.receipt?.receipt_no,
-            verify_token: r.data.receipt?.verify_token,
-            message: "Cashfree payment recorded and receipt issued.",
-            bank_verified: true,
-            do_not_pay_again: true,
-            has_payment_screenshot: false,
-            screenshot_url: null,
-            acknowledge_available: false,
-          });
-          return;
-        }
-        if (r.data?.status === "pending") {
-          setData((prev) => ({
-            ...(prev || {}),
-            status: prev?.status === "paid" ? "paid" : "processing",
-            message: r.data.message || "Confirming Cashfree payment…",
-            do_not_pay_again: true,
-            acknowledge_available: prev?.acknowledge_available ?? true,
-          }));
-        }
-      } catch {
-        // Fall through to status polling with token.
-      }
-    })();
-  }, [cashfreeOrderId]);
 
   useEffect(() => {
     if (!token) return;
@@ -144,7 +106,7 @@ export default function PaymentStatus() {
   const hasScreenshot = Boolean(paid && (data?.screenshot_url || data?.has_payment_screenshot) && token);
   const canShareWhatsApp = Boolean(paid && (data?.verify_token || hasScreenshot));
   const canAcknowledge = Boolean(
-    token && data && !paid && data.status !== "error" && (data.acknowledge_available || cashfreeOrderId),
+    token && data && !paid && data.status !== "error" && (data.acknowledge_available),
   );
 
   const onAcknowledge = async () => {
@@ -153,7 +115,6 @@ export default function PaymentStatus() {
     try {
       const r = await api.post("/payments/acknowledge", {
         status_token: token,
-        cashfree_order_id: cashfreeOrderId || undefined,
       });
       if (r.data?.status === "paid" && r.data?.receipt) {
         toast.success(`Receipt ${r.data.receipt.receipt_no || ""} issued`);
@@ -245,7 +206,7 @@ export default function PaymentStatus() {
               )}
               {data.bank_verified === true && (
                 <p className="mt-3 text-xs text-emerald-700/80">
-                  Verified via Cashfree payment gateway.
+                  Payment recorded via UPI QR.
                 </p>
               )}
               <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -280,7 +241,7 @@ export default function PaymentStatus() {
             <>
               <Loader2 className="mx-auto h-14 w-14 animate-spin text-gold-500" />
               <h1 className="mt-3 font-display text-4xl">
-                {cashfreeOrderId ? "Confirming Cashfree payment" : "Checking screenshot"}
+                Checking screenshot
               </h1>
               <p className="mt-1 text-brown-800/70">{data.message}</p>
               <p className="mt-2 text-sm font-semibold text-vermilion-600">Please do not pay again.</p>

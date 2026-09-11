@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner";
 import { RefreshCw, Download, Upload } from "lucide-react";
 import api from "../../lib/api";
-import { Card, CardBody, Table, THead, TR, TH, TD, Button, StatusBadge, Spinner } from "../../components/ui";
+import { Card, CardBody, Table, THead, TR, TH, TD, Button, StatusBadge, Spinner, Input, Label } from "../../components/ui";
 import ExportCsvButton from "../../components/ExportCsvButton";
 import { formatDateIST } from "../../lib/utils";
 
@@ -38,7 +38,14 @@ export default function FoodAdmin() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [savingPrices, setSavingPrices] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [priceForm, setPriceForm] = useState({
+    breakfast: "60",
+    lunch: "300",
+    dinner: "300",
+    payment_enabled: false,
+  });
   const fileRef = useRef(null);
 
   const load = useCallback(() => {
@@ -49,7 +56,45 @@ export default function FoodAdmin() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadPrices = useCallback(() => {
+    api.get("/admin/food-subscriptions/prices")
+      .then((r) => {
+        const map = {};
+        for (const p of r.data.prices || []) {
+          if (p?.code) map[p.code] = String(Math.round((Number(p.amount_paise) || 0) / 100));
+        }
+        setPriceForm({
+          breakfast: map.breakfast || "60",
+          lunch: map.lunch || "300",
+          dinner: map.dinner || "300",
+          payment_enabled: !!r.data.payment_enabled,
+        });
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(load, [load]);
+  useEffect(loadPrices, [loadPrices]);
+
+  const savePrices = async () => {
+    setSavingPrices(true);
+    try {
+      const r = await api.put("/admin/food-subscriptions/prices", {
+        prices: {
+          breakfast: Number(priceForm.breakfast),
+          lunch: Number(priceForm.lunch),
+          dinner: Number(priceForm.dinner),
+        },
+        payment_enabled: !!priceForm.payment_enabled,
+      });
+      toast.success(r.data.payment_enabled ? "Prices saved — UPI QR payment open" : "Prices saved");
+      loadPrices();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not save prices");
+    } finally {
+      setSavingPrices(false);
+    }
+  };
 
   const stats = useMemo(() => {
     const total = items.length;
@@ -146,6 +191,71 @@ export default function FoodAdmin() {
           </CardBody>
         </Card>
       </div>
+
+      <Card className="mb-4">
+        <CardBody>
+          <div className="mb-2 font-display text-xl text-brown-900">Meal prices (UPI QR only)</div>
+          <p className="mb-3 text-sm text-brown-800/60">
+            Set Breakfast / Lunch / Dinner in rupees. When payment is open, residents pay via the uploaded UPI QR — no payment gateway.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <Label>Breakfast ₹</Label>
+              <Input
+                data-testid="food-price-breakfast"
+                type="number"
+                min={0}
+                step="1"
+                value={priceForm.breakfast}
+                onChange={(e) => setPriceForm((f) => ({ ...f, breakfast: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Lunch ₹</Label>
+              <Input
+                data-testid="food-price-lunch"
+                type="number"
+                min={0}
+                step="1"
+                value={priceForm.lunch}
+                onChange={(e) => setPriceForm((f) => ({ ...f, lunch: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Dinner ₹</Label>
+              <Input
+                data-testid="food-price-dinner"
+                type="number"
+                min={0}
+                step="1"
+                value={priceForm.dinner}
+                onChange={(e) => setPriceForm((f) => ({ ...f, dinner: e.target.value }))}
+              />
+            </div>
+            <div className="flex flex-col justify-end gap-2">
+              <label className="flex items-center gap-2 text-sm text-brown-800/80">
+                <input
+                  type="checkbox"
+                  data-testid="food-payment-enabled"
+                  checked={!!priceForm.payment_enabled}
+                  onChange={(e) => setPriceForm((f) => ({ ...f, payment_enabled: e.target.checked }))}
+                  className="h-4 w-4"
+                />
+                Payment open (UPI QR)
+              </label>
+              <Button
+                variant="admin"
+                size="sm"
+                disabled={savingPrices}
+                onClick={savePrices}
+                data-testid="food-prices-save-btn"
+              >
+                {savingPrices ? "Saving…" : "Save prices"}
+              </Button>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
       <Card className="mb-4">
         <CardBody>

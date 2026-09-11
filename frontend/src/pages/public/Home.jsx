@@ -225,7 +225,7 @@ export default function Home() {
       <section className="border-t border-gold-500/15 bg-brown-900">
         <div className="mx-auto grid max-w-7xl gap-6 px-5 py-14 md:grid-cols-3">
           {[
-            { icon: ShieldCheck, t: "Verified payments only", d: "Every receipt is backed by a verified bank/gateway transaction — never a screenshot." },
+            { icon: ShieldCheck, t: "UPI QR receipts", d: "Pay via the committee UPI QR, upload your screenshot, and get a recorded receipt." },
             { icon: Search, t: "One source of truth", d: "Payment, receipt and ledger totals always reconcile. Auditors can trace any rupee." },
             { icon: HandHeart, t: "A community for everyone", d: "Residents, families, elders, children, performers and volunteers — all welcome." },
           ].map((f, i) => (

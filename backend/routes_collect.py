@@ -1,5 +1,5 @@
-"""Phase 1 collection core: subscribe, Razorpay payment state machine, receipts, refunds,
-and manual (cash/bank-transfer/cheque) maker-checker modes."""
+"""Phase 1 collection core: subscribe, UPI QR payment, receipts, refunds,
+and manual (cash/bank-transfer/cheque) maker-checker modes. Payment gateways disabled."""
 from fastapi import APIRouter, Depends, Request, HTTPException, Body, Response
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -15,7 +15,6 @@ from ledger import post_journal, reverse_journal
 from tokens import receipt_token, status_token, read_status_token
 from docs import receipt_pdf
 from auth import require, get_current_user, require_reauth
-import payments as pay
 from notify import notify
 
 router = APIRouter(prefix="/api")
@@ -144,8 +143,9 @@ async def subscribe(body: SubscribeIn, request: Request):
     }
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
-                entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid,
-                                               "method": intent["method"]},
+                entity_id=intent["id"], correlation_id=intent["id"],
+                after={"total": intent["total_amount"], "household": hid,
+                       "method": intent["method"]},
                 request=request)
 
     return {
@@ -274,6 +274,7 @@ async def donate(body: DonateIn, request: Request):
         "donation.intent.create",
         entity_type="subscription_intent",
         entity_id=intent["id"],
+        correlation_id=intent["id"],
         after={"total": donation, "donor_type": donor_type, "household": hid},
         request=request,
     )
@@ -289,43 +290,46 @@ async def donate(body: DonateIn, request: Request):
     }
 
 
-# --------------------------------------------------------------- Payment order + verify + webhook
+# --------------------------------------------------------------- Payment gateway (DISABLED — UPI QR only)
+_GATEWAY_GONE = (
+    "Online payment gateways are disabled. Please pay via the uploaded UPI QR "
+    "and submit your payment screenshot."
+)
+
+
 @router.post("/payments/order")
 async def create_order(body: dict = Body(...)):
-    intent_id = body.get("intent_id")
-    intent = await db.subscription_intents.find_one({"id": intent_id})
-    if not intent:
-        raise HTTPException(status_code=404, detail="Subscription intent not found.")
-    if intent["status"] == "paid":
-        raise HTTPException(status_code=409, detail="This subscription is already paid.")
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
 
-    # reuse a still-valid created order
-    existing = await db.payment_orders.find_one({"intent_id": intent_id, "status": "created"})
-    if existing:
-        return {"internal_order_id": existing["id"], "provider_order_id": existing["provider_order_id"],
-                "amount": existing["expected_amount"], "currency": "INR", "key_id": pay.KEY_ID,
-                "status_token": status_token(intent_id), "mode": existing.get("mode", "test")}
 
-    amount = int(intent["total_amount"])  # server-computed only
-    attempt_no = await db.payment_orders.count_documents({"intent_id": intent_id}) + 1
-    provider_order_id, mode = pay.create_order(amount, receipt=intent_id[:40],
-                                               notes={"household_id": intent["household_id"]})
-    order = {
-        "id": new_id("ord"), "intent_id": intent_id, "household_id": intent["household_id"],
-        "provider": pay.PROVIDER, "provider_order_id": provider_order_id,
-        "expected_amount": amount, "currency": "INR", "status": "created",
-        "attempt_no": attempt_no, "mode": mode,
-        "expires_at": iso(), "created_at": iso(),
-    }
-    await db.payment_orders.insert_one(dict(order))
-    await db.payment_attempts.insert_one({
-        "id": new_id("att"), "order_id": order["id"], "intent_id": intent_id,
-        "attempt_no": attempt_no, "status": "created", "created_at": iso()})
-    await audit("payment.order.create", entity_type="payment_order", entity_id=order["id"],
-                after={"provider_order_id": provider_order_id, "amount": amount})
-    return {"internal_order_id": order["id"], "provider_order_id": provider_order_id,
-            "amount": amount, "currency": "INR", "key_id": pay.KEY_ID,
-            "status_token": status_token(intent_id), "mode": mode}
+@router.post("/payments/verify")
+async def verify_checkout(body: dict = Body(...), request: Request = None):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/simulate")
+async def simulate_payment(body: dict = Body(...), request: Request = None):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/cashfree/session")
+async def cashfree_session_disabled(body: dict = Body(None)):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/cashfree/verify")
+async def cashfree_verify_disabled(body: dict = Body(None)):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.api_route("/webhooks/cashfree", methods=["GET", "POST"])
+async def cashfree_webhook_disabled():
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
 
 
 async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, debit_account, request=None):
@@ -350,12 +354,16 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     n, receipt_no = await next_formatted("receipt", settings["receipt"]["prefix"], 6)
     rid = new_id("rcpt")
     kind = intent.get("kind") or "subscription"
-    if kind == "donation":
+    if kind in ("donation", "food_subscription"):
         lines = [
             {"account_code": debit_account, "debit": intent["total_amount"], "credit": 0},
             {"account_code": "4100", "debit": 0, "credit": intent["total_amount"]},
         ]
-        narration = f"Donation receipt {receipt_no} ({method})"
+        narration = (
+            f"Food subscription receipt {receipt_no} ({method})"
+            if kind == "food_subscription"
+            else f"Donation receipt {receipt_no} ({method})"
+        )
     else:
         lines = [{"account_code": debit_account, "debit": intent["total_amount"], "credit": 0}]
         for comp in intent.get("components") or []:
@@ -373,8 +381,12 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "payment_id": provider_payment_id, "kind": kind,
         "payer_name": intent.get("payer_name") or household.get("primary_name"),
         "payer_mobile": intent.get("payer_mobile") or household.get("primary_mobile") or "",
-        "tower_name": household.get("tower_name") or ("External donor" if kind == "donation" else ""),
-        "flat_number": household.get("flat_number") or ("—" if kind == "donation" else ""),
+        "tower_name": household.get("tower_name") or (
+            "External donor" if kind == "donation" else ("Food subscription" if kind == "food_subscription" else "")
+        ),
+        "flat_number": household.get("flat_number") or (
+            "—" if kind in ("donation", "food_subscription") else ""
+        ),
         "base_amount": intent.get("base_amount") or 0,
         "donation_amount": intent.get("donation_amount") or 0,
         "total_amount": intent["total_amount"],
@@ -383,122 +395,30 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "journal_id": journal["id"], "issued_at": iso(),
         "campaign_title": campaign_title,
         "donor_type": intent.get("donor_type") or "",
+        "food_subscription_id": intent.get("food_subscription_id") or "",
     }
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
+    food_id = intent.get("food_subscription_id")
+    if kind == "food_subscription" and food_id:
+        await db.food_subscriptions.update_one(
+            {"id": food_id},
+            {"$set": {
+                "payment_status": "paid",
+                "status": "paid",
+                "receipt_id": rid,
+                "receipt_no": receipt_no,
+                "intent_id": intent["id"],
+                "updated_at": iso(),
+            }},
+        )
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
+                correlation_id=intent.get("id") or "",
                 after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind}, request=request)
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
                  subject=f"Your {campaign_title} receipt {receipt_no}",
                  data={"receipt_no": receipt_no})
     return clean(receipt)
-
-
-async def _finalize_online(order, provider_payment_id, request=None):
-    """Idempotent finalisation of a verified online payment."""
-    intent = await db.subscription_intents.find_one({"id": order["intent_id"]})
-    if not intent:
-        return {"status": "error", "detail": "intent missing"}
-    # idempotency: unique payment record
-    try:
-        await db.payments.insert_one({
-            "id": new_id("pay"), "provider": pay.PROVIDER, "provider_payment_id": provider_payment_id,
-            "order_id": order["id"], "intent_id": order["intent_id"],
-            "amount": order["expected_amount"], "currency": "INR", "status": "captured",
-            "created_at": iso()})
-    except Exception:
-        return {"status": "already_processed", "provider_payment_id": provider_payment_id}
-
-    # amount / currency confirmation
-    if int(order["expected_amount"]) != int(intent["total_amount"]):
-        await db.payment_orders.update_one({"id": order["id"]}, {"$set": {"status": "reconciliation_required"}})
-        await audit("payment.reconciliation_required", entity_type="payment_order",
-                    entity_id=order["id"], reason="amount mismatch")
-        return {"status": "reconciliation_required"}
-
-    receipt = await _issue_receipt(intent, method="razorpay",
-                                   masked_ref="xxxx" + provider_payment_id[-4:],
-                                   provider_payment_id=provider_payment_id,
-                                   debit_account="1003", request=request)
-    await db.payment_orders.update_one({"id": order["id"]}, {"$set": {"status": "paid"}})
-    if receipt is None:
-        return {"status": "duplicate_payment", "message": "Excess payment queued for refund review."}
-    return {"status": "paid", "receipt": receipt}
-
-
-@router.post("/payments/verify")
-async def verify_checkout(body: dict = Body(...), request: Request = None):
-    order_id = body.get("internal_order_id")
-    provider_order_id = body.get("razorpay_order_id")
-    payment_id = body.get("razorpay_payment_id")
-    signature = body.get("razorpay_signature")
-    order = await db.payment_orders.find_one({"id": order_id}) if order_id else \
-        await db.payment_orders.find_one({"provider_order_id": provider_order_id})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found.")
-    if not pay.verify_checkout_signature(order["provider_order_id"], payment_id, signature):
-        await db.payment_attempts.update_one({"order_id": order["id"]},
-                                             {"$set": {"status": "signature_invalid"}})
-        await audit("payment.signature.invalid", entity_type="payment_order", entity_id=order["id"])
-        raise HTTPException(status_code=400, detail="Invalid payment signature.")
-    result = await _finalize_online(order, payment_id, request)
-    return result
-
-
-@router.post("/payments/simulate")
-async def simulate_payment(body: dict = Body(...), request: Request = None):
-    """PREVIEW/TEST ONLY — demonstrates the verified path with a server-signed test payment.
-    Disabled when RAZORPAY_MODE=live."""
-    if pay.is_live():
-        raise HTTPException(status_code=403, detail="Simulation disabled in live mode.")
-    order = await db.payment_orders.find_one({"id": body.get("internal_order_id")})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found.")
-    payment_id, signature = pay.simulate_success_signature(order["provider_order_id"])
-    if not pay.verify_checkout_signature(order["provider_order_id"], payment_id, signature):
-        raise HTTPException(status_code=500, detail="Simulation signature failed.")
-    result = await _finalize_online(order, payment_id, request)
-    result["simulated"] = True
-    return result
-
-
-@router.post("/webhooks/razorpay")
-async def razorpay_webhook(request: Request):
-    raw = await request.body()
-    signature = request.headers.get("X-Razorpay-Signature", "")
-    verified = pay.verify_webhook_signature(raw, signature)
-    try:
-        payload = json.loads(raw.decode() or "{}")
-    except Exception:
-        payload = {}
-    event_id = request.headers.get("X-Razorpay-Event-Id") or payload.get("id") or new_id("evt")
-    event_type = payload.get("event", "")
-    # persist event (idempotent by unique provider+event_id)
-    try:
-        await db.webhook_events.insert_one({
-            "id": new_id("wh"), "provider": pay.PROVIDER, "event_id": event_id,
-            "event_type": event_type, "verified": verified, "processed": False,
-            "created_at": iso()})
-    except Exception:
-        return {"status": "duplicate", "event_id": event_id}
-
-    if not verified:
-        await audit("webhook.signature.invalid", entity_type="webhook_event", entity_id=event_id)
-        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
-
-    result = {"status": "ignored"}
-    try:
-        entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
-        provider_order_id = entity.get("order_id")
-        provider_payment_id = entity.get("id")
-        if event_type in ("payment.captured", "payment.authorized") and provider_order_id:
-            order = await db.payment_orders.find_one({"provider_order_id": provider_order_id})
-            if order:
-                result = await _finalize_online(order, provider_payment_id, request)
-    finally:
-        await db.webhook_events.update_one({"event_id": event_id},
-                                           {"$set": {"processed": True, "result": result}})
-    return {"status": "processed", "event_id": event_id, "result": result}
 
 
 @router.get("/payments/status/{token}")
@@ -837,6 +757,7 @@ async def upi_submit(request: Request):
         "upi.screenshot.submit",
         entity_type="upi_submission",
         entity_id=sub_id,
+        correlation_id=intent_id,
         after={"status": final_status, "intent_id": intent_id, "ref": ref_norm[-4:]},
         request=request,
     )
@@ -925,11 +846,13 @@ async def create_refund(body: dict = Body(...), request: Request = None,
     if amount <= 0 or (already + amount) > receipt["total_amount"]:
         raise HTTPException(status_code=400, detail="Refund exceeds eligible captured amount.")
     refund = {"id": new_id("rfnd"), "receipt_id": receipt["id"], "household_id": receipt["household_id"],
+              "intent_id": receipt.get("intent_id") or "",
               "amount_paise": amount, "reason": body.get("reason", ""), "status": "requested",
               "requested_by": user["user_id"], "provider_reference": body.get("provider_reference", ""),
               "created_at": iso()}
     await db.refunds.insert_one(dict(refund))
     await audit("refund.request", actor=user, entity_type="refund", entity_id=refund["id"],
+                correlation_id=receipt.get("intent_id") or "",
                 after={"amount": amount}, reason=refund["reason"], request=request)
     return clean(refund)
 

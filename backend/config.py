@@ -470,7 +470,7 @@ DEFAULT_SETTINGS = {
         "email_enabled": False,
         "multi_campaign": True,
         "payment_provider": "upi_qr",
-        "razorpay_public_checkout": False,
+        "razorpay_public_checkout": False,  # legacy flag; gateways removed — always False
         "llm_screenshot_auto_issue": True,
     },
     "approval_thresholds_paise": {

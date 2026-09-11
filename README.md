@@ -10,14 +10,14 @@ Handles multi-campaign **subscriptions**, **verified digital receipts**, **doubl
 |-------|------|
 | Frontend | React 18 (CRA) + Tailwind + React Router |
 | Backend | FastAPI + Motor (MongoDB) |
-| Payments | Razorpay (test/live) |
+| Payments | UPI QR + screenshot (no payment gateway) |
 | Auth | Emergent Google OAuth (committee admin) |
 
 ## Features
 
 **Public**
 - Platform home (One 10 Events) with published campaigns
-- Household subscribe & pay (Razorpay or test simulate)
+- Household subscribe & pay (UPI QR + screenshot)
 - Find / verify receipts
 - Programme, participate (volunteer/performer), transparency report
 
@@ -88,7 +88,7 @@ Before going live, confirm in Settings / env:
 
 1. Legal identity, address, PAN/registration
 2. Committee contacts and authorised signatory
-3. Bank account + Razorpay **live** keys + webhook secret
+3. Bank account + uploaded UPI payment QR
 4. Approval thresholds and recon confidence
 5. Refund / retention policy wording
 6. Custom domain and email sender

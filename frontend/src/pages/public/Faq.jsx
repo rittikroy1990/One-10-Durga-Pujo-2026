@@ -187,9 +187,9 @@ export default function Faq() {
           <FaqItem q="Where do I pay online?" id="faq-pay-where">
             <p>
               Go to <PageLink to="/subscribe">Subscribe & Pay</PageLink>, fill household details, then on the
-              payment step scan the committee UPI QR (or tap Open in UPI app / GPay / PhonePe / Paytm).
+              payment step scan the committee UPI QR with any UPI app.
             </p>
-            <p>Prefer scanning with the UPI app camera if a deep link fails on your phone.</p>
+            <p>Open GPay, PhonePe, Paytm, or BHIM and use Scan QR on this page.</p>
           </FaqItem>
 
           <FaqItem q="What are the bank account details for NEFT / IMPS / net banking?" id="faq-bank">

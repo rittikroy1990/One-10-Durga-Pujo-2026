@@ -563,12 +563,18 @@ export default function Donate() {
                 <div className="mt-1 text-[#5C3530]/70">
                   Amount: <span className="font-semibold text-[#C0392B]">{formatPaise(upiSession.total_amount)}</span>
                 </div>
+                <ol className="mx-auto mt-4 max-w-md space-y-1.5 text-left text-sm text-[#5C3530]/75">
+                  <li><span className="font-semibold text-[#3A1518]">1.</span> Open any UPI app (GPay, PhonePe, Paytm, BHIM…)</li>
+                  <li><span className="font-semibold text-[#3A1518]">2.</span> Tap <span className="font-semibold">Scan QR</span> and scan below</li>
+                  <li><span className="font-semibold text-[#3A1518]">3.</span> Pay the exact amount</li>
+                  <li><span className="font-semibold text-[#3A1518]">4.</span> Enter UTR / UPI reference and upload screenshot</li>
+                </ol>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="flex flex-col items-center rounded-xl border border-[#D4AF37]/35 bg-[#FFF8F0] p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#3A1518]">
-                    <QrCode className="h-4 w-4 text-[#C0392B]" /> Scan UPI QR
+                    <QrCode className="h-4 w-4 text-[#C0392B]" /> Scan &amp; pay
                   </div>
                   {pay?.upi_intent_url ? (
                     <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
@@ -577,6 +583,9 @@ export default function Donate() {
                   ) : (
                     <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-[#5C3530]/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
                   )}
+                  <p className="mt-3 text-center text-xs leading-relaxed text-[#5C3530]/60">
+                    Use your UPI app’s <span className="font-semibold">Scan QR</span> camera.
+                  </p>
                 </div>
 
                 <div className="rounded-xl border border-[#D4AF37]/35 bg-white p-4 text-sm">

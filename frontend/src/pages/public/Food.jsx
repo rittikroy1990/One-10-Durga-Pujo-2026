@@ -480,9 +480,13 @@ export default function Food() {
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
               <h3 className="flex items-center gap-2 font-display text-xl text-brown-900">
                 <span className="grid h-7 w-7 place-items-center rounded-full bg-vermilion-500 text-sm font-bold text-white">1</span>
-                Pay with UPI
+                Scan &amp; pay with UPI
               </h3>
-              <p className="mt-1 text-sm text-brown-800/60">Scan the QR, or tap your UPI app.</p>
+              <ol className="mt-2 space-y-1.5 text-sm text-brown-800/70">
+                <li><span className="font-semibold text-brown-900">1.</span> Open GPay, PhonePe, Paytm, or any UPI app</li>
+                <li><span className="font-semibold text-brown-900">2.</span> Tap <span className="font-semibold">Scan QR</span> and scan the code below</li>
+                <li><span className="font-semibold text-brown-900">3.</span> Pay the exact amount shown above</li>
+              </ol>
               <div className="mt-4 flex flex-col items-center">
                 {pay?.upi_intent_url ? (
                   <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
@@ -491,8 +495,8 @@ export default function Food() {
                 ) : (
                   <img src={staticQr} alt="Food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="food-qr-img" />
                 )}
-                <p className="mt-3 text-center text-xs text-brown-800/55">
-                  Open any UPI app and scan this QR to pay.
+                <p className="mt-3 text-center text-xs leading-relaxed text-brown-800/55">
+                  Use your UPI app’s <span className="font-semibold">Scan QR</span> camera.
                 </p>
               </div>
 

@@ -334,12 +334,18 @@ export default function Subscribe() {
                   Amount
                   <span className="font-display text-xl font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
+                <ol className="mx-auto mt-4 max-w-xl space-y-1.5 text-left text-sm text-brown-800/75 sm:mx-0">
+                  <li><span className="font-semibold text-brown-900">1.</span> Open GPay, PhonePe, Paytm, or any UPI app</li>
+                  <li><span className="font-semibold text-brown-900">2.</span> Tap <span className="font-semibold">Scan QR</span> and scan the code below</li>
+                  <li><span className="font-semibold text-brown-900">3.</span> Pay the exact amount shown</li>
+                  <li><span className="font-semibold text-brown-900">4.</span> Come back here, enter the UTR / UPI reference, and upload the payment screenshot</li>
+                </ol>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
                 <div className="flex flex-col items-center rounded-xl border border-gold-500/30 bg-white p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan UPI QR
+                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan &amp; pay
                   </div>
                   {pay?.upi_intent_url ? (
                     <a
@@ -350,7 +356,7 @@ export default function Subscribe() {
                     >
                       <img
                         src={staticQr}
-                        alt="Committee UPI payment QR — tap to open UPI app"
+                        alt="Committee UPI payment QR — scan with your UPI app"
                         className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
                         data-testid="payment-qr-img"
                       />
@@ -363,8 +369,10 @@ export default function Subscribe() {
                       data-testid="payment-qr-img"
                     />
                   )}
-                  <p className="mt-2 text-center text-xs text-brown-800/55">
-                    Open any UPI app and scan this QR to pay.
+                  <p className="mt-3 text-center text-xs leading-relaxed text-brown-800/60">
+                    Use your UPI app’s <span className="font-semibold">Scan QR</span> camera.
+                    <br />
+                    Enter the exact amount if the app asks.
                   </p>
                 </div>
 

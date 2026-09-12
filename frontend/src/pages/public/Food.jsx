@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  UtensilsCrossed, Check, Info, QrCode, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
+  UtensilsCrossed, Info, QrCode, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
+  Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -10,12 +11,19 @@ import { Button, Input, Label, Select, Spinner } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
 const ALLOWED_MEALS = new Set(["breakfast", "lunch", "dinner"]);
+const MAX_QTY = 50;
 
 function filterDays(days) {
-  return (days || []).map((day) => ({
-    ...day,
-    meals: (day.meals || []).filter((m) => ALLOWED_MEALS.has(m.code)),
-  })).filter((day) => (day.meals || []).length > 0);
+  return (days || [])
+    .map((day) => ({
+      ...day,
+      meals: (day.meals || []).filter((m) => ALLOWED_MEALS.has(m.code)),
+    }))
+    .filter((day) => (day.meals || []).length > 0);
+}
+
+function lineKey(dayCode, mealCode) {
+  return `${dayCode}|${mealCode}`;
 }
 
 export default function Food() {
@@ -24,11 +32,13 @@ export default function Food() {
   const [towers, setTowers] = useState([]);
   const [flats, setFlats] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState("menu"); // menu | checkout | pay | done
   const [done, setDone] = useState(null);
   const [intent, setIntent] = useState(null);
   const [upiSession, setUpiSession] = useState(null);
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
+  const [cart, setCart] = useState({}); // { "day|meal": qty }
   const [form, setForm] = useState({
     name: "",
     mobile: "",
@@ -39,7 +49,6 @@ export default function Food() {
     family_members: 1,
     notes: "",
   });
-  const [selected, setSelected] = useState(() => new Set());
 
   useEffect(() => {
     api.get("/food/menu").then((r) => setMenu(r.data)).catch(() => toast.error("Could not load food menu"));
@@ -56,6 +65,7 @@ export default function Food() {
 
   const days = useMemo(() => filterDays(menu?.menu?.days || []), [menu]);
   const paymentEnabled = !!menu?.payment_enabled;
+
   const priceByMeal = useMemo(() => {
     const map = {};
     for (const p of menu?.meal_prices || []) {
@@ -71,45 +81,70 @@ export default function Food() {
     return map;
   }, [menu, days]);
 
-  const totalPaise = useMemo(() => {
+  const cartLines = useMemo(() => {
+    const lines = [];
+    for (const day of days) {
+      for (const meal of day.meals || []) {
+        const key = lineKey(day.code, meal.code);
+        const qty = Number(cart[key] || 0);
+        if (qty <= 0) continue;
+        const unit = priceByMeal[meal.code];
+        lines.push({
+          key,
+          day_code: day.code,
+          day_label: day.label || day.code,
+          meal_code: meal.code,
+          meal_label: meal.label || meal.code,
+          quantity: qty,
+          unit_paise: unit ?? null,
+          line_total_paise: unit != null ? unit * qty : null,
+          amount_label: meal.amount_label || (unit != null ? formatPaise(unit) : "TBC"),
+        });
+      }
+    }
+    return lines;
+  }, [cart, days, priceByMeal]);
+
+  const cartCount = useMemo(() => cartLines.reduce((n, l) => n + l.quantity, 0), [cartLines]);
+  const cartTotalPaise = useMemo(() => {
+    if (!cartLines.length) return 0;
     let sum = 0;
-    for (const key of selected) {
-      const mealCode = key.split("|")[1];
-      const paise = priceByMeal[mealCode];
-      if (paise == null) return null;
-      sum += paise;
+    for (const line of cartLines) {
+      if (line.line_total_paise == null) return null;
+      sum += line.line_total_paise;
     }
     return sum;
-  }, [selected, priceByMeal]);
+  }, [cartLines]);
 
-  const allKeys = useMemo(
-    () => days.flatMap((d) => (d.meals || []).map((m) => `${d.code}|${m.code}`)),
-    [days],
-  );
+  const mealTypeSummary = useMemo(() => {
+    const map = { breakfast: 0, lunch: 0, dinner: 0 };
+    for (const line of cartLines) {
+      if (map[line.meal_code] != null) map[line.meal_code] += line.quantity;
+    }
+    return map;
+  }, [cartLines]);
+
+  const breakfastPrice = priceByMeal.breakfast ?? 6000;
+  const lunchPrice = priceByMeal.lunch ?? 30000;
+  const dinnerPrice = priceByMeal.dinner ?? 30000;
 
   const pay = upiSession?.payment;
   const bank = pay?.bank_account;
   const appLinks = pay?.upi_app_links || {};
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
 
-  const toggle = (key) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
+  const setQty = (key, qty) => {
+    const next = Math.max(0, Math.min(MAX_QTY, Number(qty) || 0));
+    setCart((prev) => {
+      const copy = { ...prev };
+      if (next <= 0) delete copy[key];
+      else copy[key] = next;
+      return copy;
     });
   };
 
-  const selectDay = (day) => {
-    const keys = (day.meals || []).map((m) => `${day.code}|${m.code}`);
-    setSelected((prev) => {
-      const next = new Set(prev);
-      const allOn = keys.every((k) => next.has(k));
-      keys.forEach((k) => (allOn ? next.delete(k) : next.add(k)));
-      return next;
-    });
-  };
+  const bump = (key, delta) => setQty(key, (cart[key] || 0) + delta);
+  const clearCart = () => setCart({});
 
   const copyText = async (text, label) => {
     try {
@@ -129,9 +164,15 @@ export default function Food() {
     window.location.href = target;
   };
 
-  const submit = async (e) => {
+  const goCheckout = () => {
+    if (cartCount === 0) return toast.error("Add meals to your cart first");
+    setStep("checkout");
+  };
+
+  const submitCheckout = async (e) => {
     e.preventDefault();
-    if (selected.size === 0) return toast.error("Select at least one meal");
+    if (cartCount === 0) return toast.error("Your cart is empty");
+    if (!form.name.trim()) return toast.error("Name is required");
     if (form.mobile && !/^[6-9]\d{9}$/.test(form.mobile)) {
       return toast.error("Enter a valid 10-digit mobile, or leave it blank");
     }
@@ -139,23 +180,30 @@ export default function Food() {
     try {
       const tower = towers.find((t) => t.id === form.tower_id);
       const flat = flats.find((f) => f.id === form.flat_id);
+      const selections = cartLines.map((l) => ({
+        day_code: l.day_code,
+        meal_code: l.meal_code,
+        quantity: l.quantity,
+      }));
       const r = await api.post("/food/register", {
         ...form,
         tower_name: tower?.name || form.tower_name,
         flat_number: flat?.number || form.flat_number,
-        selections: [...selected],
+        selections,
       });
       if (r.data.payment_enabled && r.data.intent_id) {
         setIntent(r.data);
         const s = await api.get("/payments/upi/session", { params: { intent_id: r.data.intent_id } });
         setUpiSession(s.data);
-        toast.success("Registered — pay via UPI QR");
+        setStep("pay");
+        toast.success("Order placed — pay via UPI QR");
       } else {
         setDone(r.data);
-        toast.success("Food subscription registered");
+        setStep("done");
+        toast.success("Food order registered");
       }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not register");
+      toast.error(err?.response?.data?.detail || "Could not checkout");
     } finally {
       setBusy(false);
     }
@@ -190,50 +238,105 @@ export default function Food() {
     }
   };
 
-  const resetForm = () => {
+  const resetAll = () => {
     setDone(null);
     setIntent(null);
     setUpiSession(null);
     setReference("");
     setScreenshot(null);
-    setSelected(new Set());
+    setCart({});
+    setStep("menu");
   };
+
+  const cartPanel = (
+    <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card" data-testid="food-cart">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 font-display text-xl text-brown-900">
+          <ShoppingCart className="h-5 w-5 text-vermilion-500" />
+          Your cart
+        </div>
+        {cartCount > 0 && (
+          <button type="button" className="inline-flex items-center gap-1 text-xs text-vermilion-500 hover:underline" onClick={clearCart} data-testid="food-cart-clear">
+            <Trash2 className="h-3.5 w-3.5" /> Clear
+          </button>
+        )}
+      </div>
+
+      {cartCount === 0 ? (
+        <p className="mt-3 text-sm text-brown-800/55">Add meal quantities from the menu. Example: 3 × Breakfast, 2 × Lunch.</p>
+      ) : (
+        <>
+          <ul className="mt-3 max-h-64 space-y-2 overflow-y-auto text-sm">
+            {cartLines.map((line) => (
+              <li key={line.key} className="flex items-start justify-between gap-2 border-b border-sun-400/15 pb-2" data-testid={`food-cart-line-${line.key}`}>
+                <div>
+                  <div className="font-medium text-brown-900">{line.day_label} · {line.meal_label}</div>
+                  <div className="text-xs text-brown-800/55">{line.amount_label} each × {line.quantity}</div>
+                </div>
+                <div className="text-right font-semibold text-vermilion-600">
+                  {line.line_total_paise != null ? formatPaise(line.line_total_paise) : "TBC"}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-wide text-brown-800/50">
+            {mealTypeSummary.breakfast > 0 && <span className="rounded-full bg-sun-50 px-2 py-1">Breakfast × {mealTypeSummary.breakfast}</span>}
+            {mealTypeSummary.lunch > 0 && <span className="rounded-full bg-sun-50 px-2 py-1">Lunch × {mealTypeSummary.lunch}</span>}
+            {mealTypeSummary.dinner > 0 && <span className="rounded-full bg-sun-50 px-2 py-1">Dinner × {mealTypeSummary.dinner}</span>}
+          </div>
+          <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
+            <div className="text-xs text-brown-800/55">{cartCount} item{cartCount === 1 ? "" : "s"}</div>
+            <div className="text-right">
+              <div className="text-[10px] uppercase tracking-wide text-brown-800/45">Total</div>
+              <div className="font-display text-2xl text-vermilion-600" data-testid="food-cart-total">
+                {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <PublicLayout>
       <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-20 pb-8">
-        <div className="mx-auto max-w-4xl px-4 sm:px-5">
+        <div className="mx-auto max-w-5xl px-4 sm:px-5">
           <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Food subscription</p>
-          <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">Subscribe for meals</h1>
+          <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">Meal cart</h1>
           <p className="mt-2 max-w-xl text-brown-800/70">
-            Choose Breakfast, Lunch and Dinner for each puja day, then pay via the committee UPI QR.
+            Add quantities like 3 × Breakfast and 2 × Lunch, review your cart total, then checkout.
+            Current prices: Breakfast {formatPaise(breakfastPrice)}, Lunch {formatPaise(lunchPrice)}, Dinner {formatPaise(dinnerPrice)}
+            {" "}(change anytime in Admin → Food).
           </p>
           <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50 px-3 py-2.5 text-sm text-amber-900/90">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
               {menu?.payment_note
                 || (paymentEnabled
-                  ? "Pay via UPI QR after selecting meals, then upload your payment screenshot."
-                  : "Payment is not open yet.")}
+                  ? "Checkout, pay the cart total via UPI QR, then upload your payment screenshot."
+                  : "You can build a cart now. Payment opens when the committee enables it.")}
             </span>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-4xl px-4 py-8 sm:px-5">
+      <section className="mx-auto max-w-5xl px-4 py-8 sm:px-5">
         {!menu ? (
           <Spinner className="text-vermilion-500" />
-        ) : upiSession && intent ? (
+        ) : step === "pay" && upiSession && intent ? (
           <div className="space-y-5 rounded-2xl border border-sun-400/30 bg-white p-6 shadow-card" data-testid="food-pay-step">
             <div className="text-center">
-              <div className="font-display text-3xl text-brown-900">Pay for meals</div>
+              <div className="font-display text-3xl text-brown-900">Pay cart total</div>
               <p className="mt-1 text-brown-800/70">
                 Amount:{" "}
                 <span className="font-semibold text-vermilion-600">
                   {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
                 </span>
               </p>
-              <p className="mt-1 text-xs text-brown-800/45">Reference: {intent.id}</p>
+              <p className="mt-1 text-xs text-brown-800/45">
+                {intent.selection_count || cartCount} meal(s) · Ref {intent.id}
+              </p>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
@@ -301,92 +404,23 @@ export default function Food() {
               </p>
             </div>
           </div>
-        ) : done ? (
+        ) : step === "done" && done ? (
           <div className="rounded-2xl border border-sun-400/30 bg-white p-6 shadow-card" data-testid="food-register-success">
-            <h2 className="font-display text-3xl text-brown-900">Registered</h2>
+            <h2 className="font-display text-3xl text-brown-900">Order placed</h2>
             <p className="mt-2 text-brown-800/70">{done.message}</p>
             <p className="mt-1 text-sm text-brown-800/50">Reference: {done.id}</p>
             {done.total_amount_paise != null && (
               <p className="mt-1 text-sm text-brown-800/70">Total: {formatPaise(done.total_amount_paise)}</p>
             )}
             <div className="mt-6 flex flex-wrap gap-3">
-              <Button variant="outline" onClick={resetForm}>Register another</Button>
+              <Button variant="outline" onClick={resetAll}>New cart</Button>
               <Link to="/"><Button variant="subtle">Back home</Button></Link>
             </div>
           </div>
-        ) : (
-          <form onSubmit={submit} className="space-y-6" data-testid="food-register-form">
-            <div className="overflow-x-auto rounded-2xl border border-sun-400/30 bg-white shadow-card">
-              <div className="flex items-center justify-between gap-3 border-b border-sun-400/20 px-4 py-3">
-                <div className="flex items-center gap-2 font-display text-xl text-brown-900">
-                  <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Select meals
-                </div>
-                <button
-                  type="button"
-                  className="text-xs font-semibold uppercase tracking-wide text-vermilion-500"
-                  onClick={() => setSelected(selected.size === allKeys.length ? new Set() : new Set(allKeys))}
-                >
-                  {selected.size === allKeys.length ? "Clear all" : "Select all"}
-                </button>
-              </div>
-              <table className="w-full min-w-[520px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-sun-400/20 bg-sun-50/80 text-[11px] uppercase tracking-wide text-brown-800/55">
-                    <th className="px-4 py-3">Day</th>
-                    {(days[0]?.meals || []).map((m) => (
-                      <th key={m.code} className="px-3 py-3 text-center">{m.label}</th>
-                    ))}
-                    <th className="px-3 py-3 text-center">All</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {days.map((day) => (
-                    <tr key={day.code} className="border-b border-sun-400/15">
-                      <td className="px-4 py-3 font-semibold text-brown-900">{day.label}</td>
-                      {(day.meals || []).map((meal) => {
-                        const key = `${day.code}|${meal.code}`;
-                        const on = selected.has(key);
-                        return (
-                          <td key={key} className="px-3 py-3 text-center">
-                            <button
-                              type="button"
-                              data-testid={`food-meal-${key}`}
-                              onClick={() => toggle(key)}
-                              className={`inline-flex min-h-[44px] min-w-[4.5rem] flex-col items-center justify-center gap-0.5 rounded-lg border px-2 py-2 text-xs transition ${
-                                on
-                                  ? "border-vermilion-500 bg-vermilion-500 text-white"
-                                  : "border-sun-400/35 bg-sun-50/50 text-brown-800/70 hover:border-vermilion-500/40"
-                              }`}
-                            >
-                              {on && <Check className="h-3.5 w-3.5" />}
-                              <span>{meal.amount_label || "TBC"}</span>
-                            </button>
-                          </td>
-                        );
-                      })}
-                      <td className="px-3 py-3 text-center">
-                        <button type="button" className="text-xs text-vermilion-500 hover:underline" onClick={() => selectDay(day)}>
-                          Day
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-brown-800/50">
-                <span>
-                  Selected: {selected.size} · Breakfast / Lunch / Dinner · Payment {paymentEnabled ? "open" : "not open"}
-                </span>
-                {selected.size > 0 && totalPaise != null && (
-                  <span className="font-semibold text-vermilion-600" data-testid="food-total">
-                    Total {formatPaise(totalPaise)}
-                  </span>
-                )}
-              </div>
-            </div>
-
+        ) : step === "checkout" ? (
+          <form onSubmit={submitCheckout} className="grid gap-6 lg:grid-cols-[1fr_320px]" data-testid="food-checkout-form">
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
-              <h2 className="font-display text-2xl text-brown-900">Your details</h2>
+              <h2 className="font-display text-2xl text-brown-900">Checkout details</h2>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div>
                   <Label required>Name</Label>
@@ -437,18 +471,120 @@ export default function Food() {
                   <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Optional" />
                 </div>
               </div>
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                className="mt-5 w-full sm:w-auto"
-                disabled={busy}
-                data-testid="food-register-btn"
-              >
-                {busy ? "Saving…" : (paymentEnabled ? "Subscribe & pay" : "Subscribe")}
-              </Button>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <Button type="button" variant="subtle" onClick={() => setStep("menu")}>
+                  <ArrowLeft className="h-4 w-4" /> Back to menu
+                </Button>
+                <Button type="submit" variant="primary" size="lg" disabled={busy} data-testid="food-checkout-btn">
+                  {busy ? "Placing order…" : (paymentEnabled ? "Place order & pay" : "Place order")}
+                  {!busy && <ArrowRight className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
+            {cartPanel}
           </form>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]" data-testid="food-menu-cart">
+            <div className="overflow-x-auto rounded-2xl border border-sun-400/30 bg-white shadow-card">
+              <div className="flex items-center justify-between gap-3 border-b border-sun-400/20 px-4 py-3">
+                <div className="flex items-center gap-2 font-display text-xl text-brown-900">
+                  <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Add meals
+                </div>
+                <span className="text-xs text-brown-800/50">Use + / − for quantity</span>
+              </div>
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-sun-400/20 bg-sun-50/80 text-[11px] uppercase tracking-wide text-brown-800/55">
+                    <th className="px-4 py-3">Day</th>
+                    {(days[0]?.meals || []).map((m) => (
+                      <th key={m.code} className="px-3 py-3 text-center">
+                        <div>{m.label}</div>
+                        <div className="mt-0.5 normal-case tracking-normal text-vermilion-600">
+                          {m.amount_label || formatPaise(priceByMeal[m.code] || 0)}
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {days.map((day) => (
+                    <tr key={day.code} className="border-b border-sun-400/15">
+                      <td className="px-4 py-3 font-semibold text-brown-900">{day.label}</td>
+                      {(day.meals || []).map((meal) => {
+                        const key = lineKey(day.code, meal.code);
+                        const qty = cart[key] || 0;
+                        return (
+                          <td key={key} className="px-3 py-3 text-center">
+                            <div className="inline-flex items-center gap-1 rounded-lg border border-sun-400/35 bg-sun-50/40 p-1">
+                              <button
+                                type="button"
+                                aria-label={`Decrease ${day.label} ${meal.label}`}
+                                data-testid={`food-qty-dec-${key}`}
+                                className="grid h-8 w-8 place-items-center rounded-md text-brown-800 hover:bg-white disabled:opacity-30"
+                                disabled={qty <= 0}
+                                onClick={() => bump(key, -1)}
+                              >
+                                <Minus className="h-3.5 w-3.5" />
+                              </button>
+                              <input
+                                type="number"
+                                min={0}
+                                max={MAX_QTY}
+                                value={qty}
+                                data-testid={`food-qty-${key}`}
+                                onChange={(e) => setQty(key, e.target.value)}
+                                className="h-8 w-10 border-0 bg-transparent text-center text-sm font-semibold text-brown-900 outline-none"
+                              />
+                              <button
+                                type="button"
+                                aria-label={`Increase ${day.label} ${meal.label}`}
+                                data-testid={`food-qty-inc-${key}`}
+                                className="grid h-8 w-8 place-items-center rounded-md text-brown-800 hover:bg-white"
+                                onClick={() => bump(key, 1)}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4">
+                <span className="text-xs text-brown-800/50">
+                  Payment {paymentEnabled ? "open" : "not open yet"} · Prices editable in Admin → Food
+                </span>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="lg"
+                  disabled={cartCount === 0}
+                  onClick={goCheckout}
+                  data-testid="food-goto-checkout"
+                >
+                  Checkout ({cartCount}) <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="lg:sticky lg:top-24 lg:self-start">
+              {cartPanel}
+              {cartCount > 0 && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="lg"
+                  className="mt-3 w-full"
+                  onClick={goCheckout}
+                  data-testid="food-goto-checkout-side"
+                >
+                  Checkout · {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+                </Button>
+              )}
+            </div>
+          </div>
         )}
       </section>
     </PublicLayout>

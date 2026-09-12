@@ -58,6 +58,9 @@ export default function Sponsors() {
                   Discuss partnership <ArrowRight className="h-5 w-5" />
                 </Button>
               </a>
+              <Link to="/donate">
+                <Button variant="outline" size="lg">Donation Heads</Button>
+              </Link>
               <Link to="/subscribe">
                 <Button variant="outline" size="lg">Household subscribe</Button>
               </Link>

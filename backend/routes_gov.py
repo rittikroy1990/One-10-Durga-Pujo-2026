@@ -461,12 +461,9 @@ async def evidence_completeness(user: dict = Depends(require("audit:read"))):
 # =============================================================== DASHBOARDS
 @router.get("/dashboards/collection")
 async def dashboard_collection(user: dict = Depends(require("reports:read"))):
-    settings = await get_settings()
-    eligible = settings["eligibility"]["eligible_occupied_households"]
-    registered = await db.households.count_documents({"is_deleted": {"$ne": True}})
+    """Paid-only collection dashboard — issued receipts and amounts collected."""
     paid_ids = await db.receipts.distinct("household_id", {"status": "issued"})
     paid = len(paid_ids)
-    pending = await db.subscription_intents.count_documents({"status": "payment_pending"})
 
     base_total = donation_total = 0
     method_totals = {}
@@ -476,19 +473,21 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
         m = r.get("method", "other")
         method_totals[m] = method_totals.get(m, 0) + r.get("total_amount", 0)
 
-    # by tower
+    # paid counts by tower
     towers = await db.towers.find({}, {"_id": 0}).sort("name", 1).to_list(50)
     by_tower = []
     for t in towers:
-        reg = await db.households.count_documents({"tower_id": t["id"], "is_deleted": {"$ne": True}})
         hh_ids = await db.households.distinct("id", {"tower_id": t["id"]})
         pd = await db.receipts.count_documents({"household_id": {"$in": hh_ids}, "status": "issued"})
-        by_tower.append({"tower": t["name"], "registered": reg, "paid": pd})
+        if pd:
+            by_tower.append({"tower": t["name"], "paid": pd})
 
-    # daily trend
+    # daily trend of collected amounts
     trend = {}
     async for r in db.receipts.find({"status": "issued"}):
         day = (r.get("issued_at", "") or "")[:10]
+        if not day:
+            continue
         trend[day] = trend.get(day, 0) + r.get("total_amount", 0)
     daily = [{"date": k, "amount": v} for k, v in sorted(trend.items())]
 
@@ -496,13 +495,18 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
     refunds = await db.refunds.count_documents({"status": {"$in": ["requested", "processing"]}})
     recon = await db.payment_orders.count_documents({"status": "reconciliation_required"})
     return {
-        "eligible": eligible, "registered": registered, "paid": paid, "pending": pending,
-        "unpaid": max(eligible - paid, 0),
-        "collection_rate_pct": round((paid / eligible) * 100, 1) if eligible else 0,
-        "base_total": base_total, "donation_total": donation_total,
+        "paid": paid,
+        "base_total": base_total,
+        "donation_total": donation_total,
         "grand_total": base_total + donation_total,
-        "method_totals": method_totals, "by_tower": by_tower, "daily": daily,
-        "exceptions": {"duplicate_payments": dup, "refunds_open": refunds, "reconciliation_required": recon},
+        "method_totals": method_totals,
+        "by_tower": by_tower,
+        "daily": daily,
+        "exceptions": {
+            "duplicate_payments": dup,
+            "refunds_open": refunds,
+            "reconciliation_required": recon,
+        },
     }
 
 

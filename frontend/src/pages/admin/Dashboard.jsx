@@ -144,27 +144,14 @@ export default function Dashboard() {
   };
   useEffect(load, []);
 
-  const statusPie = useMemo(() => {
+  const paidMixPie = useMemo(() => {
     if (!col) return [];
-    const paid = Number(col.paid) || 0;
-    const unpaid = Math.max((Number(col.eligible) || 0) - paid, 0);
     return [
-      { name: "Paid", value: paid, color: COLORS.emerald, valueFmt: `${paid} households` },
-      { name: "Unpaid (eligible)", value: unpaid, color: COLORS.vermilion, valueFmt: `${unpaid} households` },
-    ].filter((d) => d.value > 0);
-  }, [col]);
-
-  const towerRegPie = useMemo(() => {
-    if (!col?.by_tower) return [];
-    return col.by_tower
-      .filter((t) => (t.registered || 0) > 0)
-      .map((t, i) => ({
-        name: t.tower,
-        value: t.registered,
-        color: TOWER_PALETTE[i % TOWER_PALETTE.length],
-        valueFmt: `${t.registered} registered`,
-        extra: `${t.paid || 0} paid`,
-      }));
+      { name: "Base subscription", value: Number(col.base_total) || 0, color: COLORS.emerald },
+      { name: "Voluntary donations", value: Number(col.donation_total) || 0, color: COLORS.gold },
+    ]
+      .filter((d) => d.value > 0)
+      .map((d) => ({ ...d, valueFmt: formatPaise(d.value) }));
   }, [col]);
 
   const towerPaidPie = useMemo(() => {
@@ -176,7 +163,6 @@ export default function Dashboard() {
       value: t.paid,
       color: TOWER_PALETTE[i % TOWER_PALETTE.length],
       valueFmt: `${t.paid} paid`,
-      extra: `${t.registered || 0} registered`,
     }));
   }, [col]);
 
@@ -213,11 +199,12 @@ export default function Dashboard() {
 
   const towerBar = useMemo(() => {
     if (!col?.by_tower) return [];
-    return col.by_tower.map((t) => ({
-      tower: String(t.tower || "").replace(/^Tower\s+/i, "T"),
-      paid: t.paid || 0,
-      unpaid: Math.max((t.registered || 0) - (t.paid || 0), 0),
-    }));
+    return col.by_tower
+      .filter((t) => (t.paid || 0) > 0)
+      .map((t) => ({
+        tower: String(t.tower || "").replace(/^Tower\s+/i, "T"),
+        paid: t.paid || 0,
+      }));
   }, [col]);
 
   const dailyArea = useMemo(() => {
@@ -261,7 +248,7 @@ export default function Dashboard() {
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="font-display text-4xl">Committee Dashboards</h1>
-          <p className="text-sm text-brown-800/50">One source of truth — receipts, ledger and reports reconcile.</p>
+          <p className="text-sm text-brown-800/50">Paid collections only — issued receipts and amounts collected.</p>
         </div>
         <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</Button>
       </div>
@@ -276,12 +263,8 @@ export default function Dashboard() {
 
       {!loading && tab === "collection" && col && (
         <div className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Stat label="Eligible households" value={col.eligible} sub="configurable" />
-            <Stat label="Paid" value={col.paid} accent="text-emerald-700" />
-            <Stat label="Collection rate" value={`${col.collection_rate_pct}%`} accent="text-vermilion-600" />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Stat label="Paid households" value={col.paid} accent="text-emerald-700" />
             <Stat label="Base subscription" value={formatPaise(col.base_total)} />
             <Stat label="Voluntary donations" value={formatPaise(col.donation_total)} />
             <Stat label="Grand total collected" value={formatPaise(col.grand_total)} accent="text-emerald-700" />
@@ -290,10 +273,10 @@ export default function Dashboard() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card><CardBody>
               <h3 className="mb-1 font-display text-xl flex items-center gap-2">
-                <PieIcon className="h-5 w-5 text-vermilion-500" /> Collection status
+                <PieIcon className="h-5 w-5 text-vermilion-500" /> Collected mix
               </h3>
-              <p className="mb-2 text-xs text-brown-800/50">Paid vs unpaid against eligible households</p>
-              <Donut data={statusPie} />
+              <p className="mb-2 text-xs text-brown-800/50">Subscription vs donation amounts collected</p>
+              {paidMixPie.length ? <Donut data={paidMixPie} /> : <EmptyChart label="No collections yet" />}
             </CardBody></Card>
 
             <Card><CardBody>
@@ -306,69 +289,67 @@ export default function Dashboard() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card><CardBody>
               <h3 className="mb-1 font-display text-xl flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-vermilion-500" /> Registration by tower
+                <TrendingUp className="h-5 w-5 text-vermilion-500" /> Paid by tower
               </h3>
-              <p className="mb-2 text-xs text-brown-800/50">Households registered per tower</p>
-              <SolidPie data={towerRegPie} />
+              <p className="mb-2 text-xs text-brown-800/50">Issued receipts by tower</p>
+              {towerPaidPie.length ? <SolidPie data={towerPaidPie} /> : <EmptyChart label="No paid households yet" />}
             </CardBody></Card>
 
             <Card><CardBody>
-              <h3 className="mb-1 font-display text-xl">Paid by tower</h3>
-              <p className="mb-2 text-xs text-brown-800/50">Issued receipts by tower</p>
-              {towerPaidPie.length ? <SolidPie data={towerPaidPie} /> : <EmptyChart label="No paid households yet" />}
+              <h3 className="mb-1 font-display text-xl">Paid count by tower</h3>
+              <p className="mb-2 text-xs text-brown-800/50">Households with issued receipts</p>
+              {towerBar.length ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={towerBar} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
+                    <XAxis dataKey="tower" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
+                    />
+                    <Bar dataKey="paid" fill={COLORS.emerald} name="Paid" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyChart label="No paid households yet" />
+              )}
             </CardBody></Card>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card><CardBody>
-              <h3 className="mb-1 font-display text-xl">Paid vs unpaid by tower</h3>
-              <p className="mb-2 text-xs text-brown-800/50">Stacked counts per tower</p>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={towerBar} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
-                  <XAxis dataKey="tower" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                  <Tooltip
-                    contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
-                  />
-                  <Legend formatter={(v) => <span className="text-xs text-brown-800/70">{v}</span>} />
-                  <Bar dataKey="paid" stackId="a" fill={COLORS.emerald} name="Paid" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="unpaid" stackId="a" fill={COLORS.vermilion} name="Unpaid" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardBody></Card>
-
-            <Card><CardBody>
               <h3 className="mb-1 font-display text-xl">Exceptions</h3>
               <p className="mb-2 text-xs text-brown-800/50">Open control flags</p>
               <Donut data={exceptionsPie} innerRadius={50} outerRadius={80} />
             </CardBody></Card>
-          </div>
 
-          {dailyArea.length > 0 && (
             <Card><CardBody>
               <h3 className="mb-1 font-display text-xl">Daily collection trend</h3>
               <p className="mb-2 text-xs text-brown-800/50">Amount collected by day (₹)</p>
-              <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={dailyArea} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="collectFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={COLORS.vermilion} stopOpacity={0.35} />
-                      <stop offset="100%" stopColor={COLORS.vermilion} stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                  <Tooltip
-                    formatter={(v, _n, item) => [formatPaise(item?.payload?.amountPaise ?? Math.round(v * 100)), "Collected"]}
-                    contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
-                  />
-                  <Area type="monotone" dataKey="amount" stroke={COLORS.vermilion} fill="url(#collectFill)" strokeWidth={2} name="Collected" />
-                </AreaChart>
-              </ResponsiveContainer>
+              {dailyArea.length > 0 ? (
+                <ResponsiveContainer width="100%" height={260}>
+                  <AreaChart data={dailyArea} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="collectFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={COLORS.vermilion} stopOpacity={0.35} />
+                        <stop offset="100%" stopColor={COLORS.vermilion} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                    <Tooltip
+                      formatter={(v, _n, item) => [formatPaise(item?.payload?.amountPaise ?? Math.round(v * 100)), "Collected"]}
+                      contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
+                    />
+                    <Area type="monotone" dataKey="amount" stroke={COLORS.vermilion} fill="url(#collectFill)" strokeWidth={2} name="Collected" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <EmptyChart label="No daily collections yet" />
+              )}
             </CardBody></Card>
-          )}
+          </div>
         </div>
       )}
 

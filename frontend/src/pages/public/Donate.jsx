@@ -150,7 +150,7 @@ export default function Donate() {
 
   const submit = async () => {
     if (!(form.accuracy_confirmed && form.privacy_consent && form.terms_consent)) {
-      toast.error("Please confirm accuracy and both consents.");
+      toast.error("Please confirm the declaration below to continue.");
       return;
     }
     setBusy(true);
@@ -536,17 +536,28 @@ export default function Donate() {
                 </div>
               </div>
 
-              <label className="flex items-start gap-2.5 text-sm text-[#3A1518]">
-                <input type="checkbox" data-testid="donate-accuracy" checked={form.accuracy_confirmed} onChange={(e) => set("accuracy_confirmed", e.target.checked)} className="mt-1 h-4 w-4" />
-                I confirm the information entered is accurate.
-              </label>
-              <label className="flex items-start gap-2.5 text-sm text-[#3A1518]">
-                <input type="checkbox" data-testid="donate-privacy" checked={form.privacy_consent} onChange={(e) => set("privacy_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I consent to the <a href="/privacy" className="text-[#C0392B] underline">Privacy Policy</a>.
-              </label>
-              <label className="flex items-start gap-2.5 text-sm text-[#3A1518]">
-                <input type="checkbox" data-testid="donate-terms" checked={form.terms_consent} onChange={(e) => set("terms_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I agree to the <a href="/terms" className="text-[#C0392B] underline">payment terms</a>.
+              <label className="flex items-start gap-2.5 text-sm leading-relaxed text-[#3A1518]">
+                <input
+                  type="checkbox"
+                  data-testid="donate-consent"
+                  checked={form.accuracy_confirmed && form.privacy_consent && form.terms_consent}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setForm((f) => ({
+                      ...f,
+                      accuracy_confirmed: v,
+                      privacy_consent: v,
+                      terms_consent: v,
+                    }));
+                  }}
+                  className="mt-1 h-4 w-4 shrink-0"
+                />
+                <span>
+                  I confirm my details are accurate and I agree to the{" "}
+                  <a href="/privacy" className="font-semibold text-[#C0392B] underline">Privacy Policy</a>
+                  {" "}and{" "}
+                  <a href="/terms" className="font-semibold text-[#C0392B] underline">payment terms</a>.
+                </span>
               </label>
 
               <div className="flex justify-between">

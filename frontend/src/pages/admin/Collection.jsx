@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { FileText, Check, Plus, RefreshCw, Undo2, FileDown } from "lucide-react";
+import { FileText, Check, Plus, RefreshCw, Undo2, FileDown, Download, Upload } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
@@ -16,10 +16,12 @@ export default function Collection() {
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
         { value: "manual", label: "Cash & Manual" },
+        { value: "excel", label: "Excel import" },
       ]} />
       {tab === "households" && <Households />}
       {tab === "receipts" && <Receipts />}
       {tab === "manual" && <Manual />}
+      {tab === "excel" && <ExcelImport />}
     </div>
   );
 }
@@ -252,6 +254,237 @@ function QueueRow({ label, onAct, actLabel }) {
     <div className="flex items-center justify-between rounded-lg border border-brown-800/10 px-3 py-2 text-sm">
       <span>{label}</span>
       <Button variant="admin" size="sm" onClick={onAct}><Check className="h-3.5 w-3.5" /> {actLabel}</Button>
+    </div>
+  );
+}
+
+function ExcelImport() {
+  const fileRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const downloadTemplate = async () => {
+    setDownloading(true);
+    try {
+      const r = await api.get("/admin/subscription-imports/template", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "one10_subscription_payment_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Template downloaded");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not download template");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const uploadFile = async (file, dryRun) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await api.post(`/admin/subscription-imports/import?dry_run=${dryRun ? "true" : "false"}`, fd);
+    setResult(r.data);
+    return r.data;
+  };
+
+  const onUpload = async (e, dryRun) => {
+    const file = e?.target?.files?.[0];
+    if (e?.target) e.target.value = "";
+    if (!file) return;
+    if (dryRun) setPreviewing(true);
+    else setUploading(true);
+    setResult(null);
+    try {
+      const data = await uploadFile(file, dryRun);
+      toast.success(data.message || (dryRun ? "Preview complete" : "Import complete"));
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Upload failed");
+    } finally {
+      setUploading(false);
+      setPreviewing(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!window.confirm("Issue receipts for all valid rows in the selected file? Duplicate UTRs will be skipped.")) {
+      return;
+    }
+    fileRef.current?.click();
+  };
+
+  return (
+    <div className="space-y-5" data-testid="excel-import-panel">
+      <Card>
+        <CardBody>
+          <div className="mb-2 font-display text-xl text-brown-900">Bank transfer Excel import</div>
+          <p className="mb-3 text-sm text-brown-800/60">
+            Download the template, fill one successful bank transfer per row, then upload.
+            Each valid row creates/updates the household and automatically issues a receipt.
+            Re-uploading the same Bank Transaction ID is skipped.
+          </p>
+          <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-brown-800/65">
+            <li><b>Kind</b>: <code>subscription</code> (base flat fee) or <code>donation</code></li>
+            <li><b>Tower</b> number only (e.g. 6) and <b>Flat</b> (e.g. 11B)</li>
+            <li><b>Bank Transaction ID / UTR</b> required and unique</li>
+            <li>Delete the example rows before uploading real data</li>
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="admin"
+              size="sm"
+              disabled={downloading}
+              onClick={downloadTemplate}
+              data-testid="subscription-template-download-btn"
+            >
+              <Download className="h-4 w-4" /> {downloading ? "Preparing…" : "Download template"}
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={previewing || uploading}
+              onClick={() => {
+                const input = document.getElementById("subscription-import-preview-input");
+                input?.click();
+              }}
+              data-testid="subscription-template-preview-btn"
+            >
+              <FileText className="h-4 w-4" /> {previewing ? "Checking…" : "Preview (no receipts)"}
+            </Button>
+            <Button
+              variant="admin"
+              size="sm"
+              disabled={uploading || previewing}
+              onClick={confirmImport}
+              data-testid="subscription-template-upload-btn"
+            >
+              <Upload className="h-4 w-4" /> {uploading ? "Importing…" : "Upload & issue receipts"}
+            </Button>
+            <input
+              id="subscription-import-preview-input"
+              type="file"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => onUpload(e, true)}
+              data-testid="subscription-template-preview-input"
+            />
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => onUpload(e, false)}
+              data-testid="subscription-template-file-input"
+            />
+          </div>
+        </CardBody>
+      </Card>
+
+      {result && (
+        <Card data-testid="subscription-import-result">
+          <CardBody>
+            <div className="mb-2 font-display text-xl text-brown-900">Import result</div>
+            <p className="mb-3 text-sm text-brown-800/70">{result.message}</p>
+            <div className="mb-4 grid gap-3 sm:grid-cols-4">
+              <StatMini label={result.dry_run ? "Would issue" : "Issued"} value={(result.issued || result.would_issue || []).length} />
+              <StatMini label="Skipped" value={(result.skipped || []).length} />
+              <StatMini label="Errors" value={(result.errors || []).length} />
+              <StatMini label="Rows read" value={result.row_count || 0} />
+            </div>
+
+            {!!(result.issued || []).length && (
+              <ResultTable
+                title="Receipts issued"
+                rows={result.issued}
+                cols={[
+                  ["receipt_no", "Receipt"],
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["kind", "Kind"],
+                  ["txn", "UTR"],
+                ]}
+              />
+            )}
+            {!!(result.would_issue || []).length && (
+              <ResultTable
+                title="Would issue (dry run)"
+                rows={result.would_issue}
+                cols={[
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["kind", "Kind"],
+                  ["txn", "UTR"],
+                ]}
+              />
+            )}
+            {!!(result.skipped || []).length && (
+              <ResultTable
+                title="Skipped"
+                rows={result.skipped}
+                cols={[
+                  ["excel_row", "Row"],
+                  ["name", "Name"],
+                  ["txn", "UTR"],
+                  ["reason", "Reason"],
+                ]}
+              />
+            )}
+            {!!(result.errors || []).length && (
+              <ResultTable
+                title="Errors"
+                rows={result.errors}
+                cols={[
+                  ["excel_row", "Row"],
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["reason", "Reason"],
+                ]}
+              />
+            )}
+          </CardBody>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function StatMini({ label, value }) {
+  return (
+    <div className="rounded-lg border border-brown-800/10 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-brown-800/45">{label}</div>
+      <div className="mt-0.5 font-display text-2xl text-brown-900">{value}</div>
+    </div>
+  );
+}
+
+function ResultTable({ title, rows, cols }) {
+  return (
+    <div className="mb-4">
+      <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-brown-800/55">{title}</h4>
+      <div className="overflow-x-auto">
+        <Table>
+          <THead>
+            <TR>{cols.map(([k, label]) => <TH key={k}>{label}</TH>)}</TR>
+          </THead>
+          <tbody>
+            {rows.slice(0, 50).map((row, idx) => (
+              <TR key={`${title}-${idx}-${row.txn || row.receipt_no || idx}`}>
+                {cols.map(([k]) => <TD key={k}>{row[k] ?? ""}</TD>)}
+              </TR>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+      {rows.length > 50 && (
+        <div className="mt-1 text-xs text-brown-800/45">Showing first 50 of {rows.length}</div>
+      )}
     </div>
   );
 }

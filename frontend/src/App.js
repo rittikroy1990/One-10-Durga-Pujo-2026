@@ -23,6 +23,7 @@ import Faq from "./pages/public/Faq";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 import FoodPoll from "./pages/public/FoodPoll";
 import UploadPdf from "./pages/public/UploadPdf";
+import Invite from "./pages/public/Invite";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
@@ -58,6 +59,7 @@ function AppRoutes() {
       <Route path="/faq" element={<Faq />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
+      <Route path="/invite" element={<Invite />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />

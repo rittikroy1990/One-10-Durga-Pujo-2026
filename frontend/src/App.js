@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "./context/AuthContext";
@@ -62,9 +62,11 @@ function AppRoutes() {
 
       <Route path="/admin/login" element={<Login />} />
       <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<Navigate to="collection" replace />} />
         <Route path="collection" element={<Collection />} />
         <Route path="food" element={<FoodAdmin />} />
+        {/* Hidden for now — revive via AdminLayout NAV + these routes */}
+        <Route path="dashboard" element={<Dashboard />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="procurement" element={<Procurement />} />

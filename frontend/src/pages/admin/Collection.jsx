@@ -11,17 +11,15 @@ export default function Collection() {
   return (
     <div data-testid="collection-page">
       <h1 className="mb-1 font-display text-4xl">Collection Control</h1>
-      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, manual maker-checker modes and refunds.</p>
+      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, and manual maker-checker modes.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
         { value: "manual", label: "Cash & Manual" },
-        { value: "refunds", label: "Refunds" },
       ]} />
       {tab === "households" && <Households />}
       {tab === "receipts" && <Receipts />}
       {tab === "manual" && <Manual />}
-      {tab === "refunds" && <Refunds />}
     </div>
   );
 }
@@ -254,48 +252,6 @@ function QueueRow({ label, onAct, actLabel }) {
     <div className="flex items-center justify-between rounded-lg border border-brown-800/10 px-3 py-2 text-sm">
       <span>{label}</span>
       <Button variant="admin" size="sm" onClick={onAct}><Check className="h-3.5 w-3.5" /> {actLabel}</Button>
-    </div>
-  );
-}
-
-function Refunds() {
-  const { items, loading, load } = useList("/admin/receipts");
-  const { items: refunds, load: loadRefunds } = useList("/reports/refund_register", "rows");
-  const [open, setOpen] = useState(false);
-  const [sel, setSel] = useState(null);
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
-
-  const request = async () => {
-    try {
-      await api.post("/refunds", { receipt_id: sel.id, amount_paise: Math.round(Number(amount) * 100), reason });
-      toast.success("Refund requested (awaiting convenor approval)"); setOpen(false); loadRefunds();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Could not request refund"); }
-  };
-  const approve = async (rid) => {
-    try { await api.post(`/refunds/${rid}/approve`, {}, { headers: { "X-Reauth": "true" } }); toast.success("Refund approved — credit note issued"); loadRefunds(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Could not approve"); }
-  };
-
-  return (
-    <div className="space-y-5">
-      <Card><CardBody>
-        <h3 className="mb-2 font-display text-xl">Request a refund</h3>
-        {loading ? <Spinner className="text-vermilion-500" /> : (
-          <Table><THead><TR><TH>Receipt</TH><TH right>Total</TH><TH>Action</TH></TR></THead>
-            <tbody>{items.slice(0, 25).map((r) => (
-              <TR key={r.id}><TD>{r.receipt_no}</TD><TD right>{formatPaise(r.total_amount)}</TD>
-                <TD><Button variant="subtle" size="sm" data-testid={`refund-${r.receipt_no}`} onClick={() => { setSel(r); setAmount((r.total_amount / 100).toString()); setOpen(true); }}><Undo2 className="h-3.5 w-3.5" /> Refund</Button></TD></TR>
-            ))}</tbody></Table>
-        )}
-      </CardBody></Card>
-
-      <Dialog open={open} onClose={() => setOpen(false)} title={`Refund ${sel?.receipt_no || ""}`}
-        footer={<><Button variant="subtle" onClick={() => setOpen(false)}>Cancel</Button><Button variant="danger" onClick={request} data-testid="refund-request-submit">Request refund</Button></>}>
-        <Label>Amount (₹)</Label><Input type="number" data-testid="refund-amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <div className="mt-3"><Label>Reason</Label><Input data-testid="refund-reason" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
-        <p className="mt-2 text-xs text-brown-800/50">A linked credit note and reversal ledger entries are generated on approval. Refund is tracked until the provider confirms completion.</p>
-      </Dialog>
     </div>
   );
 }

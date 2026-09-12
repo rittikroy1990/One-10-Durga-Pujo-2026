@@ -824,14 +824,6 @@ async def receipt_pending_payment(body: dict = Body(...), request: Request = Non
     def _norm_name(s: str) -> str:
         return " ".join((s or "").strip().lower().split())
 
-    stored_names = {
-        _norm_name(household.get("primary_name") or ""),
-        _norm_name(household.get("family_display_name") or ""),
-    }
-    stored_names.discard("")
-    if stored_names and _norm_name(name) not in stored_names:
-        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
-
     hh_mobile = (household.get("primary_mobile") or "").strip()
     if mobile and hh_mobile and mobile != hh_mobile:
         raise HTTPException(status_code=404, detail="No pending payment found with those details.")
@@ -844,12 +836,17 @@ async def receipt_pending_payment(body: dict = Body(...), request: Request = Non
         },
         sort=[("created_at", -1)],
     )
+
+    stored_names = {
+        _norm_name(household.get("primary_name") or ""),
+        _norm_name(household.get("family_display_name") or ""),
+    }
     if intent:
-        payer = _norm_name(intent.get("payer_name") or "")
-        if payer:
-            stored_names.add(payer)
-        if stored_names and _norm_name(name) not in stored_names:
-            raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+        stored_names.add(_norm_name(intent.get("payer_name") or ""))
+    stored_names.discard("")
+    if stored_names and _norm_name(name) not in stored_names:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
     if not intent:
         paid = await db.subscription_intents.find_one(
             {"household_id": household["id"], "kind": "subscription", "status": "paid"},

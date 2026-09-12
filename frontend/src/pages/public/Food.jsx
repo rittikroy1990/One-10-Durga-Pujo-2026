@@ -482,22 +482,20 @@ export default function Food() {
                 <span className="grid h-7 w-7 place-items-center rounded-full bg-vermilion-500 text-sm font-bold text-white">1</span>
                 Scan &amp; pay with UPI
               </h3>
-              <ol className="mt-2 space-y-1.5 text-sm text-brown-800/70">
-                <li><span className="font-semibold text-brown-900">1.</span> Open GPay, PhonePe, Paytm, or any UPI app</li>
-                <li><span className="font-semibold text-brown-900">2.</span> Tap <span className="font-semibold">Scan QR</span> and scan the code below</li>
-                <li><span className="font-semibold text-brown-900">3.</span> Pay the exact amount shown above</li>
-              </ol>
               <div className="mt-4 flex flex-col items-center">
-                {pay?.upi_intent_url ? (
-                  <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
-                    <img src={staticQr} alt="Food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="food-qr-img" />
-                  </a>
-                ) : (
-                  <img src={staticQr} alt="Food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="food-qr-img" />
-                )}
-                <p className="mt-3 text-center text-xs leading-relaxed text-brown-800/55">
-                  Use your UPI app’s <span className="font-semibold">Scan QR</span> camera.
-                </p>
+                <img
+                  src={staticQr}
+                  alt="Food UPI QR"
+                  className="pointer-events-none h-52 w-52 select-none rounded-xl border border-brown-800/10 bg-white object-contain p-2"
+                  data-testid="food-qr-img"
+                  draggable={false}
+                />
+                <ol className="mt-4 w-full max-w-sm space-y-1.5 text-left text-sm text-brown-800/75">
+                  <li><span className="font-semibold text-brown-900">1.</span> Open GPay, PhonePe, Paytm, or any UPI app</li>
+                  <li><span className="font-semibold text-brown-900">2.</span> Tap <span className="font-semibold">Scan QR</span> in the app</li>
+                  <li><span className="font-semibold text-brown-900">3.</span> Scan this QR and pay the exact amount</li>
+                  <li><span className="font-semibold text-brown-900">4.</span> Enter UTR / UPI reference and upload screenshot below</li>
+                </ol>
               </div>
 
               <div className="mt-5 rounded-xl border border-sun-400/25 bg-sun-50/50 p-4 text-sm">

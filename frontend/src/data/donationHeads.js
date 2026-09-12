@@ -12,7 +12,7 @@ export const DONATION_HEADS = [
       { id: "idol-carriage", label: "Durga Idol Carriage & Mutia", amount: 5000 },
       { id: "idol-garland", label: "Durga Puja Idol Garland", amount: 10000 },
       { id: "laxmi-idol", label: "Laxmi Idol", amount: 10000 },
-      { id: "durga-idol", label: "Durga Idol", amount: 65000 },
+      { id: "durga-idol", label: "Durga Idol", amount: 65000, closed: true, closedLabel: "Done" },
       { id: "sajja-astra", label: "Durga Sajja & Astra", amount: 5000 },
       { id: "purohit", label: "Puja Purohit", amount: 10000 },
       { id: "mandap-sajja", label: "Durga Puja Mandap Sajja", amount: 15000 },

@@ -97,6 +97,8 @@ export default function Donate() {
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
 
   const toggleItem = (id) => {
+    const item = findDonationItem(id);
+    if (item?.closed) return;
     setCustomMode(false);
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
@@ -312,27 +314,50 @@ export default function Donate() {
                       </div>
                       <ul className="divide-y divide-[#5C3530]/10 px-2 pb-2">
                         {cat.items.map((item) => {
-                          const on = selected.includes(item.id);
+                          const closed = !!item.closed;
+                          const on = !closed && selected.includes(item.id);
                           return (
                             <li key={item.id}>
                               <button
                                 type="button"
                                 data-testid={`donate-item-${item.id}`}
                                 onClick={() => toggleItem(item.id)}
-                                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${on ? "bg-[#7A1F2B]/06" : "hover:bg-black/[0.02]"}`}
+                                disabled={closed}
+                                aria-disabled={closed}
+                                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${
+                                  closed
+                                    ? "cursor-not-allowed opacity-70"
+                                    : on
+                                      ? "bg-[#7A1F2B]/06"
+                                      : "hover:bg-black/[0.02]"
+                                }`}
                               >
-                                <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border transition ${on ? "border-[#7A1F2B] bg-[#7A1F2B] text-white" : "border-[#5C3530]/25 bg-white text-transparent"}`}>
+                                <span
+                                  className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border transition ${
+                                    closed
+                                      ? "border-emerald-600/40 bg-emerald-50 text-emerald-700"
+                                      : on
+                                        ? "border-[#7A1F2B] bg-[#7A1F2B] text-white"
+                                        : "border-[#5C3530]/25 bg-white text-transparent"
+                                  }`}
+                                >
                                   <Check className="h-3 w-3" strokeWidth={3} />
                                 </span>
-                                <span className={`min-w-0 flex-1 text-[15px] font-semibold leading-snug ${on ? "text-[#3A1518]" : "text-[#2A1215]"}`}>
+                                <span className={`min-w-0 flex-1 text-[15px] font-semibold leading-snug ${closed ? "text-[#5C3530]/55 line-through" : on ? "text-[#3A1518]" : "text-[#2A1215]"}`}>
                                   {item.label}
                                 </span>
-                                <span
-                                  className="shrink-0 font-display text-xl font-semibold tabular-nums"
-                                  style={{ color: on ? cat.accent : "#3A1518" }}
-                                >
-                                  {formatInr(item.amount)}
-                                </span>
+                                {closed ? (
+                                  <span className="shrink-0 rounded-full bg-emerald-700/10 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-800">
+                                    {item.closedLabel || "Done"}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="shrink-0 font-display text-xl font-semibold tabular-nums"
+                                    style={{ color: on ? cat.accent : "#3A1518" }}
+                                  >
+                                    {formatInr(item.amount)}
+                                  </span>
+                                )}
                               </button>
                             </li>
                           );

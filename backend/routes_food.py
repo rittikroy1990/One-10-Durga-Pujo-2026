@@ -63,19 +63,62 @@ def _menu_lookup(food: dict) -> dict:
 
 
 def _normalize_selections(food: dict, selections: list) -> list:
+    """Accept cart lines with quantities.
+
+    Supported shapes:
+      - "day|meal"
+      - {"day_code","meal_code", quantity|qty}
+    Quantities for the same day/meal are merged. Max 50 per line.
+    """
     lookup = _menu_lookup(food)
     cleaned = []
-    seen = set()
+    index_by_key = {}
     for raw in selections or []:
+        qty = 1
         if isinstance(raw, str) and "|" in raw:
-            key = raw
-        else:
+            key = raw.strip()
+        elif isinstance(raw, dict):
             key = f"{raw.get('day_code')}|{raw.get('meal_code')}"
-        if key in seen or key not in lookup:
+            try:
+                qty = int(raw.get("quantity") if raw.get("quantity") is not None else raw.get("qty") or 1)
+            except (TypeError, ValueError):
+                qty = 1
+        else:
             continue
-        seen.add(key)
-        cleaned.append(lookup[key])
+        if key not in lookup or qty < 1:
+            continue
+        qty = min(qty, 50)
+        if key in index_by_key:
+            item = cleaned[index_by_key[key]]
+            item["quantity"] = min(50, int(item.get("quantity") or 0) + qty)
+            unit = item.get("amount_paise")
+            item["line_total_paise"] = (int(unit) * item["quantity"]) if unit not in (None, "") else None
+            continue
+        item = dict(lookup[key])
+        item["quantity"] = qty
+        unit = item.get("amount_paise")
+        item["line_total_paise"] = (int(unit) * qty) if unit not in (None, "") else None
+        index_by_key[key] = len(cleaned)
+        cleaned.append(item)
     return cleaned
+
+
+def _selection_totals(selections: list) -> tuple:
+    """Return (total_paise|None, item_count)."""
+    total_paise = 0
+    item_count = 0
+    for sel in selections or []:
+        qty = max(1, int(sel.get("quantity") or 1))
+        item_count += qty
+        unit = sel.get("amount_paise")
+        line = sel.get("line_total_paise")
+        if line not in (None, ""):
+            total_paise += int(line)
+        elif unit not in (None, ""):
+            total_paise += int(unit) * qty
+        else:
+            return None, item_count
+    return total_paise, item_count
 
 
 DEFAULT_MEAL_PRICES_PAISE = {
@@ -150,15 +193,9 @@ async def food_register(body: dict = Body(...), request: Request = None):
 
     selections = _normalize_selections(food, body.get("selections") or [])
     if not selections:
-        raise HTTPException(status_code=400, detail="Select at least one meal.")
+        raise HTTPException(status_code=400, detail="Add at least one meal to your cart.")
 
-    total_paise = 0
-    for sel in selections:
-        paise = sel.get("amount_paise")
-        if paise in (None, ""):
-            total_paise = None
-            break
-        total_paise += int(paise)
+    total_paise, item_count = _selection_totals(selections)
 
     payment_enabled = bool(food.get("payment_enabled")) and total_paise is not None and total_paise > 0
     cycle_id = await get_active_cycle_id()
@@ -175,7 +212,7 @@ async def food_register(body: dict = Body(...), request: Request = None):
         "family_members": int(body.get("family_members") or 1),
         "notes": (body.get("notes") or "").strip()[:500],
         "selections": selections,
-        "selection_count": len(selections),
+        "selection_count": item_count,
         "amount_status": "fixed" if total_paise is not None else "TBC",
         "total_amount_paise": total_paise,
         "payment_status": "pending" if payment_enabled else "not_open",
@@ -229,7 +266,7 @@ async def food_register(body: dict = Body(...), request: Request = None):
         after={
             "name": name,
             "mobile": (mobile[-4:] if mobile else ""),
-            "selection_count": len(selections),
+            "selection_count": item_count,
             "total_amount_paise": total_paise,
             "payment_enabled": payment_enabled,
         },
@@ -242,6 +279,8 @@ async def food_register(body: dict = Body(...), request: Request = None):
         "status": "registered",
         "payment_enabled": payment_enabled,
         "total_amount_paise": total_paise,
+        "selection_count": item_count,
+        "selections": selections,
         "intent_id": intent_id,
         "status_token": status_tok,
         "message": (
@@ -408,13 +447,23 @@ def _selections_from_row(food: dict, row: dict, meal_headers: list[str]) -> list
         keys = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
         return _normalize_selections(food, keys)
 
-    keys = []
+    lines = []
     for h in present:
-        if _is_truthy(row.get(h)):
-            if "_" in h:
-                day, meal = h.split("_", 1)
-                keys.append(f"{day}|{meal}")
-    return _normalize_selections(food, keys)
+        raw = str(row.get(h) or "").strip()
+        if not raw:
+            continue
+        if "_" not in h:
+            continue
+        day, meal = h.split("_", 1)
+        # Numeric quantity (e.g. 3) or truthy Y/yes
+        qty = None
+        try:
+            qty = int(float(raw))
+        except (TypeError, ValueError):
+            qty = 1 if _is_truthy(raw) else 0
+        if qty and qty > 0:
+            lines.append({"day_code": day, "meal_code": meal, "quantity": qty})
+    return _normalize_selections(food, lines)
 
 
 def _payment_status_from_cell(val: str) -> str:

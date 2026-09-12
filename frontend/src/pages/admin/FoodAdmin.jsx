@@ -10,7 +10,11 @@ function selectionSummary(row) {
   const sels = row.selections || [];
   if (!sels.length) return "—";
   return sels
-    .map((s) => `${s.day_label || s.day_code} ${s.meal_label || s.meal_code}`)
+    .map((s) => {
+      const qty = Number(s.quantity) || 1;
+      const label = `${s.day_label || s.day_code} ${s.meal_label || s.meal_code}`;
+      return qty > 1 ? `${label} × ${qty}` : label;
+    })
     .join("; ");
 }
 

@@ -2,28 +2,52 @@ import React, { useState } from "react";
 import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
-  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode,
+  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, UtensilsCrossed,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Spinner } from "./ui";
 
+// Sections with hidden:true stay in code for easy revive but are not shown in the sidebar.
 const NAV = [
   { to: "/admin", label: "Dashboards", icon: LayoutDashboard, end: true, perm: "reports:read" },
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
-  { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read" },
-  { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read" },
-  { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read" },
-  { to: "/admin/operations", label: "Operations", icon: Users2, perm: "ops:read" },
-  { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read" },
-  { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read" },
-  { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read" },
+  { to: "/admin/food", label: "Food", icon: UtensilsCrossed, perm: "households:read" },
+  { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read", hidden: true },
+  { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read", hidden: true },
+  { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read", hidden: true },
+  { to: "/admin/operations", label: "Operations", icon: Users2, perm: "ops:read", hidden: true },
+  { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read", hidden: true },
+  { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read", hidden: true },
+  { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read", hidden: true },
   { to: "/upload-qr", label: "Payment QR", icon: QrCode, perm: "settings:manage" },
   { to: "/admin/settings", label: "Settings", icon: Settings2, perm: "settings:read" },
 ];
 
 export function RequireAuth({ children }) {
-  const { user, loading } = useAuth();
-  if (loading) return <div className="grid min-h-screen place-items-center bg-ivory-200"><Spinner className="h-8 w-8 text-vermilion-500" /></div>;
+  const { user, loading, checkAuth } = useAuth();
+  const [checking, setChecking] = React.useState(!user);
+
+  React.useEffect(() => {
+    if (user) {
+      setChecking(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setChecking(true);
+      await checkAuth();
+      if (!cancelled) setChecking(false);
+    })();
+    return () => { cancelled = true; };
+  }, [user, checkAuth]);
+
+  if (loading || checking) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-ivory-200">
+        <Spinner className="h-8 w-8 text-vermilion-500" />
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/admin/login" replace />;
   return children;
 }
@@ -33,7 +57,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const perms = new Set(user?.permissions || []);
-  const links = NAV.filter((n) => perms.has(n.perm) || perms.size === 0);
+  const links = NAV.filter((n) => !n.hidden && (perms.has(n.perm) || perms.size === 0));
 
   const doLogout = async () => { await logout(); navigate("/admin/login"); };
 

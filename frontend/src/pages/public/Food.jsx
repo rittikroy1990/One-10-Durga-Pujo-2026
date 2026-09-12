@@ -235,7 +235,11 @@ export default function Food() {
   };
 
   const bump = (key, delta) => setQty(key, (cart[key] || 0) + delta);
-  const clearCart = () => setCart({});
+  const clearCart = () => {
+    if (Object.keys(cart).length === 0) return;
+    setCart({});
+    toast.message("Cart cleared");
+  };
 
   const addOneOfMealAcrossDays = (mealCode) => {
     setCart((prev) => {
@@ -367,8 +371,8 @@ export default function Food() {
           )}
         </div>
         {cartCount > 0 && (
-          <button type="button" className="inline-flex items-center gap-1 text-xs text-vermilion-500 hover:underline" onClick={clearCart} data-testid="food-cart-clear">
-            <Trash2 className="h-3.5 w-3.5" /> Clear
+          <button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-vermilion-500 hover:underline" onClick={clearCart} data-testid="food-cart-clear">
+            <Trash2 className="h-3.5 w-3.5" /> Reset
           </button>
         )}
       </div>
@@ -661,7 +665,7 @@ export default function Food() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <span className="self-center text-xs text-brown-800/45">Quick add 1 for every day:</span>
                   {[
                     ["breakfast", "Breakfast"],
@@ -672,6 +676,18 @@ export default function Food() {
                       + {label}
                     </Button>
                   ))}
+                  {cartCount > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={clearCart}
+                      data-testid="food-reset-btn"
+                      className="ml-auto"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Reset cart
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -742,7 +758,18 @@ export default function Food() {
       {/* Mobile sticky checkout bar */}
       {step === "menu" && cartCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-sun-400/30 bg-white/95 p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur lg:hidden" data-testid="food-mobile-checkout-bar">
-          <div className="mx-auto flex max-w-5xl items-center gap-3">
+          <div className="mx-auto flex max-w-5xl items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={clearCart}
+              data-testid="food-mobile-reset"
+              className="shrink-0 px-3"
+              aria-label="Reset cart"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
             <div className="min-w-0 flex-1">
               <div className="text-xs text-brown-800/55">{cartCount} meal{cartCount === 1 ? "" : "s"} in cart</div>
               <div className="truncate font-display text-xl text-vermilion-600">

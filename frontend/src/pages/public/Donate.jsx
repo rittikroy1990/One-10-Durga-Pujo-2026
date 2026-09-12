@@ -135,7 +135,8 @@ export default function Donate() {
   };
 
   const validDetails = useMemo(() => {
-    if (!form.donor_name.trim() || !/^[6-9]\d{9}$/.test(form.mobile)) return false;
+    if (!form.donor_name.trim()) return false;
+    if (form.mobile && !/^[6-9]\d{9}$/.test(form.mobile)) return false;
     if (!(Number(form.donation_rupees) > 0) || donationPaise < minPaise) return false;
     if (form.donor_type === "resident") return !!(form.tower_id && form.flat_id && form.occupancy_type);
     if (form.donor_type === "other") return true;
@@ -456,7 +457,7 @@ export default function Donate() {
                   <Input id="dname" data-testid="donate-name" value={form.donor_name} onChange={(e) => set("donor_name", e.target.value)} placeholder="Donor name" />
                 </div>
                 <div>
-                  <Label required htmlFor="dmobile">Mobile</Label>
+                  <Label htmlFor="dmobile">Mobile (optional)</Label>
                   <Input id="dmobile" data-testid="donate-mobile" value={form.mobile} onChange={(e) => set("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="10-digit Indian mobile" />
                 </div>
                 <div>
@@ -541,7 +542,7 @@ export default function Donate() {
                 )}
                 <div className="mt-3 space-y-1 border-t border-[#7A1F2B]/10 pt-3 text-sm text-[#5C3530]/80">
                   <div><span className="text-[#5C3530]/50">Donor</span> · {form.donor_name}</div>
-                  <div><span className="text-[#5C3530]/50">Mobile</span> · {form.mobile}</div>
+                  <div><span className="text-[#5C3530]/50">Mobile</span> · {form.mobile || "—"}</div>
                   {form.donor_type === "resident" ? (
                     <div>
                       <span className="text-[#5C3530]/50">Flat</span> · {towers.find((t) => t.id === form.tower_id)?.name || form.tower_id} / {flats.find((f) => f.id === form.flat_id)?.number || form.flat_id}

@@ -60,7 +60,8 @@ export default function Subscribe() {
   const toggleInterest = (v) =>
     set("interests", form.interests.includes(v) ? form.interests.filter((x) => x !== v) : [...form.interests, v]);
 
-  const validStep1 = form.primary_contact_name && /^[6-9]\d{9}$/.test(form.mobile) && form.tower_id && form.flat_id;
+  const mobileOk = !form.mobile || /^[6-9]\d{9}$/.test(form.mobile);
+  const validStep1 = form.primary_contact_name && mobileOk && form.tower_id && form.flat_id;
 
   const copyText = async (text, label) => {
     try {
@@ -177,7 +178,7 @@ export default function Subscribe() {
                 <Input id="name" data-testid="sub-name" value={form.primary_contact_name} onChange={(e) => set("primary_contact_name", e.target.value)} placeholder="e.g. Rahul Sen" />
               </div>
               <div>
-                <Label required htmlFor="mobile">Mobile number</Label>
+                <Label htmlFor="mobile">Mobile number (optional)</Label>
                 <Input id="mobile" data-testid="sub-mobile" value={form.mobile} onChange={(e) => set("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit Indian mobile" inputMode="numeric" />
               </div>
               <div>
@@ -269,7 +270,7 @@ export default function Subscribe() {
                   </div>
                   <div className="flex items-start justify-between gap-3">
                     <dt className="text-brown-800/55">Mobile</dt>
-                    <dd className="font-medium tabular-nums text-brown-900">{form.mobile}</dd>
+                    <dd className="font-medium tabular-nums text-brown-900">{form.mobile || "—"}</dd>
                   </div>
                   <div className="flex items-start justify-between gap-3">
                     <dt className="text-brown-800/55">Flat</dt>

@@ -19,7 +19,7 @@ export default function Invite() {
 
         <div className="relative z-10 max-w-md">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7A1F2B]/70">
-            3rd year
+            3rd year · Organised by EOC
           </p>
           <h1 className="mt-4 font-sans text-5xl font-black uppercase leading-[0.95] tracking-tight sm:text-6xl md:text-7xl">
             One 10

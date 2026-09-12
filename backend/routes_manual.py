@@ -1,5 +1,7 @@
 """Manual payment modes with maker-checker controls, plus admin collection registers."""
-from fastapi import APIRouter, Depends, Request, HTTPException, Body
+from fastapi import APIRouter, Depends, Request, HTTPException, Body, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
+import io
 
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id
@@ -7,6 +9,13 @@ from util import iso, valid_indian_mobile
 from audit import audit
 from auth import require
 from routes_collect import _issue_receipt
+from subscription_import import (
+    TEMPLATE_FILENAME,
+    base_amount_paise,
+    build_template_xlsx,
+    load_import_settings,
+    run_import,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -304,3 +313,44 @@ async def admin_receipt_pdf(rid: str, user: dict = Depends(require("receipts:rea
     pdf = receipt_pdf(r, settings, verify_url)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{r["receipt_no"]}.pdf"'})
+
+
+@router.get("/admin/subscription-imports/template")
+async def admin_subscription_import_template(
+    user: dict = Depends(require("households:read", "receipts:read", "receipts:manage")),
+):
+    """Download blank Excel template for offline bank-transfer capture."""
+    _cycle_id, settings = await load_import_settings()
+    base_rupees = base_amount_paise(settings) / 100.0
+    data = build_template_xlsx(base_rupees=base_rupees)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{TEMPLATE_FILENAME}"'},
+    )
+
+
+@router.post("/admin/subscription-imports/import")
+async def admin_subscription_import_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(False),
+    request: Request = None,
+    user: dict = Depends(require("receipts:manage")),
+):
+    """Upload filled template; populate households and auto-issue receipts per successful row."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    try:
+        summary = await run_import(
+            content,
+            file.filename or "upload.xlsx",
+            dry_run=dry_run,
+            actor=user,
+            request=request,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not import file: {e}")
+    return summary

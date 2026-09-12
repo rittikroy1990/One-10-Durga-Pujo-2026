@@ -38,10 +38,10 @@ export default function Invite() {
           </Link>
 
           <p className="mt-8 text-lg leading-snug text-[#2A1215]/85 sm:text-xl">
-            But participate and enjoy.
+            Or don&apos;t.
           </p>
-          <p className="mt-2 font-display text-2xl text-[#2A1215] sm:text-3xl">
-            সবার পুজো
+          <p className="mt-2 text-lg leading-snug text-[#2A1215]/85 sm:text-xl">
+            But participate and enjoy.
           </p>
         </div>
 

@@ -3,14 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --brown-900: #170d0b;
-  --brown-800: #1f1412;
-  --brown-700: #2a1b18;
-  --ivory-100: #fffff0;
-  --ivory-200: #fdfbf7;
-  --ivory-300: #f5f0e6;
-  --vermilion: #d9381e;
-  --gold: #d4af37;
+  --brown-950: #1f120c;
+  --brown-900: #2c1810;
+  --brown-800: #3d2418;
+  --brown-700: #5c3a28;
+  --brown-600: #7a4e34;
+  --ivory-100: #fffefa;
+  --ivory-200: #fff8ec;
+  --ivory-300: #ffefd6;
+  --sky-50: #f5fbff;
+  --sky-100: #e8f4fc;
+  --sun-100: #fff1d6;
+  --sun-400: #f5a623;
+  --vermilion: #e03520;
+  --vermilion-bright: #f04a35;
+  --sindoor: #e03520;
+  --gold: #d4a017;
+  --gold-soft: #f0d78c;
 }
 
 * {
@@ -23,18 +32,17 @@ html {
 
 body {
   margin: 0;
-  font-family: "Manrope", sans-serif;
+  font-family: "Outfit", sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: var(--brown-800);
-  color: var(--ivory-100);
-}
-
-::selection {
-  background: var(--gold);
+  background: var(--sky-50);
   color: var(--brown-900);
 }
 
-/* Scrollbar */
+::selection {
+  background: var(--sun-400);
+  color: var(--brown-900);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -43,21 +51,38 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.35);
+  background: rgba(245, 166, 35, 0.45);
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 175, 55, 0.55);
+  background: rgba(245, 166, 35, 0.65);
 }
 
 .font-display {
   font-family: "Cormorant Garamond", serif;
+  font-feature-settings: "liga" 1, "kern" 1;
 }
 
-/* Alpona / mandala radial motif */
+.pujo-day {
+  background:
+    radial-gradient(ellipse 90% 55% at 10% -10%, rgba(255, 200, 87, 0.45), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 95% 5%, rgba(168, 212, 240, 0.55), transparent 50%),
+    radial-gradient(ellipse 50% 40% at 50% 100%, rgba(255, 225, 163, 0.35), transparent 55%),
+    linear-gradient(180deg, #f5fbff 0%, #fff9f0 48%, #e8f4fc 100%);
+}
+
+.pujo-night {
+  /* legacy alias → sunny day wash */
+  background:
+    radial-gradient(ellipse 90% 55% at 10% -10%, rgba(255, 200, 87, 0.45), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 95% 5%, rgba(168, 212, 240, 0.55), transparent 50%),
+    linear-gradient(180deg, #f5fbff 0%, #fff9f0 48%, #e8f4fc 100%);
+}
+
 .alpona-bg {
-  background-image: radial-gradient(circle at 50% 50%, rgba(212, 175, 55, 0.08) 0%, transparent 60%),
-    repeating-conic-gradient(from 0deg at 50% 50%, rgba(212, 175, 55, 0.05) 0deg 6deg, transparent 6deg 12deg);
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(245, 166, 35, 0.08) 0%, transparent 55%),
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(224, 53, 32, 0.03) 0deg 5deg, transparent 5deg 12deg);
 }
 
 .grain {
@@ -68,12 +93,13 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.05;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.025;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .text-gradient-gold {
-  background: linear-gradient(120deg, #efcb63, #d4af37 40%, #b5952f);
+  background: linear-gradient(120deg, #f5a623, #e03520 55%, #c42b18);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -81,33 +107,45 @@ body {
 
 .divider-diya {
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.5), transparent);
+  background: linear-gradient(90deg, transparent, rgba(245, 166, 35, 0.65), transparent);
 }
 
 .card-glow {
-  box-shadow: 0 10px 60px -20px rgba(212, 175, 55, 0.4);
+  box-shadow: 0 12px 48px -18px rgba(245, 166, 35, 0.35);
 }
 
-/* focus visibility for accessibility */
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
-  border-radius: 4px;
+.ken-burns {
+  animation: kenBurns 28s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes kenBurns {
+  from {
+    transform: scale(1.05) translate(0, 0);
+  }
+  to {
+    transform: scale(1.14) translate(-2%, -1%);
+  }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
+.reveal-mask {
+  clip-path: inset(0 0 100% 0);
+  animation: revealUp 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes revealUp {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.gallery-scroll {
+  animation: galleryDrift 50s linear infinite;
+}
+@keyframes galleryDrift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
   }
 }
 
@@ -120,5 +158,27 @@ textarea:focus-visible,
   }
   to {
     transform: translateX(-50%);
+  }
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--sun-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

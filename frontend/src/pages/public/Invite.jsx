@@ -38,9 +38,6 @@ export default function Invite() {
           </Link>
 
           <p className="mt-8 text-lg leading-snug text-[#2A1215]/85 sm:text-xl">
-            Or don&apos;t.
-          </p>
-          <p className="mt-2 text-lg leading-snug text-[#2A1215]/85 sm:text-xl">
             But participate and enjoy.
           </p>
         </div>

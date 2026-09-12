@@ -18,6 +18,7 @@ export default function ReceiptFind() {
   const [findResult, setFindResult] = useState(null);
 
   // Generate from proof
+  const [genName, setGenName] = useState("");
   const [towerId, setTowerId] = useState("");
   const [flatId, setFlatId] = useState("");
   const [genMobile, setGenMobile] = useState("");
@@ -66,6 +67,10 @@ export default function ReceiptFind() {
 
   const lookupPending = async (e) => {
     e.preventDefault();
+    if (!genName.trim() || genName.trim().length < 2) {
+      toast.error("Enter the name used at subscription.");
+      return;
+    }
     if (!towerId || !flatId) {
       toast.error("Select tower and flat.");
       return;
@@ -75,6 +80,7 @@ export default function ReceiptFind() {
     setGenResult(null);
     try {
       const r = await api.post("/receipt/pending-payment", {
+        name: genName.trim(),
         tower_id: towerId,
         flat_id: flatId,
         mobile: genMobile.trim(),
@@ -205,8 +211,19 @@ export default function ReceiptFind() {
               <div>
                 <h2 className="font-display text-2xl text-brown-900">Paid via UPI?</h2>
                 <p className="mt-1 text-sm text-brown-800/65">
-                  Select your flat, then upload the payment screenshot and UTR / reference number to generate your receipt.
+                  Enter your name and flat, then upload the payment screenshot and UTR / reference number to generate your receipt.
                 </p>
+              </div>
+              <div>
+                <Label required htmlFor="gname">Name</Label>
+                <Input
+                  id="gname"
+                  data-testid="gen-name"
+                  value={genName}
+                  onChange={(e) => setGenName(e.target.value)}
+                  placeholder="Name as on subscription"
+                  autoComplete="name"
+                />
               </div>
               <div>
                 <Label required htmlFor="gtower">Tower / Block</Label>

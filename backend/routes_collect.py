@@ -799,9 +799,12 @@ async def receipt_pending_payment(body: dict = Body(...), request: Request = Non
         "tower_id": body.get("tower_id", ""), "flat_id": body.get("flat_id", ""),
     })
 
+    name = (body.get("name") or "").strip()
     tower_id = (body.get("tower_id") or "").strip()
     flat_id = (body.get("flat_id") or "").strip()
     mobile = (body.get("mobile") or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter the name used at subscription.")
     if not tower_id or not flat_id:
         raise HTTPException(status_code=400, detail="Select tower and flat.")
     if mobile and not valid_indian_mobile(mobile):
@@ -818,6 +821,17 @@ async def receipt_pending_payment(body: dict = Body(...), request: Request = Non
             detail="No subscription found for this flat. Please Subscribe & Pay first.",
         )
 
+    def _norm_name(s: str) -> str:
+        return " ".join((s or "").strip().lower().split())
+
+    stored_names = {
+        _norm_name(household.get("primary_name") or ""),
+        _norm_name(household.get("family_display_name") or ""),
+    }
+    stored_names.discard("")
+    if stored_names and _norm_name(name) not in stored_names:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
     hh_mobile = (household.get("primary_mobile") or "").strip()
     if mobile and hh_mobile and mobile != hh_mobile:
         raise HTTPException(status_code=404, detail="No pending payment found with those details.")
@@ -830,6 +844,12 @@ async def receipt_pending_payment(body: dict = Body(...), request: Request = Non
         },
         sort=[("created_at", -1)],
     )
+    if intent:
+        payer = _norm_name(intent.get("payer_name") or "")
+        if payer:
+            stored_names.add(payer)
+        if stored_names and _norm_name(name) not in stored_names:
+            raise HTTPException(status_code=404, detail="No pending payment found with those details.")
     if not intent:
         paid = await db.subscription_intents.find_one(
             {"household_id": household["id"], "kind": "subscription", "status": "paid"},

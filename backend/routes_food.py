@@ -163,15 +163,24 @@ def _meal_price_map(food: dict) -> dict:
     return prices
 
 
+
+def _food_page_enabled(food: dict) -> bool:
+    """Public Food page is coming-soon unless admin explicitly enables it."""
+    return bool((food or {}).get("page_enabled"))
+
 @router.get("/food/menu")
 async def food_menu():
     s = await get_settings()
     food = _apply_default_prices(s.get("food_subscription") or {})
+    page_enabled = _food_page_enabled(food)
     return {
-        "menu": food,
-        "payment_enabled": bool(food.get("payment_enabled")),
+        "menu": food if page_enabled else {"days": []},
+        "page_enabled": page_enabled,
+        "coming_soon_message": (food.get("coming_soon_message") or "").strip()
+            or "Food subscriptions will open soon. Please check back.",
+        "payment_enabled": bool(food.get("payment_enabled")) if page_enabled else False,
         "payment_note": food.get("payment_note") or "Pay via UPI QR after registering.",
-        "meal_prices": list(_meal_price_map(food).values()),
+        "meal_prices": list(_meal_price_map(food).values()) if page_enabled else [],
     }
 
 
@@ -182,6 +191,8 @@ async def food_register(body: dict = Body(...), request: Request = None):
     food = _apply_default_prices(s.get("food_subscription") or {})
     if not food:
         raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
+    if not _food_page_enabled(food):
+        raise HTTPException(status_code=403, detail="Food subscriptions are coming soon.")
 
     name = (body.get("name") or "").strip()
     mobile_raw = "".join(c for c in str(body.get("mobile") or "") if c.isdigit())
@@ -296,9 +307,43 @@ async def admin_food_prices(user: dict = Depends(require("households:read", "ops
     s = await get_settings()
     food = _apply_default_prices(s.get("food_subscription") or {})
     return {
+        "page_enabled": _food_page_enabled(food),
+        "coming_soon_message": (food.get("coming_soon_message") or "").strip(),
         "payment_enabled": bool(food.get("payment_enabled")),
         "payment_note": food.get("payment_note") or "",
         "prices": list(_meal_price_map(food).values()),
+    }
+
+
+@router.put("/admin/food-subscriptions/page")
+async def admin_set_food_page(
+    body: dict = Body(...),
+    request: Request = None,
+    user: dict = Depends(require("households:write", "ops:manage", "receipts:manage")),
+):
+    """One-click open / coming-soon for the public Food page."""
+    s = await get_settings()
+    food = dict(s.get("food_subscription") or {})
+    if not food:
+        raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
+    if "page_enabled" not in body:
+        raise HTTPException(status_code=400, detail="page_enabled is required.")
+    food["page_enabled"] = bool(body.get("page_enabled"))
+    if "coming_soon_message" in body:
+        food["coming_soon_message"] = str(body.get("coming_soon_message") or "")[:300]
+    await db.application_settings.update_one({}, {"$set": {"food_subscription": food}}, upsert=True)
+    await audit(
+        "food.page.update",
+        actor=user,
+        entity_type="food_subscription",
+        entity_id="page",
+        after={"page_enabled": food.get("page_enabled")},
+        request=request,
+    )
+    return {
+        "ok": True,
+        "page_enabled": _food_page_enabled(food),
+        "coming_soon_message": (food.get("coming_soon_message") or "").strip(),
     }
 
 
@@ -344,6 +389,10 @@ async def admin_update_food_prices(
         days.append(d)
     food["days"] = days
 
+    if "page_enabled" in body:
+        food["page_enabled"] = bool(body.get("page_enabled"))
+    if "coming_soon_message" in body:
+        food["coming_soon_message"] = str(body.get("coming_soon_message") or "")[:300]
     if "payment_enabled" in body:
         food["payment_enabled"] = bool(body.get("payment_enabled"))
     if "payment_note" in body:
@@ -363,6 +412,8 @@ async def admin_update_food_prices(
     food = _apply_default_prices(food)
     return {
         "ok": True,
+        "page_enabled": _food_page_enabled(food),
+        "coming_soon_message": (food.get("coming_soon_message") or "").strip(),
         "payment_enabled": bool(food.get("payment_enabled")),
         "payment_note": food.get("payment_note") or "",
         "prices": list(_meal_price_map(food).values()),
@@ -374,7 +425,11 @@ async def admin_list_food(user: dict = Depends(require("households:read", "ops:r
     items = await db.food_subscriptions.find({}, NO_ID).sort("created_at", -1).to_list(2000)
     s = await get_settings()
     food = s.get("food_subscription") or {}
-    return {"items": items, "payment_enabled": bool(food.get("payment_enabled"))}
+    return {
+        "items": items,
+        "page_enabled": _food_page_enabled(food),
+        "payment_enabled": bool(food.get("payment_enabled")),
+    }
 
 
 _BASE_TEMPLATE_COLS = [

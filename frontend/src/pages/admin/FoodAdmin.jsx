@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Download, Upload } from "lucide-react";
+import { RefreshCw, Download, Upload, Ban, CheckCircle2 } from "lucide-react";
 import api from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, Button, StatusBadge, Spinner, Input, Label } from "../../components/ui";
 import ExportCsvButton from "../../components/ExportCsvButton";
@@ -43,6 +43,8 @@ export default function FoodAdmin() {
   const [downloading, setDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [savingPrices, setSavingPrices] = useState(false);
+  const [togglingPage, setTogglingPage] = useState(false);
+  const [pageEnabled, setPageEnabled] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [priceForm, setPriceForm] = useState({
     breakfast: "60",
@@ -55,7 +57,10 @@ export default function FoodAdmin() {
   const load = useCallback(() => {
     setLoading(true);
     api.get("/admin/food-subscriptions")
-      .then((r) => setItems(r.data.items || []))
+      .then((r) => {
+        setItems(r.data.items || []);
+        if (typeof r.data.page_enabled === "boolean") setPageEnabled(r.data.page_enabled);
+      })
       .catch(() => toast.error("Could not load food subscriptions"))
       .finally(() => setLoading(false));
   }, []);
@@ -67,6 +72,7 @@ export default function FoodAdmin() {
         for (const p of r.data.prices || []) {
           if (p?.code) map[p.code] = String(Math.round((Number(p.amount_paise) || 0) / 100));
         }
+        setPageEnabled(!!r.data.page_enabled);
         setPriceForm({
           breakfast: map.breakfast || "60",
           lunch: map.lunch || "300",
@@ -79,6 +85,19 @@ export default function FoodAdmin() {
 
   useEffect(load, [load]);
   useEffect(loadPrices, [loadPrices]);
+
+  const setFoodPageEnabled = async (enabled) => {
+    setTogglingPage(true);
+    try {
+      const r = await api.put("/admin/food-subscriptions/page", { page_enabled: enabled });
+      setPageEnabled(!!r.data.page_enabled);
+      toast.success(enabled ? "Food page is open for residents" : "Food page set to Coming soon");
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not update Food page status");
+    } finally {
+      setTogglingPage(false);
+    }
+  };
 
   const savePrices = async () => {
     setSavingPrices(true);
@@ -160,6 +179,44 @@ export default function FoodAdmin() {
       <p className="mb-4 text-sm text-brown-800/50">
         Download a CSV template to capture subscriptions offline, then upload it to create or update records.
       </p>
+
+
+      <Card className="mb-4" data-testid="food-page-status-card">
+        <CardBody className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-display text-xl text-brown-900">Public Food page</div>
+            <p className="mt-1 text-sm text-brown-800/60">
+              When set to Coming soon, residents see a placeholder instead of the meal cart.
+            </p>
+            <div className="mt-2">
+              <StatusBadge status={pageEnabled ? "open" : "coming_soon"} />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {pageEnabled ? (
+              <Button
+                variant="subtle"
+                size="sm"
+                disabled={togglingPage}
+                onClick={() => setFoodPageEnabled(false)}
+                data-testid="food-page-coming-soon-btn"
+              >
+                <Ban className="h-4 w-4" /> {togglingPage ? "Updating…" : "Set coming soon"}
+              </Button>
+            ) : (
+              <Button
+                variant="admin"
+                size="sm"
+                disabled={togglingPage}
+                onClick={() => setFoodPageEnabled(true)}
+                data-testid="food-page-open-btn"
+              >
+                <CheckCircle2 className="h-4 w-4" /> {togglingPage ? "Updating…" : "Open Food page"}
+              </Button>
+            )}
+          </div>
+        </CardBody>
+      </Card>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card>

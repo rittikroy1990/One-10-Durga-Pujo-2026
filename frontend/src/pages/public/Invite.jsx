@@ -8,13 +8,13 @@ import { Link } from "react-router-dom";
 export default function Invite() {
   return (
     <main className="min-h-screen bg-[#FFFAF5] text-[#7A1F2B]">
-      <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col px-6 pb-10 pt-10 sm:px-10 sm:pt-14">
-        {/* Poster artwork as soft backdrop on the right (desktop) */}
+      <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col overflow-hidden px-6 pb-10 pt-10 sm:px-10 sm:pt-14">
+        {/* Durga figure only (not the full text poster — avoids doubled copy) */}
         <img
-          src="/images/one10-durgotsav-whatsapp-share.png"
+          src="/images/one10-durga-invite-figure.jpg"
           alt=""
           aria-hidden
-          className="pointer-events-none absolute bottom-0 right-0 hidden max-h-[72vh] w-auto opacity-95 sm:block"
+          className="pointer-events-none absolute bottom-0 right-[-1rem] hidden max-h-[78vh] w-auto opacity-100 sm:block"
         />
 
         <div className="relative z-10 max-w-md">
@@ -45,12 +45,12 @@ export default function Invite() {
           </p>
         </div>
 
-        {/* Mobile Durga image */}
-        <div className="relative z-10 mt-10 flex justify-end sm:hidden">
+        {/* Mobile Durga figure */}
+        <div className="relative z-10 mt-8 flex justify-end sm:hidden">
           <img
-            src="/images/one10-durgotsav-whatsapp-share.png"
+            src="/images/one10-durga-invite-figure.jpg"
             alt="Goddess Durga — One 10 Durgotsav 2026"
-            className="h-56 w-56 rounded-2xl object-cover object-right-bottom shadow-sm"
+            className="h-52 w-auto max-w-[70%] object-contain object-bottom"
           />
         </div>
 

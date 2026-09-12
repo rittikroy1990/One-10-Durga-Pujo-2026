@@ -11,7 +11,7 @@ export default function Invite() {
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col overflow-hidden px-6 pb-10 pt-10 sm:px-10 sm:pt-14">
         {/* Durga figure only (not the full text poster — avoids doubled copy) */}
         <img
-          src="/images/one10-durga-invite-figure.jpg"
+          src="/images/one10-bengali-durga-figure.jpg"
           alt=""
           aria-hidden
           className="pointer-events-none absolute bottom-0 right-[-1rem] hidden max-h-[78vh] w-auto opacity-100 sm:block"
@@ -48,7 +48,7 @@ export default function Invite() {
         {/* Mobile Durga figure */}
         <div className="relative z-10 mt-8 flex justify-end sm:hidden">
           <img
-            src="/images/one10-durga-invite-figure.jpg"
+            src="/images/one10-bengali-durga-figure.jpg"
             alt="Goddess Durga — One 10 Durgotsav 2026"
             className="h-52 w-auto max-w-[70%] object-contain object-bottom"
           />

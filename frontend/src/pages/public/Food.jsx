@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  UtensilsCrossed, Info, QrCode, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
+  UtensilsCrossed, Info, QrCode, Clock, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
   Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon,
 } from "lucide-react";
 import api from "../../lib/api";
@@ -438,6 +438,39 @@ export default function Food() {
       )}
     </div>
   );
+
+  if (menu && !menu.page_enabled) {
+    return (
+      <PublicLayout>
+        <section
+          className="relative flex min-h-[70vh] items-center justify-center overflow-hidden border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 px-4 pt-24 pb-16"
+          data-testid="food-coming-soon"
+        >
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(245,166,35,0.18),_transparent_55%)]" />
+          <div className="relative mx-auto max-w-xl text-center">
+            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Puja meals</p>
+            <h1 className="mt-3 font-display text-4xl text-brown-900 sm:text-5xl">Coming soon</h1>
+            <p className="mt-3 text-base text-brown-800/70 sm:text-lg">
+              {menu.coming_soon_message
+                || "Food subscriptions will open soon. Please check back."}
+            </p>
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-sun-400/40 bg-white/80 px-4 py-2 text-sm text-brown-800/70 shadow-sm backdrop-blur">
+              <Clock className="h-4 w-4 text-vermilion-500" />
+              Ordering is temporarily paused
+            </div>
+            <div className="mt-8">
+              <Link
+                to="/subscribe"
+                className="inline-flex items-center justify-center rounded-full bg-vermilion-500 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-vermilion-600"
+              >
+                Subscribe &amp; Pay
+              </Link>
+            </div>
+          </div>
+        </section>
+      </PublicLayout>
+    );
+  }
 
   return (
     <PublicLayout>

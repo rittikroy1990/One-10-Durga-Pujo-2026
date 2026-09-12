@@ -18,16 +18,19 @@ export default function Invite() {
         />
 
         <div className="relative z-10 max-w-md">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7A1F2B]/70">
-            3rd year · Organised by EOC
-          </p>
-          <h1 className="mt-4 font-sans text-5xl font-black uppercase leading-[0.95] tracking-tight sm:text-6xl md:text-7xl">
-            One 10
+          <h1 className="font-sans text-5xl font-black uppercase leading-[0.95] tracking-tight sm:text-6xl md:text-7xl">
+            One10
+            <br />
+            3rd Year
             <br />
             Durgotsav
-            <br />
-            2026
           </h1>
+          <p className="mt-4 text-base font-semibold tracking-wide text-[#7A1F2B]/80 sm:text-lg">
+            organised by EOC
+          </p>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.22em] text-[#7A1F2B]/55">
+            2026
+          </p>
 
           <Link
             to="/subscribe"

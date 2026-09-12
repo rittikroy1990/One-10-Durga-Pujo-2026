@@ -59,11 +59,6 @@ export default function Invite() {
           >
             one10events.in
           </a>
-          <p className="max-w-[14rem] text-right text-xs leading-relaxed text-[#5C3530]/55">
-            Subscribe if you can.
-            <br />
-            Come either way.
-          </p>
         </div>
       </div>
     </main>

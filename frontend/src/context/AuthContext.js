@@ -34,8 +34,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const loginWithPassword = async (loginId, password) => {
+    const r = await api.post("/auth/login", { login_id: loginId, password });
+    setUser(r.data.user);
+    return r.data.user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, checkAuth, logout }}>
+    <AuthContext.Provider value={{ user, setUser, loading, checkAuth, logout, loginWithPassword }}>
       {children}
     </AuthContext.Provider>
   );

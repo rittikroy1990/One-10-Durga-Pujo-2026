@@ -10,9 +10,9 @@ from fastapi import (APIRouter, Depends, Request, Response, HTTPException, Body,
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id, list_campaigns, DEFAULT_SETTINGS
 from util import iso, now_utc, fmt_inr, to_ist
-from audit import audit
+from audit import audit, fetch_transaction_trail, transaction_trail_csv_rows
 from ledger import trial_balance, account_balance
-from auth import (get_current_user, exchange_session, require, ROLES, ROLE_PERMISSIONS,
+from auth import (get_current_user, exchange_session, login_with_password, require, ROLES, ROLE_PERMISSIONS,
                   sod_conflicts, user_permissions)
 from docs import export_csv, export_xlsx, export_pdf
 from storage import save_document, get_object
@@ -21,6 +21,30 @@ router = APIRouter(prefix="/api")
 
 
 # =============================================================== AUTH
+
+@router.post("/auth/login")
+async def auth_login(body: dict = Body(...), response: Response = None, request: Request = None):
+    """Committee portal password login (user id + password)."""
+    result = await login_with_password(body.get("login_id"), body.get("password"))
+    response.set_cookie(
+        "session_token",
+        result["session_token"],
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+        max_age=7 * 24 * 3600,
+    )
+    await audit(
+        "auth.login",
+        actor=result["user"],
+        entity_type="user",
+        entity_id=result["user"]["user_id"],
+        request=request,
+    )
+    return {"user": result["user"]}
+
+
 @router.post("/auth/session")
 async def auth_session(body: dict = Body(...), response: Response = None):
     session_id = body.get("session_id")
@@ -36,7 +60,8 @@ async def auth_session(body: dict = Body(...), response: Response = None):
 
 @router.get("/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
-    return {**user, "permissions": sorted(user_permissions(user))}
+    safe = {k: v for k, v in user.items() if k not in ("password_hash", "_id")}
+    return {**safe, "permissions": sorted(user_permissions(user))}
 
 
 @router.post("/auth/logout")
@@ -118,6 +143,149 @@ async def update_settings(body: dict = Body(...), request: Request = None,
     return after
 
 
+# =============================================================== ONE-TIME PAYMENT QR UPLOAD
+def _payment_qr_paths():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    return [
+        root / "frontend" / "public" / "images" / "payment-qr.png",
+        root / "frontend" / "build" / "images" / "payment-qr.png",
+        root / "_uploads" / "payment-qr.png",
+    ]
+
+
+@router.get("/admin/payment-qr")
+async def admin_payment_qr_status(user: dict = Depends(require("settings:read", "settings:manage", "receipts:manage", "payments:manage", "households:write"))):
+    settings = await get_settings()
+    upi = (settings.get("organisation") or {}).get("upi") or {}
+    locked = bool(upi.get("qr_locked"))
+    url = upi.get("static_qr_url") or "/images/payment-qr.png"
+    return {
+        "locked": locked,
+        "uploaded": locked or bool(upi.get("qr_uploaded_at")),
+        "url": url,
+        "uploaded_at": upi.get("qr_uploaded_at"),
+        "uploaded_by": upi.get("qr_uploaded_by"),
+        "vpa": upi.get("vpa") or "",
+        "payee_name": upi.get("payee_name") or "",
+        "can_upload": not locked,
+    }
+
+
+@router.post("/admin/payment-qr")
+async def admin_upload_payment_qr(request: Request = None,
+                                  user: dict = Depends(require("settings:manage", "receipts:manage", "payments:manage", "households:write")),
+                                  file: UploadFile = File(...)):
+    """One-time upload of the public UPI payment QR. After success, further uploads are locked."""
+    settings = await get_settings()
+    org = dict(settings.get("organisation") or {})
+    upi = dict(org.get("upi") or {})
+    if upi.get("qr_locked"):
+        raise HTTPException(
+            status_code=409,
+            detail="Payment QR upload is deactivated — a QR was already uploaded once.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="QR image too large (max 8 MB).")
+    ctype = (file.content_type or "").lower()
+    name = (file.filename or "").lower()
+    if not (ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        raise HTTPException(status_code=400, detail="Upload a PNG or JPG QR image.")
+
+    # Normalize to PNG for consistent serving; try to decode VPA from the QR.
+    decoded_vpa = ""
+    decoded_payee = ""
+    decoded_uri = ""
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(data)).convert("RGB")
+        buf = _io.BytesIO()
+        im.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        try:
+            from pyzbar.pyzbar import decode as _zbar_decode
+            from urllib.parse import parse_qs, urlparse, unquote
+            for sym in _zbar_decode(im) or []:
+                raw = (sym.data or b"").decode("utf-8", errors="ignore").strip()
+                if not raw.lower().startswith("upi://"):
+                    continue
+                decoded_uri = raw
+                qs = parse_qs(urlparse(raw).query)
+                decoded_vpa = unquote((qs.get("pa") or [""])[0]).strip()
+                decoded_payee = unquote((qs.get("pn") or [""])[0]).strip()
+                break
+        except Exception:
+            pass
+    except Exception:
+        png_bytes = data
+
+    written = []
+    for path in _payment_qr_paths():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png_bytes)
+        written.append(str(path))
+
+    stamp = iso()
+    cache_bust = stamp.replace(":", "").replace("-", "").replace(".", "")[:18]
+    static_url = f"/images/payment-qr.png?v={cache_bust}"
+    upi.update({
+        "enabled": True,
+        "static_qr_url": static_url,
+        "qr_locked": True,
+        "qr_uploaded_at": stamp,
+        "qr_uploaded_by": user.get("email") or user.get("user_id") or "",
+        "instructions": (
+            "Scan the committee QR with any UPI app and pay the exact amount shown. "
+            "Then upload your payment screenshot and enter the UTR / UPI reference number. "
+            "Do not type the UPI ID manually."
+        ),
+    })
+    if decoded_vpa:
+        upi["vpa"] = decoded_vpa
+    if decoded_payee:
+        upi["payee_name"] = decoded_payee
+    if decoded_uri:
+        upi["merchant_upi_uri"] = decoded_uri
+    org["upi"] = upi
+    result = await db.application_settings.update_one(
+        {"id": "app_settings"},
+        {"$set": {"organisation.upi": upi, "updated_at": stamp}},
+    )
+    if result.matched_count == 0:
+        await db.application_settings.update_one(
+            {},
+            {"$set": {"organisation.upi": upi, "updated_at": stamp}},
+        )
+    await audit(
+        "payment_qr.upload",
+        actor=user,
+        entity_type="organisation.upi",
+        entity_id="payment_qr",
+        after={
+            "url": static_url,
+            "bytes": len(png_bytes),
+            "paths": written,
+            "vpa": decoded_vpa or upi.get("vpa"),
+            "payee_name": decoded_payee or upi.get("payee_name"),
+        },
+        request=request,
+    )
+    return {
+        "ok": True,
+        "locked": True,
+        "url": static_url,
+        "uploaded_at": stamp,
+        "vpa": decoded_vpa or upi.get("vpa") or "",
+        "payee_name": decoded_payee or upi.get("payee_name") or "",
+        "message": "Payment QR saved and upload deactivated.",
+    }
+
+
 # =============================================================== CAMPAIGNS / CYCLES
 @router.get("/admin/campaigns")
 async def admin_list_campaigns(user: dict = Depends(require("settings:read", "reports:read"))):
@@ -163,7 +331,7 @@ async def create_campaign(body: dict = Body(...), request: Request = None,
             "consecutive_year": int(body.get("consecutive_year") or 1),
             "venue": body.get("venue") or "",
             "important_notice": "A receipt is issued only after payment is verified.",
-            "short_url": f"one10events.example/campaigns/{slug}",
+            "short_url": f"https://one10events.in/campaigns/{slug}",
             "hero_url": body.get("hero_url") or "",
         },
         "subscription": sub,
@@ -393,14 +561,63 @@ async def dashboard_audit(user: dict = Depends(require("audit:read"))):
 # =============================================================== AUDIT TRAIL
 @router.get("/audit/events")
 async def audit_events(action: str = Query(""), entity_type: str = Query(""),
-                       limit: int = Query(200), user: dict = Depends(require("audit:read"))):
+                       entity_id: str = Query(""), limit: int = Query(200),
+                       user: dict = Depends(require("audit:read"))):
     q = {}
     if action:
-        q["action"] = {"$regex": action}
+        q["action"] = {"$regex": action, "$options": "i"}
     if entity_type:
         q["entity_type"] = entity_type
+    if entity_id:
+        q["entity_id"] = entity_id
     events = await db.audit_events.find(q, {"_id": 0}).sort("seq", -1).to_list(min(limit, 2000))
     return {"items": events, "count": len(events)}
+
+
+@router.get("/audit/transaction/{key}")
+async def audit_transaction_trail(key: str, user: dict = Depends(require("audit:read"))):
+    """Per-transaction audit timeline (receipt no / intent / order / payment id)."""
+    trail = await fetch_transaction_trail(key)
+    if not trail.get("related_ids"):
+        raise HTTPException(status_code=404, detail="No transaction found for that reference.")
+    return trail
+
+
+@router.get("/audit/transaction/{key}/export")
+async def audit_transaction_export(key: str, request: Request = None,
+                                   user: dict = Depends(require("audit:read"))):
+    """Download CSV audit trail for one transaction, with timestamps."""
+    trail = await fetch_transaction_trail(key)
+    if not trail.get("related_ids"):
+        raise HTTPException(status_code=404, detail="No transaction found for that reference.")
+    headers, rows = transaction_trail_csv_rows(trail)
+    # Context preamble rows help admins without opening JSON
+    ctx = trail.get("context") or {}
+    meta_rows = [
+        ["meta", "lookup", key, "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "receipt_no", ctx.get("receipt_no", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "intent_id", ctx.get("intent_id", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "issued_at", ctx.get("issued_at", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "method", ctx.get("method", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "provider_order_id", ctx.get("provider_order_id", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "event_count", trail.get("count", 0), "", "", "", "", "", "", "", "", "", ""],
+    ]
+    data = export_csv(headers, meta_rows + rows)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)[:48] or "transaction"
+    await audit(
+        "audit.transaction.export",
+        actor=user,
+        entity_type="transaction",
+        entity_id=ctx.get("receipt_id") or ctx.get("intent_id") or key,
+        correlation_id=ctx.get("intent_id") or "",
+        after={"key": key, "count": trail.get("count", 0), "receipt_no": ctx.get("receipt_no")},
+        request=request,
+    )
+    return Response(
+        content=data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="transaction_audit_{safe}.csv"'},
+    )
 
 
 @router.get("/audit/verify-chain")

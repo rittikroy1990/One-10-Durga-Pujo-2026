@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
-  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck,
+  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, UtensilsCrossed,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Spinner } from "./ui";
@@ -10,6 +10,7 @@ import { Spinner } from "./ui";
 const NAV = [
   { to: "/admin", label: "Dashboards", icon: LayoutDashboard, end: true, perm: "reports:read" },
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
+  { to: "/admin/food", label: "Food", icon: UtensilsCrossed, perm: "households:read" },
   { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read" },
   { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read" },
   { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read" },
@@ -17,6 +18,7 @@ const NAV = [
   { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read" },
   { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read" },
   { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read" },
+  { to: "/upload-qr", label: "Payment QR", icon: QrCode, perm: "settings:manage" },
   { to: "/admin/settings", label: "Settings", icon: Settings2, perm: "settings:read" },
 ];
 

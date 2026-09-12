@@ -2,14 +2,19 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, X, Flower2 } from "lucide-react";
 import { Button } from "./ui";
+import TechSupportBrand from "./TechSupportBrand";
 import api from "../lib/api";
 
 const LINKS = [
   { to: "/", label: "Home" },
   { to: "/events", label: "Programme" },
+  { to: "/nirghanto", label: "Nirghonto" },
+  { to: "/donate", label: "Donate" },
   { to: "/sponsors", label: "Sponsors" },
+  { to: "/food", label: "Food" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
+  { to: "/faq", label: "FAQ" },
   { to: "/transparency", label: "Transparency" },
 ];
 
@@ -94,6 +99,9 @@ export function PublicFooter() {
           <div className="mb-2 text-xs uppercase tracking-widest text-gold-400">Portal</div>
           <ul className="space-y-1.5 text-sm">
             <li><Link to="/subscribe" className="hover:text-ivory-100">Subscribe & Pay</Link></li>
+            <li><Link to="/donate" className="hover:text-ivory-100">Donate</Link></li>
+            <li><Link to="/food" className="hover:text-ivory-100">Food</Link></li>
+            <li><Link to="/faq" className="hover:text-ivory-100">FAQ & site guide</Link></li>
             <li><Link to="/receipt/find" className="hover:text-ivory-100">Find Receipt</Link></li>
             <li><Link to="/sponsors" className="hover:text-ivory-100">Sponsorship</Link></li>
             <li><Link to="/participate" className="hover:text-ivory-100">Participate</Link></li>
@@ -106,13 +114,17 @@ export function PublicFooter() {
           <ul className="space-y-1.5 text-sm">
             <li><Link to="/privacy" className="hover:text-ivory-100">Privacy Policy</Link></li>
             <li><Link to="/terms" className="hover:text-ivory-100">Terms</Link></li>
-            <li><Link to="/refund-policy" className="hover:text-ivory-100">Refund Policy</Link></li>
             <li><Link to="/contact" className="hover:text-ivory-100">Contact Committee</Link></li>
           </ul>
         </div>
       </div>
-      <div className="border-t border-gold-500/10 py-4 text-center text-xs text-ivory-100/40">
-        © {new Date().getFullYear()} {name}. Built for transparent, audit-ready collection.
+      <div className="border-t border-gold-500/15 bg-brown-900/40 px-5 py-8">
+        <div className="mx-auto max-w-7xl">
+          <TechSupportBrand />
+          <p className="mt-5 text-center text-xs text-ivory-100/40">
+            © {new Date().getFullYear()} {name}. Built for transparent, audit-ready collection · Website one10events.in
+          </p>
+        </div>
       </div>
     </footer>
   );

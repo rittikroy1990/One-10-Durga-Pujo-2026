@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import TechSupportBrand from "../../components/TechSupportBrand";
 
 export default function Legal({ type }) {
   const [cfg, setCfg] = useState(null);
@@ -32,18 +33,9 @@ export default function Legal({ type }) {
           ? `The current ${camp.title} per-family subscription is ${formatBreakup(sub)}.`
           : "Campaign subscription amounts are shown on the Subscribe page for the active campaign.",
         "Additional voluntary donations are recorded separately from the base subscription. No surplus is distributed to members as profit.",
-        "Online payments are processed via the configured payment gateway. A receipt is issued only after the payment is verified server-side — a browser success screen or screenshot is not proof of settlement.",
+        "Online payments are processed via UPI QR / bank transfer as shown on the Subscribe page. A receipt is issued only after the payment is verified — a browser success screen or screenshot is not proof of settlement.",
         "Significant expenditure requires advance approval by designated office bearers. Bank operations follow the Committee’s joint-signature mandate.",
       ].filter(Boolean),
-    },
-    refund: {
-      title: "Refund Policy",
-      body: [
-        "Refunds are considered only in genuine cases (e.g., duplicate payment) and require a request, reason and committee approval by designated office bearers.",
-        "Every approved refund generates a linked credit note and reversal ledger entries. Money is tracked as owed until the payment provider confirms the refund is complete.",
-        "Partial refunds preserve the original receipt history; the original receipt is never deleted.",
-        "Specific refund windows may be set by the Committee for each campaign; contact the Committee if you believe a refund is due.",
-      ],
     },
     contact: {
       title: "Contact the Committee",
@@ -63,6 +55,11 @@ export default function Legal({ type }) {
     <PublicLayout>
       <div className="mx-auto max-w-3xl px-5 py-16">
         <h1 className="font-display text-5xl text-ivory-100">{c.title}</h1>
+        {type === "contact" && (
+          <div className="mt-8" data-testid="contact-tech-support">
+            <TechSupportBrand />
+          </div>
+        )}
         <div className="mt-6 space-y-4 text-ivory-100/75 leading-relaxed">
           {c.body.map((p, i) => <p key={i}>{p}</p>)}
         </div>

@@ -154,17 +154,190 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawString(52 * mm, y - 6 * mm, "Scan to verify this receipt online:")
     c.drawString(52 * mm, y - 11 * mm, verify_url)
     c.drawString(52 * mm, y - 18 * mm, rc.get("computer_generated_note", ""))
-    c.drawString(52 * mm, y - 23 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+    # Subtle note for QR / bank-transfer receipts — not a bank settlement confirmation
+    if receipt.get("method") in ("upi_qr", "bank_transfer") or receipt.get("bank_verified") is False:
+        note = rc.get("verification_note") or (
+            "Committee-recorded against the payment reference you submitted. "
+            "This is not a bank settlement confirmation."
+        )
+        c.setFillColor(colors.HexColor("#5c5346"))
+        c.setFont("Helvetica-Oblique", 7.5)
+        c.drawString(52 * mm, y - 23 * mm, note[:110])
+        c.setFillColor(BROWN)
+        c.setFont("Helvetica", 8)
+        c.drawString(52 * mm, y - 28 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+        y_shift = 5 * mm
+    else:
+        c.drawString(52 * mm, y - 23 * mm, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
+        y_shift = 0
 
     c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(W - 22 * mm, y - 28 * mm, org.get("authorised_signatory", "Authorised Signatory"))
+    c.drawRightString(W - 22 * mm, y - 28 * mm - y_shift, org.get("authorised_signatory", "Authorised Signatory"))
     c.setFont("Helvetica", 7)
-    c.drawRightString(W - 22 * mm, y - 32 * mm, "Authorised Signatory (for the Committee)")
+    c.drawRightString(W - 22 * mm, y - 32 * mm - y_shift, "Authorised Signatory (for the Committee)")
     c.setFont("Helvetica", 6.5)
     mandate = org.get("bank_operating_mandate") or ""
     if mandate:
         c.drawCentredString(W / 2, 18 * mm, f"Bank mandate: {mandate}")
     c.drawCentredString(W / 2, 14 * mm, "Funds are accepted as voluntary subscriptions/donations for committee activities (non-profit).")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+# ------------------------------------------------------------------ Exports
+def export_csv(headers: list[str], rows: list[list]) -> bytes:
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow([neutralise_cell(h) for h in headers])
+    for r in rows:
+        w.writerow([neutralise_cell(c) for c in r])
+    return out.getvalue().encode("utf-8")
+
+
+def export_xlsx(headers: list[str], rows: list[list], title: str = "Report") -> bytes:
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = title[:31]
+    ws.append([neutralise_cell(h) for h in headers])
+    for r in rows:
+        ws.append([neutralise_cell(c) for c in r])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def export_pdf(title: str, headers: list[str], rows: list[list], meta: dict) -> bytes:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    c.setFillColor(VERMILION)
+    c.setFont("Helvetica-Bold", 15)
+    c.drawString(18 * mm, H - 22 * mm, title)
+    c.setFillColor(BROWN)
+    c.setFont("Helvetica", 8)
+    yy = H - 28 * mm
+    for k, v in meta.items():
+        c.drawString(18 * mm, yy, f"{k}: {v}")
+        yy -= 4 * mm
+    data = [[neutralise_cell(h) for h in headers]] + [[neutralise_cell(x) for x in r] for r in rows[:400]]
+    ncols = max(1, len(headers))
+    t = Table(data, colWidths=[(W - 36 * mm) / ncols] * ncols)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BROWN),
+        ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
+        ("FONTSIZE", (0, 0), (-1, -1), 6),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+    ]))
+    tw, th = t.wrapOn(c, W, H)
+    t.drawOn(c, 18 * mm, max(yy - th - 4 * mm, 18 * mm))
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def food_coupon_pdf(coupon: dict, subscription: dict, settings: dict) -> bytes:
+    """Single A4 food coupon sheet for admin printout."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    org = settings.get("organisation", {})
+    food = settings.get("food_subscription", {})
+    letterhead = org.get("organiser") or "Events Organizations Committee of One10"
+
+    c.setStrokeColor(GOLD)
+    c.setLineWidth(2)
+    c.rect(12 * mm, 12 * mm, W - 24 * mm, H - 24 * mm)
+    c.setLineWidth(0.5)
+    c.rect(15 * mm, 15 * mm, W - 30 * mm, H - 30 * mm)
+
+    y = H - 28 * mm
+    c.setFillColor(VERMILION)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(W / 2, y, letterhead)
+    y -= 6 * mm
+    c.setFillColor(GOLD)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(W / 2, y, food.get("title") or "Food Subscription Coupon")
+    y -= 5 * mm
+    c.setFillColor(BROWN)
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(W / 2, y, food.get("subtitle") or "Shashthi to Dashami")
+    y -= 10 * mm
+
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(22 * mm, y, f"Coupon No: {coupon.get('coupon_no', '')}")
+    c.setFillColor(colors.HexColor("#0f7b45"))
+    c.drawRightString(W - 22 * mm, y, f"Status: {(coupon.get('status') or 'issued').upper()}")
+    c.setFillColor(BROWN)
+    y -= 7 * mm
+    c.setFont("Helvetica", 10)
+    c.drawString(22 * mm, y, f"Name: {coupon.get('name') or subscription.get('name') or ''}")
+    y -= 5 * mm
+    mobile = coupon.get("mobile") or subscription.get("mobile") or ""
+    c.drawString(22 * mm, y, f"Mobile: {mobile}")
+    y -= 5 * mm
+    tower = coupon.get("tower_name") or subscription.get("tower_name") or ""
+    flat = coupon.get("flat_number") or subscription.get("flat_number") or ""
+    c.drawString(22 * mm, y, f"Household: {tower}{', Flat ' + flat if flat else ''}")
+    y -= 5 * mm
+    c.drawString(22 * mm, y, f"Issued: {_ist_str(coupon.get('created_at', ''))}")
+    y -= 5 * mm
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(22 * mm, y, "Amounts: TBC · Payment not activated")
+    y -= 8 * mm
+
+    # Meal grid: Day | Breakfast | Lunch | Evening | Dinner
+    meal_codes = ["breakfast", "lunch", "evening", "dinner"]
+    meal_labels = ["Breakfast", "Lunch", "Evening", "Dinner"]
+    selected = {
+        (x.get("day_code"), x.get("meal_code"))
+        for x in (coupon.get("selections") or subscription.get("selections") or [])
+    }
+    days = food.get("days") or []
+    if not days:
+        # fall back from selections
+        day_order = []
+        for x in (coupon.get("selections") or []):
+            if x.get("day_code") not in day_order:
+                day_order.append(x.get("day_code"))
+        days = [{"code": d, "label": (next((s.get("day_label") for s in (coupon.get("selections") or []) if s.get("day_code") == d), d))} for d in day_order]
+
+    header = ["Day"] + meal_labels
+    rows = [header]
+    for day in days:
+        row = [day.get("label") or day.get("code")]
+        for mc in meal_codes:
+            row.append("✓" if (day.get("code"), mc) in selected else "—")
+        rows.append(row)
+
+    t = Table(rows, colWidths=[40 * mm, 32 * mm, 32 * mm, 32 * mm, 32 * mm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BROWN),
+        ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, GOLD),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFF8EC")),
+    ]))
+    tw, th = t.wrapOn(c, W, H)
+    t.drawOn(c, 22 * mm, y - th)
+    y = y - th - 10 * mm
+
+    c.setFont("Helvetica", 8)
+    c.drawString(22 * mm, y, f"Issued by: {coupon.get('issued_by_name') or 'EOC Admin'}")
+    y -= 5 * mm
+    c.drawString(22 * mm, y, "Present this coupon for meal entitlement. Valid for selected meals only.")
+    y -= 8 * mm
+    c.setFont("Helvetica", 7)
+    c.setFillColor(colors.HexColor("#6B5A4E"))
+    c.drawCentredString(W / 2, 18 * mm, "Admin printout · One A4 sheet · Events Organizations Committee of One10")
 
     c.showPage()
     c.save()

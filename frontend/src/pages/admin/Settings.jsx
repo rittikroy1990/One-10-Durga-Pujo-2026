@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Save, Users2, AlertTriangle, CalendarRange, CheckCircle2 } from "lucide-react";
+import { Save, Users2, AlertTriangle, CalendarRange, CheckCircle2, Upload, QrCode, Lock } from "lucide-react";
 import api from "../../lib/api";
 import { Card, CardBody, Button, Tabs, Label, Input, StatusBadge, Spinner, Textarea } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -25,6 +25,90 @@ export default function Settings() {
       {tab === "general" && <General />}
       {tab === "campaigns" && <Campaigns />}
       {tab === "users" && <UsersRoles />}
+    </div>
+  );
+}
+
+function PaymentQrUpload() {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(null);
+
+  const load = useCallback(() => {
+    api.get("/admin/payment-qr").then((r) => setStatus(r.data)).catch(() => {});
+  }, []);
+  useEffect(load, [load]);
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (status?.locked) {
+      toast.error("QR upload is deactivated — already used once.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post("/admin/payment-qr", fd);
+      toast.success(r.data.message || "QR uploaded — upload deactivated");
+      setPreview(r.data.url);
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not upload QR");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const locked = !!status?.locked;
+  const url = preview || status?.url || "/images/payment-qr.png";
+
+  return (
+    <div className="mt-6 rounded-xl border border-gold-500/30 bg-white p-4" data-testid="payment-qr-upload">
+      <div className="mb-2 flex items-center gap-2 font-display text-xl text-brown-900">
+        <QrCode className="h-5 w-5 text-vermilion-500" /> Payment UPI QR
+      </div>
+      <p className="mb-4 text-sm text-brown-800/60">
+        Upload the committee UPI QR once. It is shown on Subscribe &amp; Pay. After upload, this control is permanently deactivated.
+      </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <img
+          src={url}
+          alt="Current payment QR"
+          className="h-40 w-40 rounded-lg border border-brown-800/10 bg-ivory-100 object-contain p-1"
+          data-testid="payment-qr-preview"
+        />
+        <div className="flex-1 space-y-3">
+          {locked ? (
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <div className="font-semibold">Upload deactivated</div>
+                <p className="mt-0.5 text-emerald-900/80">
+                  A payment QR was already uploaded{status?.uploaded_at ? ` on ${status.uploaded_at}` : ""}. Residents see this QR on checkout.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-vermilion-500/40 bg-vermilion-500/10 px-4 py-2.5 text-sm font-semibold text-vermilion-700 hover:bg-vermilion-500/15">
+              {busy ? "Uploading…" : <><Upload className="h-4 w-4" /> Upload QR image</>}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg"
+                className="hidden"
+                disabled={busy || locked}
+                data-testid="payment-qr-file"
+                onChange={onFile}
+              />
+            </label>
+          )}
+          {status?.vpa && (
+            <div className="text-xs text-brown-800/55">Configured UPI: {status.vpa}</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -139,6 +223,9 @@ function General() {
             </ul>
           </div>
         )}
+
+        <PaymentQrUpload />
+
         <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
           <div className="flex items-center gap-1 font-semibold">
             <AlertTriangle className="h-4 w-4" /> Items requiring committee/legal confirmation

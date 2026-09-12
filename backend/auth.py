@@ -27,6 +27,7 @@ ROLES = {
     "coordinator": "Volunteer / cultural coordinator.",
     "inventory_custodian": "Inventory custodian.",
     "auditor": "Read-only auditor.",
+    "committee_member": "Committee member — view access to portal data.",
     "resident": "Resident / public user.",
 }
 
@@ -53,7 +54,7 @@ P = {
 ROLE_PERMISSIONS = {
     "system_admin": {"settings:read", "settings:manage", "users:manage", "audit:read",
                      "reports:read", "households:read", "payments:read", "receipts:read",
-                     "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read"},
+                     "receipts:manage", "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read"},
     "convenor": {"settings:read", "reports:read", "audit:read", "households:read", "payments:read",
                  "receipts:read", "receipts:manage", "manual:approve", "refunds:approve",
                  "accounting:read", "recon:read", "budget:read", "budget:approve",
@@ -82,6 +83,11 @@ ROLE_PERMISSIONS = {
     "auditor": {"reports:read", "audit:read", "households:read", "payments:read", "receipts:read",
                 "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
                 "settings:read"},
+    # All EOC members: view portal data; elevated roles add write/approve powers
+    "committee_member": {
+        "settings:read", "reports:read", "households:read", "payments:read", "receipts:read",
+        "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
+    },
     "resident": set(),
 }
 
@@ -227,6 +233,66 @@ DEMO_USERS = [
     ("custodian@one10.test", "Demo Inventory Custodian", ["inventory_custodian"]),
 ]
 
+# Preview committee logins — short user id + easy shared password (NOT for production).
+# All have view access via committee_member; some hold elevated EOC roles.
+COMMITTEE_PASSWORD = "one10"
+COMMITTEE_LOGINS = [
+    {"login_id": "abhijit", "name": "Abhijit Chakrabarti", "designation": "President",
+     "roles": ["committee_member", "convenor", "system_admin"]},
+    {"login_id": "subhasis", "name": "Subhasis Sarkar", "designation": "Vice President",
+     "roles": ["committee_member"]},
+    {"login_id": "anjan", "name": "Anjan Nandy", "designation": "Vice President",
+     "roles": ["committee_member"]},
+    {"login_id": "binoy", "name": "Binoy Banerjee", "designation": "Joint Secretary",
+     "roles": ["committee_member", "coordinator", "collector"]},
+    {"login_id": "debabrata", "name": "Debabrata Dey", "designation": "Joint Secretary",
+     "roles": ["committee_member", "coordinator", "collector"]},
+    {"login_id": "smriti", "name": "Smriti Sasmal", "designation": "Asst. Secretary",
+     "roles": ["committee_member"]},
+    {"login_id": "suman", "name": "Suman Nandy", "designation": "Asst. Secretary",
+     "roles": ["committee_member"]},
+    {"login_id": "apc", "name": "APC", "designation": "Joint Treasurer",
+     "roles": ["committee_member", "treasurer"]},
+    {"login_id": "subrata", "name": "Subrata Chatterjee", "designation": "Joint Treasurer",
+     "roles": ["committee_member", "treasurer"]},
+    {"login_id": "alok", "name": "Alok Biswas", "designation": "Advisor",
+     "roles": ["committee_member", "auditor"]},
+    {"login_id": "scp", "name": "SC Purakayastha", "designation": "Advisor",
+     "roles": ["committee_member", "auditor"]},
+]
+
+
+def hash_password(password: str) -> str:
+    import hashlib
+    return hashlib.sha256(f"one10_eoc_v1:{password}".encode()).hexdigest()
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    import hmac
+    return hmac.compare_digest(hash_password(password), password_hash or "")
+
+
+async def create_password_session(user: dict) -> dict:
+    import secrets
+    session_token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": user["user_id"], "session_token": session_token,
+        "expires_at": expires, "created_at": now_utc(),
+    })
+    safe = {k: v for k, v in user.items() if k not in ("_id", "password_hash")}
+    return {"user": safe, "session_token": session_token}
+
+
+async def login_with_password(login_id: str, password: str) -> dict:
+    lid = (login_id or "").strip().lower()
+    if not lid or not password:
+        raise HTTPException(status_code=400, detail="User ID and password required")
+    user = await db.users.find_one({"login_id": lid, "is_active": True})
+    if not user or not verify_password(password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid user ID or password")
+    return await create_password_session(user)
+
 
 async def seed_demo_users():
     from db import new_id
@@ -239,4 +305,42 @@ async def seed_demo_users():
                 "roles": roles, "is_active": True, "is_demo": True, "created_at": iso(),
             })
             created.append(email)
+
+    pw_hash = hash_password(COMMITTEE_PASSWORD)
+    for row in COMMITTEE_LOGINS:
+        lid = row["login_id"]
+        existing = await db.users.find_one({"login_id": lid})
+        email = f"{lid}@committee.one10"
+        doc = {
+            "login_id": lid,
+            "email": email,
+            "name": row["name"],
+            "designation": row["designation"],
+            "picture": "",
+            "roles": row["roles"],
+            "password_hash": pw_hash,
+            "is_active": True,
+            "is_demo": True,
+            "is_committee": True,
+            "updated_at": iso(),
+        }
+        if not existing:
+            doc["user_id"] = new_id("user")
+            doc["created_at"] = iso()
+            await db.users.insert_one(doc)
+            created.append(lid)
+        else:
+            await db.users.update_one(
+                {"login_id": lid},
+                {"$set": {
+                    "name": row["name"],
+                    "designation": row["designation"],
+                    "roles": row["roles"],
+                    "password_hash": pw_hash,
+                    "is_active": True,
+                    "is_demo": True,
+                    "is_committee": True,
+                    "updated_at": iso(),
+                }},
+            )
     return created

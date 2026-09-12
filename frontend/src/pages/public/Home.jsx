@@ -10,7 +10,7 @@ import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
-const DIYA = "/images/campaign/gallery-3.jpg";
+const DIYA = "/images/campaign/full-36.jpg";
 
 const fade = {
   hidden: { opacity: 0, y: 24 },
@@ -134,6 +134,9 @@ export default function Home() {
                       {c.venue}
                     </div>
                   )}
+                  {c.dates_label && (
+                    <div className="mt-2 text-sm text-gold-400/90">{c.dates_label}</div>
+                  )}
                   <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="font-display text-3xl text-ivory-100">
                       {c.base_amount_paise > 0 ? formatPaise(c.base_amount_paise) : "TBC"}
@@ -175,6 +178,9 @@ export default function Home() {
               <div>
                 <div className="text-xs uppercase tracking-wider text-gold-400">Principal Venue</div>
                 <div className="text-ivory-100/90">{camp?.venue || "Badminton court near the tennis court, in front of Tower 11"}</div>
+                {camp?.dates_label && (
+                  <div className="mt-1 text-sm text-gold-400/90">{camp.dates_label}</div>
+                )}
               </div>
             </div>
           </motion.div>
@@ -219,7 +225,7 @@ export default function Home() {
       <section className="border-t border-gold-500/15 bg-brown-900">
         <div className="mx-auto grid max-w-7xl gap-6 px-5 py-14 md:grid-cols-3">
           {[
-            { icon: ShieldCheck, t: "Verified payments only", d: "Every receipt is backed by a verified bank/gateway transaction — never a screenshot." },
+            { icon: ShieldCheck, t: "UPI QR receipts", d: "Pay via the committee UPI QR, upload your screenshot, and get a recorded receipt." },
             { icon: Search, t: "One source of truth", d: "Payment, receipt and ledger totals always reconcile. Auditors can trace any rupee." },
             { icon: HandHeart, t: "A community for everyone", d: "Residents, families, elders, children, performers and volunteers — all welcome." },
           ].map((f, i) => (

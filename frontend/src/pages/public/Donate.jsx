@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, Heart, Loader2, Upload, QrCode, ExternalLink, Copy,
+  ArrowRight, ArrowLeft, Heart, Loader2, Upload, QrCode, Copy,
   ShieldCheck, Home, Users, Check, Sparkles, Flower2,
 } from "lucide-react";
 import api from "../../lib/api";
@@ -75,8 +75,7 @@ export default function Donate() {
     notes: "",
     accuracy_confirmed: false,
     privacy_consent: false,
-    terms_consent: false,
-  });
+    terms_consent: false});
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -95,7 +94,6 @@ export default function Donate() {
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
-  const appLinks = pay?.upi_app_links || {};
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
 
   const toggleItem = (id) => {
@@ -129,15 +127,6 @@ export default function Donate() {
     } catch {
       toast.error("Could not copy");
     }
-  };
-
-  const openUpiApp = (url) => {
-    const target = (url || pay?.upi_intent_url || "").trim();
-    if (!target) {
-      toast.error("Open GPay / PhonePe and scan the QR on this page.");
-      return;
-    }
-    window.location.href = target;
   };
 
   const validDetails = useMemo(() => {
@@ -204,8 +193,7 @@ export default function Donate() {
           className="absolute inset-0"
           style={{
             background:
-              "radial-gradient(ellipse 80% 60% at 15% 20%, rgba(212,175,55,0.22), transparent 55%), radial-gradient(ellipse 70% 50% at 90% 10%, rgba(192,57,43,0.16), transparent 50%), linear-gradient(165deg, #FFF8F0 0%, #F3E6D8 45%, #EDE0D0 100%)",
-          }}
+              "radial-gradient(ellipse 80% 60% at 15% 20%, rgba(212,175,55,0.22), transparent 55%), radial-gradient(ellipse 70% 50% at 90% 10%, rgba(192,57,43,0.16), transparent 50%), linear-gradient(165deg, #FFF8F0 0%, #F3E6D8 45%, #EDE0D0 100%)"}}
         />
         <div className="relative mx-auto max-w-6xl px-5 pb-12 pt-28 sm:pt-32">
           <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}>
@@ -547,8 +535,7 @@ export default function Donate() {
                       ...f,
                       accuracy_confirmed: v,
                       privacy_consent: v,
-                      terms_consent: v,
-                    }));
+                      terms_consent: v}));
                   }}
                   className="mt-1 h-4 w-4 shrink-0"
                 />
@@ -581,7 +568,7 @@ export default function Donate() {
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="flex flex-col items-center rounded-xl border border-[#D4AF37]/35 bg-[#FFF8F0] p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#3A1518]">
-                    <QrCode className="h-4 w-4 text-[#C0392B]" /> Scan or open UPI app
+                    <QrCode className="h-4 w-4 text-[#C0392B]" /> Scan UPI QR
                   </div>
                   {pay?.upi_intent_url ? (
                     <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
@@ -590,18 +577,6 @@ export default function Donate() {
                   ) : (
                     <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-[#5C3530]/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
                   )}
-                  <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                    {[
-                      ["GPay", appLinks.gpay || appLinks.tez || pay?.upi_intent_url],
-                      ["PhonePe", appLinks.phonepe || pay?.upi_intent_url],
-                      ["Paytm", appLinks.paytm || pay?.upi_intent_url],
-                      ["BHIM / UPI", appLinks.upi || pay?.upi_intent_url],
-                    ].filter(([, href]) => href).map(([label, href]) => (
-                      <Button key={label} type="button" variant="admin" className="w-full text-xs" onClick={() => openUpiApp(href)}>
-                        <ExternalLink className="h-3.5 w-3.5" /> {label}
-                      </Button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="rounded-xl border border-[#D4AF37]/35 bg-white p-4 text-sm">

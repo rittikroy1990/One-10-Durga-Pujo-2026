@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, ExternalLink, Copy,
+  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, Copy,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -40,8 +40,7 @@ export default function Subscribe() {
     primary_contact_name: "", mobile: "", tower_id: "", flat_id: "",
     occupancy_type: "owner_resident", family_members: 4, email: "", family_display_name: "",
     donation_rupees: 0, interests: [], accessibility_request: "", comments: "",
-    accuracy_confirmed: false, privacy_consent: false, terms_consent: false,
-  });
+    accuracy_confirmed: false, privacy_consent: false, terms_consent: false});
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -57,7 +56,6 @@ export default function Subscribe() {
   const total = base;
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
-  const appLinks = pay?.upi_app_links || {};
 
   const toggleInterest = (v) =>
     set("interests", form.interests.includes(v) ? form.interests.filter((x) => x !== v) : [...form.interests, v]);
@@ -73,15 +71,6 @@ export default function Subscribe() {
     }
   };
 
-  const openUpiApp = (url) => {
-    const target = (url || pay?.upi_intent_url || "").trim();
-    if (!target) {
-      toast.error("Open GPay / PhonePe and scan the QR on this page.");
-      return;
-    }
-    window.location.href = target;
-  };
-
   const submit = async () => {
     if (!(form.accuracy_confirmed && form.privacy_consent && form.terms_consent)) {
       toast.error("Please confirm the declaration below to continue.");
@@ -92,8 +81,7 @@ export default function Subscribe() {
       const r = await api.post("/subscribe", {
         ...form,
         family_members: Number(form.family_members),
-        donation_rupees: 0,
-      });
+        donation_rupees: 0});
       setIntent(r.data);
       const s = await api.get(`/payments/upi/session`, { params: { intent_id: r.data.intent_id } });
       setUpiSession(s.data);
@@ -315,8 +303,7 @@ export default function Subscribe() {
                       ...f,
                       accuracy_confirmed: v,
                       privacy_consent: v,
-                      terms_consent: v,
-                    }));
+                      terms_consent: v}));
                   }}
                   className="mt-0.5 h-5 w-5 shrink-0 accent-vermilion-600"
                 />
@@ -352,7 +339,7 @@ export default function Subscribe() {
               <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
                 <div className="flex flex-col items-center rounded-xl border border-gold-500/30 bg-white p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or open UPI app
+                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan UPI QR
                   </div>
                   {pay?.upi_intent_url ? (
                     <a
@@ -377,27 +364,8 @@ export default function Subscribe() {
                     />
                   )}
                   <p className="mt-2 text-center text-xs text-brown-800/55">
-                    Prefer scanning with the UPI app camera if a deep link fails on your phone.
+                    Open any UPI app and scan this QR to pay.
                   </p>
-                  <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                    {[
-                      ["GPay", appLinks.gpay || appLinks.tez || pay?.upi_intent_url],
-                      ["PhonePe", appLinks.phonepe || pay?.upi_intent_url],
-                      ["Paytm", appLinks.paytm || pay?.upi_intent_url],
-                      ["BHIM / any UPI", appLinks.upi || pay?.upi_intent_url],
-                    ].filter(([, href]) => href).map(([label, href]) => (
-                      <Button
-                        key={label}
-                        type="button"
-                        variant="admin"
-                        className="w-full text-xs"
-                        data-testid={`open-upi-${label.split(" ")[0].toLowerCase()}`}
-                        onClick={() => openUpiApp(href)}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" /> {label}
-                      </Button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="rounded-xl border border-gold-500/30 bg-white p-4 text-sm">

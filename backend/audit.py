@@ -49,6 +49,11 @@ async def audit(action: str, *, actor=None, entity_type: str = "", entity_id: st
 
     actor_id = actor.get("user_id") if isinstance(actor, dict) else (actor or "system")
     actor_role = ",".join(actor.get("roles", [])) if isinstance(actor, dict) else ""
+    actor_name = ""
+    actor_login = ""
+    if isinstance(actor, dict):
+        actor_name = actor.get("name") or ""
+        actor_login = actor.get("login_id") or ""
     ip = ""
     ua = ""
     if request is not None:
@@ -62,6 +67,8 @@ async def audit(action: str, *, actor=None, entity_type: str = "", entity_id: st
         "seq": seq,
         "actor_id": actor_id,
         "actor_role": actor_role,
+        "actor_name": actor_name,
+        "actor_login": actor_login,
         "action": action,
         "entity_type": entity_type,
         "entity_id": entity_id,

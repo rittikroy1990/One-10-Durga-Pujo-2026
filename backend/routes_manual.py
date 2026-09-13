@@ -1,4 +1,4 @@
-"""Manual payment modes with maker-checker controls, plus admin collection registers."""
+"""Manual payment modes (immediate receipt issue) plus admin collection registers."""
 from fastapi import APIRouter, Depends, Request, HTTPException, Body, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 import io
@@ -118,6 +118,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
 @router.post("/manual/cash")
 async def cash_create(body: dict = Body(...), request: Request = None,
                       user: dict = Depends(require("manual:create"))):
+    """Record cash and issue the receipt immediately (no maker-checker)."""
     household, intent = await _create_hh_intent(body, "cash", user)
     rec = {"id": new_id("cash"), "intent_id": intent["id"], "household_id": household["id"],
            "amount_paise": intent["total_amount"], "kind": intent.get("kind") or "subscription",
@@ -127,25 +128,28 @@ async def cash_create(body: dict = Body(...), request: Request = None,
            "collector_id": user["user_id"],
            "collector_name": user.get("name", ""), "collector_ack": True,
            "collected_at": body.get("collected_at", iso()),
-           "status": "pending_acceptance",
+           "status": "accepted",
+           "accepted_by": user["user_id"], "accepted_at": iso(),
            "deposit_ref": "", "deposit_date": "", "created_at": iso(), "is_deleted": False}
     await db.cash_collections.insert_one(dict(rec))
+    receipt = await _issue_receipt(intent, method="cash", masked_ref="CASH",
+                                   provider_payment_id=f"cash_{rec['id']}", debit_account="1002",
+                                   request=request)
     await audit("cash.collect", actor=user, entity_type="cash_collection", entity_id=rec["id"],
-                after={"amount": rec["amount_paise"], "kind": rec["kind"]}, request=request)
-    return clean(rec)
+                after={"amount": rec["amount_paise"], "kind": rec["kind"],
+                       "receipt_no": (receipt or {}).get("receipt_no")}, request=request)
+    out = clean(rec)
+    out["receipt"] = receipt
+    return out
 
 
 @router.post("/manual/cash/{cash_id}/accept")
 async def cash_accept(cash_id: str, request: Request = None,
-                      user: dict = Depends(require("manual:approve"))):
+                      user: dict = Depends(require("manual:approve", "manual:create"))):
+    """Legacy backlog: accept a pending cash entry left from maker-checker days."""
     rec = await db.cash_collections.find_one({"id": cash_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec.get("collector_id") and rec["collector_id"] == user.get("user_id"):
-        raise HTTPException(
-            status_code=403,
-            detail="Maker-checker: another admin must Accept. You recorded this entry.",
-        )
     if rec["status"] != "pending_acceptance":
         raise HTTPException(status_code=409, detail="Not pending acceptance.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
@@ -155,7 +159,7 @@ async def cash_accept(cash_id: str, request: Request = None,
     await db.cash_collections.update_one({"id": cash_id}, {"$set": {
         "status": "accepted", "accepted_by": user["user_id"], "accepted_at": iso()}})
     await audit("cash.accept", actor=user, entity_type="cash_collection", entity_id=cash_id,
-                approval_chain=[rec["collector_id"], user["user_id"]], request=request)
+                request=request)
     return {"ok": True, "receipt": receipt}
 
 
@@ -196,33 +200,36 @@ async def cash_cancel(cash_id: str, request: Request = None,
 @router.post("/manual/bank-transfer")
 async def bank_transfer_create(body: dict = Body(...), request: Request = None,
                                user: dict = Depends(require("manual:create"))):
+    """Record bank transfer and issue the receipt immediately (no maker-checker)."""
     household, intent = await _create_hh_intent(body, "bank_transfer", user)
     rec = {"id": new_id("btr"), "intent_id": intent["id"], "household_id": household["id"],
            "amount_paise": intent["total_amount"], "utr": body.get("utr", ""),
            "txn_date": body.get("txn_date", ""), "proof_doc_id": body.get("proof_doc_id", ""),
-           "maker_id": user["user_id"], "status": "pending_match", "matched": False,
+           "maker_id": user["user_id"], "status": "approved", "matched": True,
+           "approved_by": user["user_id"], "approved_at": iso(),
            "created_at": iso(), "is_deleted": False}
     await db.bank_transfers.insert_one(dict(rec))
+    receipt = await _issue_receipt(intent, method="bank_transfer",
+                                   masked_ref="UTR-" + (rec.get("utr", "")[-4:] or "xxxx"),
+                                   provider_payment_id=f"btr_{rec['id']}", debit_account="1001",
+                                   request=request)
     await audit("bank_transfer.create", actor=user, entity_type="bank_transfer", entity_id=rec["id"],
-                after={"utr": rec["utr"]}, request=request)
-    return clean(rec)
+                after={"utr": rec["utr"], "receipt_no": (receipt or {}).get("receipt_no")},
+                request=request)
+    out = clean(rec)
+    out["receipt"] = receipt
+    return out
 
 
 @router.post("/manual/bank-transfer/{btr_id}/approve")
 async def bank_transfer_approve(btr_id: str, body: dict = Body(default={}), request: Request = None,
-                                user: dict = Depends(require("manual:approve"))):
+                                user: dict = Depends(require("manual:approve", "manual:create"))):
+    """Legacy backlog: approve a pending bank transfer left from maker-checker days."""
     rec = await db.bank_transfers.find_one({"id": btr_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
-        raise HTTPException(
-            status_code=403,
-            detail="Maker-checker: another admin must Approve. You recorded this transfer.",
-        )
     if rec["status"] != "pending_match":
         raise HTTPException(status_code=409, detail="Not pending match.")
-    if not body.get("bank_statement_matched"):
-        raise HTTPException(status_code=400, detail="Bank statement match confirmation required before receipt.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
     receipt = await _issue_receipt(intent, method="bank_transfer",
                                    masked_ref="UTR-" + (rec.get("utr", "")[-4:] or "xxxx"),
@@ -232,7 +239,7 @@ async def bank_transfer_approve(btr_id: str, body: dict = Body(default={}), requ
                                                                  "approved_by": user["user_id"],
                                                                  "approved_at": iso()}})
     await audit("bank_transfer.approve", actor=user, entity_type="bank_transfer", entity_id=btr_id,
-                approval_chain=[rec["maker_id"], user["user_id"]], request=request)
+                request=request)
     return {"ok": True, "receipt": receipt}
 
 
@@ -240,28 +247,34 @@ async def bank_transfer_approve(btr_id: str, body: dict = Body(default={}), requ
 @router.post("/manual/cheque")
 async def cheque_create(body: dict = Body(...), request: Request = None,
                         user: dict = Depends(require("manual:create"))):
+    """Record cheque and issue the receipt immediately (no maker-checker)."""
     household, intent = await _create_hh_intent(body, "cheque", user)
     rec = {"id": new_id("chq"), "intent_id": intent["id"], "household_id": household["id"],
            "amount_paise": intent["total_amount"], "cheque_no": body.get("cheque_no", ""),
            "bank": body.get("bank", ""), "deposit_date": body.get("deposit_date", ""),
-           "maker_id": user["user_id"], "clearing_status": "pending", "status": "pending_clearing",
+           "maker_id": user["user_id"], "clearing_status": "cleared", "status": "cleared",
+           "cleared_by": user["user_id"], "cleared_at": iso(),
            "created_at": iso(), "is_deleted": False}
     await db.cheques.insert_one(dict(rec))
-    await audit("cheque.create", actor=user, entity_type="cheque", entity_id=rec["id"], request=request)
-    return clean(rec)
+    receipt = await _issue_receipt(intent, method="cheque",
+                                   masked_ref="CHQ-" + (rec.get("cheque_no", "")[-4:] or "xxxx"),
+                                   provider_payment_id=f"chq_{rec['id']}", debit_account="1001",
+                                   request=request)
+    await audit("cheque.create", actor=user, entity_type="cheque", entity_id=rec["id"],
+                after={"cheque_no": rec["cheque_no"], "receipt_no": (receipt or {}).get("receipt_no")},
+                request=request)
+    out = clean(rec)
+    out["receipt"] = receipt
+    return out
 
 
 @router.post("/manual/cheque/{chq_id}/clear")
 async def cheque_clear(chq_id: str, body: dict = Body(default={}), request: Request = None,
-                       user: dict = Depends(require("manual:approve"))):
+                       user: dict = Depends(require("manual:approve", "manual:create"))):
+    """Legacy backlog: clear a pending cheque left from maker-checker days."""
     rec = await db.cheques.find_one({"id": chq_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
-        raise HTTPException(
-            status_code=403,
-            detail="Maker-checker: another admin must clear this. You recorded this cheque.",
-        )
     if rec["status"] != "pending_clearing":
         raise HTTPException(status_code=409, detail="Not pending clearing.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
@@ -273,8 +286,7 @@ async def cheque_clear(chq_id: str, body: dict = Body(default={}), request: Requ
                                                           "status": "cleared",
                                                           "cleared_by": user["user_id"],
                                                           "cleared_at": iso()}})
-    await audit("cheque.clear", actor=user, entity_type="cheque", entity_id=chq_id,
-                approval_chain=[rec["maker_id"], user["user_id"]], request=request)
+    await audit("cheque.clear", actor=user, entity_type="cheque", entity_id=chq_id, request=request)
     return {"ok": True, "receipt": receipt}
 
 

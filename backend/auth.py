@@ -98,7 +98,6 @@ ROLE_PERMISSIONS = {
 TOXIC_COMBINATIONS = [
     ("vendor:manage", "payment_run:approve", "Vendor creator should not approve payments"),
     ("expense:create", "expense:approve", "Expense claimant should not approve claims"),
-    ("manual:create", "manual:approve", "Manual receipt maker should not approve"),
     ("procurement:create", "procurement:approve", "Procurement maker should not approve"),
     ("payment_run:create", "payment_run:approve", "Payment maker should not approve"),
 ]
@@ -222,7 +221,7 @@ async def exchange_session(session_id: str) -> dict:
 
 DEMO_USERS = []
 
-# Active committee portal logins (password auth). Maker-checker still requires two different users.
+# Active committee portal logins (password auth).
 COMMITTEE_PASSWORD = "EOC@2026"
 COMMITTEE_LOGINS = [
     {"login_id": "apc", "name": "APC", "designation": "Joint Treasurer",
@@ -230,6 +229,8 @@ COMMITTEE_LOGINS = [
     {"login_id": "arka", "name": "Arka", "designation": "Committee Admin",
      "roles": ["committee_member", "treasurer", "collector", "convenor"]},
     {"login_id": "suman", "name": "Suman", "designation": "Asst. Secretary",
+     "roles": ["committee_member", "treasurer", "collector", "convenor"]},
+    {"login_id": "rittik", "name": "Rittik", "designation": "Committee Admin",
      "roles": ["committee_member", "treasurer", "collector", "convenor"]},
 ]
 
@@ -264,6 +265,24 @@ async def login_with_password(login_id: str, password: str) -> dict:
     if not user or not verify_password(password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid user ID or password")
     return await create_password_session(user)
+
+
+
+async def change_password(user: dict, current_password: str, new_password: str) -> None:
+    """Let a signed-in committee user change their own password."""
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="Current and new password are required")
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    db_user = await db.users.find_one({"user_id": user["user_id"]})
+    if not db_user or not verify_password(current_password, db_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if verify_password(new_password, db_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": hash_password(new_password), "updated_at": iso()}},
+    )
 
 
 async def seed_demo_users():
@@ -305,13 +324,13 @@ async def seed_demo_users():
             await db.users.insert_one(doc)
             created.append(lid)
         else:
+            # Preserve each user's chosen password; only refresh profile/roles.
             await db.users.update_one(
                 {"login_id": lid},
                 {"$set": {
                     "name": row["name"],
                     "designation": row["designation"],
                     "roles": row["roles"],
-                    "password_hash": pw_hash,
                     "is_active": True,
                     "is_demo": False,
                     "is_committee": True,
@@ -320,7 +339,14 @@ async def seed_demo_users():
                 }},
             )
 
-    # Remove access for every other account (demo, Google, old committee logins).
+    # Deactivate every other account (demo, Google, old committee logins).
+    deactivated = await db.users.find(
+        {"$or": [
+            {"login_id": {"$nin": list(allowed_login_ids)}},
+            {"login_id": {"$exists": False}},
+        ], "is_active": {"$ne": False}},
+        {"user_id": 1},
+    ).to_list(1000)
     await db.users.update_many(
         {"login_id": {"$nin": list(allowed_login_ids)}},
         {"$set": {"is_active": False, "password_hash": "", "updated_at": iso()}},
@@ -329,5 +355,8 @@ async def seed_demo_users():
         {"login_id": {"$exists": False}},
         {"$set": {"is_active": False, "updated_at": iso()}},
     )
-    await db.user_sessions.delete_many({})
+    # Drop sessions only for deactivated accounts (keep active users signed in).
+    dead_ids = [u["user_id"] for u in deactivated if u.get("user_id")]
+    if dead_ids:
+        await db.user_sessions.delete_many({"user_id": {"$in": dead_ids}})
     return created

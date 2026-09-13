@@ -20,7 +20,7 @@ export default function Collection() {
   return (
     <div data-testid="collection-page">
       <h1 className="mb-1 font-display text-4xl">Collection Control</h1>
-      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, and manual maker-checker modes.</p>
+      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, and manual cash / bank / cheque collections.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
@@ -181,6 +181,7 @@ function Manual() {
   const [mode, setMode] = useState("cash");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lastReceipt, setLastReceipt] = useState(null);
   const [f, setF] = useState({
     kind: "donation",
     tower_id: "",
@@ -195,10 +196,8 @@ function Manual() {
     bank: "",
   });
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
-  const [queues, setQueues] = useState(null);
 
-  const loadQueues = useCallback(() => { api.get("/manual/queues").then((r) => setQueues(r.data)).catch(() => {}); }, []);
-  useEffect(() => { api.get("/towers").then((r) => setTowers(r.data.items || [])); loadQueues(); }, [loadQueues]);
+  useEffect(() => { api.get("/towers").then((r) => setTowers(r.data.items || [])); }, []);
   useEffect(() => { if (f.tower_id) api.get(`/towers/${f.tower_id}/flats`).then((r) => setFlats(r.data.items || [])); }, [f.tower_id]);
 
   const create = async () => {
@@ -213,24 +212,15 @@ function Manual() {
     setBusy(true);
     try {
       const ep = mode === "cash" ? "/manual/cash" : mode === "bank" ? "/manual/bank-transfer" : "/manual/cheque";
-      await api.post(ep, { ...f, donation_rupees: Number(f.donation_rupees || 0) });
-      toast.success("Recorded — another user must Accept before a receipt is issued");
-      setOpen(false); loadQueues();
+      const r = await api.post(ep, { ...f, donation_rupees: Number(f.donation_rupees || 0) });
+      const receipt = r.data?.receipt;
+      setLastReceipt(receipt || null);
+      toast.success(receipt?.receipt_no
+        ? `Receipt ${receipt.receipt_no} issued`
+        : "Recorded and receipt issued");
+      setOpen(false);
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not record."); }
     finally { setBusy(false); }
-  };
-
-  const act = async (endpoint, body) => {
-    try { await api.post(endpoint, body || { bank_statement_matched: true }); toast.success("Done"); loadQueues(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Action failed"); }
-  };
-
-  const queueLabel = (c) => {
-    const who = c.payer_name || "";
-    const flat = [c.tower_name, c.flat_number].filter(Boolean).join(" ");
-    const kind = c.kind === "donation" ? "Donation" : "Subscription";
-    const by = c.collector_name ? ` · recorded by ${c.collector_name}` : "";
-    return `${formatPaise(c.amount_paise)} · ${kind}${who ? ` · ${who}` : ""}${flat ? ` · ${flat}` : ""}${by}`;
   };
 
   return (
@@ -241,49 +231,19 @@ function Manual() {
           <Button variant="admin" size="sm" onClick={() => setOpen(true)} data-testid="manual-new-btn"><Plus className="h-4 w-4" /> New</Button>
         </div>
         <p className="mt-1 text-sm text-brown-800/50">
-          Maker-checker: the person who records (shown as their name) cannot Accept their own entry.
-          Another committee member must Accept before the receipt is issued.
+          Cash, bank transfer, and cheque are recorded under your login and the receipt is issued immediately.
+          {user?.name ? ` Signed in as ${user.name}.` : ""}
         </p>
+        {lastReceipt?.receipt_no && (
+          <div className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" data-testid="manual-last-receipt">
+            Last receipt: <span className="font-semibold">{lastReceipt.receipt_no}</span>
+            {lastReceipt.total_amount != null && <> · {formatPaise(lastReceipt.total_amount)}</>}
+          </div>
+        )}
       </CardBody></Card>
 
-      {queues && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <QueueCard title="Cash — pending acceptance" testid="queue-cash" rows={queues.cash_pending || []}
-            render={(c) => {
-              const isMine = user?.user_id && c.collector_id === user.user_id;
-              return (
-                <QueueRow
-                  key={c.id}
-                  label={queueLabel(c) + (isMine ? " · waiting for another admin" : "")}
-                  onAct={isMine ? null : () => act(`/manual/cash/${c.id}/accept`)}
-                  actLabel="Accept"
-                  onCancel={() => act(`/manual/cash/${c.id}/cancel`)}
-                />
-              );
-            }} />
-          <QueueCard title="Bank transfer — pending match" testid="queue-bank" rows={queues.bank_transfer_pending || queues.bank_pending || []}
-            render={(c) => {
-              const isMine = user?.user_id && c.maker_id === user.user_id;
-              return (
-                <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · UTR ${c.utr}` + (isMine ? " · waiting for another admin" : "")}
-                  onAct={isMine ? null : () => act(`/manual/bank-transfer/${c.id}/approve`, { bank_statement_matched: true })}
-                  actLabel="Approve" />
-              );
-            }} />
-          <QueueCard title="Cheque — pending clearing" testid="queue-cheque" rows={queues.cheque_pending || []}
-            render={(c) => {
-              const isMine = user?.user_id && c.maker_id === user.user_id;
-              return (
-                <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · ${c.cheque_no}` + (isMine ? " · waiting for another admin" : "")}
-                  onAct={isMine ? null : () => act(`/manual/cheque/${c.id}/clear`)}
-                  actLabel="Mark cleared" />
-              );
-            }} />
-        </div>
-      )}
-
       <Dialog open={open} onClose={() => setOpen(false)} title="New manual collection"
-        footer={<><Button variant="subtle" onClick={() => setOpen(false)}>Cancel</Button><Button variant="admin" onClick={create} disabled={busy} data-testid="manual-create-submit">{busy ? "Saving…" : "Record"}</Button></>}>
+        footer={<><Button variant="subtle" onClick={() => setOpen(false)}>Cancel</Button><Button variant="admin" onClick={create} disabled={busy} data-testid="manual-create-submit">{busy ? "Saving…" : "Record & issue"}</Button></>}>
         <div className="mb-3 inline-flex rounded-md border border-brown-800/15 p-1">
           {["cash", "bank", "cheque"].map((m) => (
             <button key={m} onClick={() => setMode(m)} data-testid={`manual-mode-${m}`} className={`rounded px-3 py-1.5 text-sm capitalize ${mode === m ? "bg-brown-800 text-ivory-100" : "text-brown-800/60"}`}>{m}</button>
@@ -323,26 +283,6 @@ function Manual() {
           {mode === "cheque" && <><div><Label>Cheque no</Label><Input value={f.cheque_no} onChange={(e) => set("cheque_no", e.target.value)} /></div><div><Label>Bank</Label><Input value={f.bank} onChange={(e) => set("bank", e.target.value)} /></div></>}
         </div>
       </Dialog>
-    </div>
-  );
-}
-
-function QueueCard({ title, rows, render, testid }) {
-  return (
-    <Card data-testid={testid}><CardBody>
-      <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-brown-800/60">{title}</h4>
-      {(!rows || rows.length === 0) ? <div className="text-sm text-brown-800/40">Empty</div> : <div className="space-y-2">{rows.map(render)}</div>}
-    </CardBody></Card>
-  );
-}
-function QueueRow({ label, onAct, actLabel, onCancel }) {
-  return (
-    <div className="flex items-center justify-between gap-2 rounded-lg border border-brown-800/10 px-3 py-2 text-sm">
-      <span className="min-w-0 flex-1">{label}</span>
-      <div className="flex shrink-0 gap-2">
-        {onCancel && <Button variant="subtle" size="sm" onClick={onCancel}>Cancel</Button>}
-        {onAct && <Button variant="admin" size="sm" onClick={onAct}><Check className="h-3.5 w-3.5" /> {actLabel}</Button>}
-      </div>
     </div>
   );
 }

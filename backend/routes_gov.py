@@ -12,8 +12,8 @@ from config import get_settings, get_active_cycle_id, list_campaigns, DEFAULT_SE
 from util import iso, now_utc, fmt_inr, to_ist
 from audit import audit
 from ledger import trial_balance, account_balance
-from auth import (get_current_user, exchange_session, require, ROLES, ROLE_PERMISSIONS,
-                  sod_conflicts, user_permissions)
+from auth import (get_current_user, exchange_session, login_with_password, change_password,
+                  require, ROLES, ROLE_PERMISSIONS, sod_conflicts, user_permissions)
 from docs import export_csv, export_xlsx, export_pdf
 from storage import save_document, get_object
 
@@ -21,6 +21,46 @@ router = APIRouter(prefix="/api")
 
 
 # =============================================================== AUTH
+@router.post("/auth/login")
+async def auth_login(body: dict = Body(...), response: Response = None, request: Request = None):
+    """Committee portal password login (user id + password)."""
+    result = await login_with_password(body.get("login_id"), body.get("password"))
+    response.set_cookie(
+        "session_token",
+        result["session_token"],
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+        max_age=7 * 24 * 3600,
+    )
+    await audit(
+        "auth.login",
+        actor=result["user"],
+        entity_type="user",
+        entity_id=result["user"]["user_id"],
+        after={"login_id": result["user"].get("login_id"), "name": result["user"].get("name")},
+        request=request,
+    )
+    return {"user": result["user"]}
+
+
+@router.post("/auth/change-password")
+async def auth_change_password(body: dict = Body(...), request: Request = None,
+                               user: dict = Depends(get_current_user)):
+    """Signed-in admin changes their own password."""
+    await change_password(user, body.get("current_password") or "", body.get("new_password") or "")
+    await audit(
+        "auth.password_change",
+        actor=user,
+        entity_type="user",
+        entity_id=user["user_id"],
+        after={"login_id": user.get("login_id"), "name": user.get("name")},
+        request=request,
+    )
+    return {"ok": True, "message": "Password updated"}
+
+
 @router.post("/auth/session")
 async def auth_session(body: dict = Body(...), response: Response = None):
     session_id = body.get("session_id")

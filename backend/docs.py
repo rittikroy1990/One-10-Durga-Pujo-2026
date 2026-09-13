@@ -239,27 +239,6 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
 
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(22 * mm, y, f"Amount in words: {rupees_words(receipt.get('total_amount', 0))}")
-    y -= 14 * mm
-
-    # QR + footer
-    try:
-        qr = qr_png(verify_url, box=4)
-        from reportlab.lib.utils import ImageReader
-        c.drawImage(ImageReader(io.BytesIO(qr)), 22 * mm, y - 26 * mm, width=26 * mm, height=26 * mm)
-    except Exception:
-        pass
-    c.setFont("Helvetica", 8)
-    c.drawString(52 * mm, y - 6 * mm, "Scan to verify this receipt online:")
-    c.drawString(52 * mm, y - 11 * mm, verify_url[:90])
-    c.drawString(52 * mm, y - 18 * mm, (rc.get("computer_generated_note") or "")[:95])
-    footer_y = y - 23 * mm
-    c.setFont("Helvetica", 8)
-    c.drawString(52 * mm, footer_y, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
-
-    c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(W - 22 * mm, y - 28 * mm, org.get("authorised_signatory", "Authorised Signatory"))
-    c.setFont("Helvetica", 7)
-    c.drawRightString(W - 22 * mm, y - 32 * mm, "Authorised Signatory (for the Committee)")
 
     c.showPage()
     c.save()

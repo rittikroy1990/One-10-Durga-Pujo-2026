@@ -1,5 +1,7 @@
 """Manual payment modes with maker-checker controls, plus admin collection registers."""
-from fastapi import APIRouter, Depends, Request, HTTPException, Body
+from fastapi import APIRouter, Depends, Request, HTTPException, Body, UploadFile, File, Query
+from fastapi.responses import StreamingResponse
+import io
 
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id
@@ -7,8 +9,33 @@ from util import iso, valid_indian_mobile
 from audit import audit
 from auth import require
 from routes_collect import _issue_receipt
+from subscription_import import (
+    TEMPLATE_FILENAME,
+    base_amount_paise,
+    build_template_xlsx,
+    load_import_settings,
+    run_import,
+)
 
 router = APIRouter(prefix="/api")
+
+
+async def _household_subscription_paid(household_id: str, cycle_id: str) -> bool:
+    if await db.receipts.find_one({
+        "household_id": household_id,
+        "cycle_id": cycle_id,
+        "kind": "subscription",
+        "status": "issued",
+    }):
+        return True
+    if await db.subscription_intents.find_one({
+        "household_id": household_id,
+        "cycle_id": cycle_id,
+        "kind": "subscription",
+        "status": "paid",
+    }):
+        return True
+    return False
 
 
 async def _create_hh_intent(body: dict, method: str, user: dict):
@@ -18,29 +45,70 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
     flat = await db.flats.find_one({"id": body.get("flat_id")})
     if not tower or not flat:
         raise HTTPException(status_code=400, detail="Invalid tower/flat.")
-    if not valid_indian_mobile(body.get("mobile", "")):
-        raise HTTPException(status_code=400, detail="Valid mobile required.")
-    base = int(settings["subscription"]["base_amount_paise"])
-    donation = int(round(float(body.get("donation_rupees") or 0) * 100))
+    mobile = (body.get("mobile") or "").strip()
+    if not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+    amount_rupees = body.get("amount_rupees", body.get("donation_rupees") or 0)
+    amount_paise = int(round(float(amount_rupees or 0) * 100))
+    kind = (body.get("kind") or "subscription").strip().lower()
+    if kind not in ("subscription", "donation"):
+        raise HTTPException(status_code=400, detail="Kind must be subscription or donation.")
+
     household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": tower["id"],
                                              "flat_id": flat["id"], "is_deleted": {"$ne": True}})
     if household:
         hid = household["id"]
+        # Keep contact details fresh when re-recording for an existing flat
+        patch = {}
+        if body.get("name"):
+            patch["primary_name"] = body["name"]
+        if mobile:
+            patch["primary_mobile"] = mobile
+        if patch:
+            await db.households.update_one({"id": hid}, {"$set": patch})
+            household = {**household, **patch}
     else:
         hid = new_id("hh")
         household = {"id": hid, "cycle_id": cycle_id, "tower_id": tower["id"],
                      "tower_name": tower["name"], "flat_id": flat["id"], "flat_number": flat["number"],
                      "occupancy_type": body.get("occupancy_type", "other"),
                      "family_members": int(body.get("family_members") or 1),
-                     "primary_name": body.get("name", ""), "primary_mobile": body.get("mobile", ""),
+                     "primary_name": body.get("name", ""), "primary_mobile": mobile,
                      "email": body.get("email", ""), "created_at": iso(), "is_deleted": False}
         await db.households.insert_one(dict(household))
+
+    already_paid = await _household_subscription_paid(hid, cycle_id)
+    # If subscription is already paid, donation-only is the only valid manual path.
+    if kind == "subscription" and already_paid:
+        if amount_paise <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="This flat already has a subscription receipt. Choose Donation and enter the donation amount.",
+            )
+        kind = "donation"
+
+    if kind == "donation":
+        if amount_paise <= 0:
+            raise HTTPException(status_code=400, detail="Enter a donation amount greater than zero.")
+        intent = {
+            "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "donation",
+            "donor_type": "resident", "base_amount": 0, "donation_amount": amount_paise,
+            "total_amount": amount_paise, "components": [],
+            "payer_name": body.get("name", "") or household.get("primary_name", ""),
+            "payer_mobile": mobile, "status": "payment_pending", "method": method,
+            "notes": "Manual donation collection", "created_at": iso(),
+        }
+        await db.subscription_intents.insert_one(dict(intent))
+        return household, intent
+
+    base = int(settings["subscription"]["base_amount_paise"])
+    donation = amount_paise  # optional add-on when recording a fresh subscription
     comps = [{"code": c["code"], "label": c["label"], "amount_paise": c["amount_paise"],
               "account_code": c["account_code"]} for c in settings["subscription"]["components"]]
     intent = {"id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
               "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
               "components": comps, "payer_name": body.get("name", ""),
-              "payer_mobile": body.get("mobile", ""), "status": "payment_pending", "method": method,
+              "payer_mobile": mobile, "status": "payment_pending", "method": method,
               "created_at": iso()}
     await db.subscription_intents.insert_one(dict(intent))
     return household, intent
@@ -52,14 +120,18 @@ async def cash_create(body: dict = Body(...), request: Request = None,
                       user: dict = Depends(require("manual:create"))):
     household, intent = await _create_hh_intent(body, "cash", user)
     rec = {"id": new_id("cash"), "intent_id": intent["id"], "household_id": household["id"],
-           "amount_paise": intent["total_amount"], "collector_id": user["user_id"],
+           "amount_paise": intent["total_amount"], "kind": intent.get("kind") or "subscription",
+           "payer_name": intent.get("payer_name") or household.get("primary_name") or "",
+           "tower_name": household.get("tower_name") or "",
+           "flat_number": household.get("flat_number") or "",
+           "collector_id": user["user_id"],
            "collector_name": user.get("name", ""), "collector_ack": True,
            "collected_at": body.get("collected_at", iso()),
-           "handover_batch": body.get("handover_batch", ""), "status": "pending_acceptance",
+           "status": "pending_acceptance",
            "deposit_ref": "", "deposit_date": "", "created_at": iso(), "is_deleted": False}
     await db.cash_collections.insert_one(dict(rec))
     await audit("cash.collect", actor=user, entity_type="cash_collection", entity_id=rec["id"],
-                after={"amount": rec["amount_paise"]}, request=request)
+                after={"amount": rec["amount_paise"], "kind": rec["kind"]}, request=request)
     return clean(rec)
 
 
@@ -69,12 +141,15 @@ async def cash_accept(cash_id: str, request: Request = None,
     rec = await db.cash_collections.find_one({"id": cash_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["collector_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Collector cannot accept their own cash.")
+    if rec.get("collector_id") and rec["collector_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must Accept. You recorded this entry.",
+        )
     if rec["status"] != "pending_acceptance":
         raise HTTPException(status_code=409, detail="Not pending acceptance.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
-    receipt = await _issue_receipt(intent, method="cash", masked_ref=rec.get("handover_batch", "CASH"),
+    receipt = await _issue_receipt(intent, method="cash", masked_ref="CASH",
                                    provider_payment_id=f"cash_{cash_id}", debit_account="1002",
                                    request=request)
     await db.cash_collections.update_one({"id": cash_id}, {"$set": {
@@ -94,6 +169,26 @@ async def cash_deposit(cash_id: str, body: dict = Body(...), request: Request = 
         "deposit_ref": body.get("deposit_ref", ""), "deposit_date": body.get("deposit_date", iso()),
         "deposited": True}})
     await audit("cash.deposit", actor=user, entity_type="cash_collection", entity_id=cash_id, request=request)
+    return {"ok": True}
+
+
+@router.post("/manual/cash/{cash_id}/cancel")
+async def cash_cancel(cash_id: str, request: Request = None,
+                      user: dict = Depends(require("manual:create", "manual:approve"))):
+    """Maker (or approver) can withdraw a pending cash entry before acceptance."""
+    rec = await db.cash_collections.find_one({"id": cash_id})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not found.")
+    if rec.get("status") != "pending_acceptance":
+        raise HTTPException(status_code=409, detail="Only pending cash entries can be cancelled.")
+    await db.cash_collections.update_one({"id": cash_id}, {"$set": {
+        "status": "cancelled", "is_deleted": True, "cancelled_by": user["user_id"],
+        "cancelled_at": iso()}})
+    if rec.get("intent_id"):
+        await db.subscription_intents.delete_one({
+            "id": rec["intent_id"], "status": "payment_pending"})
+    await audit("cash.cancel", actor=user, entity_type="cash_collection", entity_id=cash_id,
+                request=request)
     return {"ok": True}
 
 
@@ -119,8 +214,11 @@ async def bank_transfer_approve(btr_id: str, body: dict = Body(default={}), requ
     rec = await db.bank_transfers.find_one({"id": btr_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["maker_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Maker cannot approve their own transfer.")
+    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must Approve. You recorded this transfer.",
+        )
     if rec["status"] != "pending_match":
         raise HTTPException(status_code=409, detail="Not pending match.")
     if not body.get("bank_statement_matched"):
@@ -159,8 +257,11 @@ async def cheque_clear(chq_id: str, body: dict = Body(default={}), request: Requ
     rec = await db.cheques.find_one({"id": chq_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["maker_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Maker cannot clear their own cheque.")
+    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must clear this. You recorded this cheque.",
+        )
     if rec["status"] != "pending_clearing":
         raise HTTPException(status_code=409, detail="Not pending clearing.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
@@ -304,3 +405,44 @@ async def admin_receipt_pdf(rid: str, user: dict = Depends(require("receipts:rea
     pdf = receipt_pdf(r, settings, verify_url)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{r["receipt_no"]}.pdf"'})
+
+
+@router.get("/admin/subscription-imports/template")
+async def admin_subscription_import_template(
+    user: dict = Depends(require("households:read", "receipts:read", "receipts:manage")),
+):
+    """Download blank Excel template for offline bank-transfer capture."""
+    _cycle_id, settings = await load_import_settings()
+    base_rupees = base_amount_paise(settings) / 100.0
+    data = build_template_xlsx(base_rupees=base_rupees)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{TEMPLATE_FILENAME}"'},
+    )
+
+
+@router.post("/admin/subscription-imports/import")
+async def admin_subscription_import_upload(
+    file: UploadFile = File(...),
+    dry_run: bool = Query(False),
+    request: Request = None,
+    user: dict = Depends(require("receipts:manage")),
+):
+    """Upload filled template; populate households and auto-issue receipts per successful row."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    try:
+        summary = await run_import(
+            content,
+            file.filename or "upload.xlsx",
+            dry_run=dry_run,
+            actor=user,
+            request=request,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not import file: {e}")
+    return summary

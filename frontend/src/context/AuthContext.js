@@ -3,9 +3,14 @@ import api from "../lib/api";
 
 const AuthContext = createContext(null);
 
+function isAdminPath() {
+  const path = window.location.pathname || "";
+  return path.startsWith("/admin");
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => isAdminPath());
 
   const checkAuth = useCallback(async () => {
     try {
@@ -24,6 +29,11 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
+    // Public pages don't need a session round-trip on first paint.
+    if (!isAdminPath()) {
+      setLoading(false);
+      return;
+    }
     checkAuth();
   }, [checkAuth]);
 
@@ -34,8 +44,14 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const loginWithPassword = async (loginId, password) => {
+    const r = await api.post("/auth/login", { login_id: loginId, password });
+    setUser(r.data.user);
+    return r.data.user;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, setUser, loading, checkAuth, logout }}>
+    <AuthContext.Provider value={{ user, setUser, loading, checkAuth, logout, loginWithPassword }}>
       {children}
     </AuthContext.Provider>
   );

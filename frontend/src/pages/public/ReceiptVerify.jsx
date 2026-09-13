@@ -37,18 +37,12 @@ export default function ReceiptVerify() {
                   </div>
                 </div>
                 {data.bank_verified === false && (
-                  <div
-                    className="mt-5 rounded-xl border border-[#C45C26]/45 bg-[#FDF2E9] px-4 py-3"
+                  <p
+                    className="mt-2 text-center text-sm font-semibold text-[#A85A2A]"
                     data-testid="not-bank-verified-notice"
                   >
-                    <p className="text-sm font-semibold uppercase tracking-wide text-[#C45C26]">
-                      Not bank verified
-                    </p>
-                    <p className="mt-1 text-xs leading-relaxed text-brown-800/80">
-                      This receipt is a committee record of the payment reference and/or screenshot
-                      submitted by the payer. It is not confirmation from the bank that funds have settled.
-                    </p>
-                  </div>
+                    Not bank verified
+                  </p>
                 )}
                 <div className="my-6 divider-diya" />
                 <dl className="grid grid-cols-2 gap-y-4 text-sm">

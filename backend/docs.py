@@ -16,8 +16,7 @@ VERMILION = colors.HexColor("#D9381E")
 GOLD = colors.HexColor("#B5952F")
 BROWN = colors.HexColor("#1F1412")
 IVORY = colors.HexColor("#FDFBF7")
-NOT_BANK_BANNER_BG = colors.HexColor("#FDF2E9")
-NOT_BANK_BANNER_BORDER = colors.HexColor("#C45C26")
+NOT_BANK_MUTED = colors.HexColor("#A85A2A")
 
 
 def _not_bank_verified(receipt: dict) -> bool:
@@ -149,37 +148,14 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     y -= 6 * mm
     c.setFont("Helvetica", 10)
     c.drawString(22 * mm, y, f"Issued: {_ist_str(receipt.get('issued_at', ''))}")
-    y -= 8 * mm
-
-    # Prominent notice directly under receipt identity — before payer/amount details
+    # Same weight/placement language as Status — short, right-aligned, no banner
     if _not_bank_verified(receipt):
-        banner_h = 16 * mm
-        c.setFillColor(NOT_BANK_BANNER_BG)
-        c.setStrokeColor(NOT_BANK_BANNER_BORDER)
-        c.setLineWidth(1.2)
-        c.roundRect(20 * mm, y - banner_h + 3 * mm, W - 40 * mm, banner_h, 2 * mm, fill=1, stroke=1)
-        c.setFillColor(NOT_BANK_BANNER_BORDER)
-        c.setFont("Helvetica-Bold", 10)
-        c.drawCentredString(W / 2, y - 1.5 * mm, "NOT BANK VERIFIED")
+        c.setFillColor(NOT_BANK_MUTED)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawRightString(W - 22 * mm, y, "Not bank verified")
         c.setFillColor(BROWN)
-        c.setFont("Helvetica", 7.5)
-        body = rc.get("verification_note") or (
-            "This receipt is a committee record of the payment reference and/or screenshot "
-            "submitted by the payer. It is not confirmation from the bank that funds have settled."
-        )
-        # Wrap roughly to two centred lines
-        max_chars = 95
-        if len(body) <= max_chars:
-            c.drawCentredString(W / 2, y - 6.5 * mm, body)
-        else:
-            mid = len(body) // 2
-            split_at = body.rfind(" ", 0, mid + 15)
-            if split_at < 40:
-                split_at = mid
-            c.drawCentredString(W / 2, y - 6 * mm, body[:split_at].strip())
-            c.drawCentredString(W / 2, y - 9.5 * mm, body[split_at:].strip())
-        c.setFillColor(BROWN)
-        y -= banner_h + 3 * mm
+        c.setFont("Helvetica", 10)
+    y -= 8 * mm
 
     c.drawString(22 * mm, y, f"Payer: {receipt.get('payer_name', '')}")
     y -= 6 * mm
@@ -277,17 +253,6 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawString(52 * mm, y - 11 * mm, verify_url[:90])
     c.drawString(52 * mm, y - 18 * mm, (rc.get("computer_generated_note") or "")[:95])
     footer_y = y - 23 * mm
-    if _not_bank_verified(receipt):
-        c.setFillColor(NOT_BANK_BANNER_BORDER)
-        c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(
-            52 * mm,
-            footer_y,
-            "Reminder: NOT BANK VERIFIED — committee acknowledgement only; not a bank settlement proof.",
-        )
-        c.setFillColor(BROWN)
-        c.setFont("Helvetica", 8)
-        footer_y -= 5 * mm
     c.setFont("Helvetica", 8)
     c.drawString(52 * mm, footer_y, f"Refund policy: {rc.get('refund_policy_ref', '')}  |  Doc {rc.get('document_version', '')}")
 

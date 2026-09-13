@@ -61,8 +61,11 @@ ROLE_PERMISSIONS = {
                  "procurement:approve", "payment_run:approve", "expense:approve",
                  "ops:read", "ops:manage", "period:close", "public_report:publish",
                  "advance:manage", "documents:read", "documents:write"},
+    # Treasurers may both record and approve manual collections in a small EOC;
+    # self-approval is still blocked at accept/approve endpoints.
     "treasurer": {"reports:read", "households:read", "payments:read", "payments:manage",
-                  "receipts:read", "receipts:manage", "manual:approve", "refunds:create",
+                  "receipts:read", "receipts:manage", "manual:create", "manual:approve",
+                  "refunds:create",
                   "accounting:read", "accounting:post", "recon:read", "recon:manage",
                   "budget:read", "payment_run:approve", "period:close",
                   "advance:manage", "documents:read", "documents:write", "audit:read"},

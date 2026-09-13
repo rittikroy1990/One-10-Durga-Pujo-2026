@@ -18,8 +18,9 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
     flat = await db.flats.find_one({"id": body.get("flat_id")})
     if not tower or not flat:
         raise HTTPException(status_code=400, detail="Invalid tower/flat.")
-    if not valid_indian_mobile(body.get("mobile", "")):
-        raise HTTPException(status_code=400, detail="Valid mobile required.")
+    mobile = (body.get("mobile") or "").strip()
+    if mobile and not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile, or leave it blank.")
     base = int(settings["subscription"]["base_amount_paise"])
     donation = int(round(float(body.get("donation_rupees") or 0) * 100))
     household = await db.households.find_one({"cycle_id": cycle_id, "tower_id": tower["id"],
@@ -32,7 +33,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
                      "tower_name": tower["name"], "flat_id": flat["id"], "flat_number": flat["number"],
                      "occupancy_type": body.get("occupancy_type", "other"),
                      "family_members": int(body.get("family_members") or 1),
-                     "primary_name": body.get("name", ""), "primary_mobile": body.get("mobile", ""),
+                     "primary_name": body.get("name", ""), "primary_mobile": mobile,
                      "email": body.get("email", ""), "created_at": iso(), "is_deleted": False}
         await db.households.insert_one(dict(household))
     comps = [{"code": c["code"], "label": c["label"], "amount_paise": c["amount_paise"],
@@ -40,7 +41,7 @@ async def _create_hh_intent(body: dict, method: str, user: dict):
     intent = {"id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
               "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
               "components": comps, "payer_name": body.get("name", ""),
-              "payer_mobile": body.get("mobile", ""), "status": "payment_pending", "method": method,
+              "payer_mobile": mobile, "status": "payment_pending", "method": method,
               "created_at": iso()}
     await db.subscription_intents.insert_one(dict(intent))
     return household, intent

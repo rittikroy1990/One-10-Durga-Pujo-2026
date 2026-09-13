@@ -383,7 +383,7 @@ export default function Subscribe() {
                     <span className="mt-2 text-sm font-medium">
                       {screenshot ? screenshot.name : "Tap to upload PNG / JPG"}
                     </span>
-                    <span className="mt-1 text-xs text-brown-800/50">We read the screenshot to match amount & reference</span>
+                    <span className="mt-1 text-xs text-brown-800/50">We check amount, reference, and that payee is One10 Events Organising Committee</span>
                     <input
                       id="shot"
                       data-testid="upi-screenshot"

@@ -260,11 +260,6 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawRightString(W - 22 * mm, y - 28 * mm, org.get("authorised_signatory", "Authorised Signatory"))
     c.setFont("Helvetica", 7)
     c.drawRightString(W - 22 * mm, y - 32 * mm, "Authorised Signatory (for the Committee)")
-    c.setFont("Helvetica", 6.5)
-    mandate = org.get("bank_operating_mandate") or ""
-    if mandate:
-        c.drawCentredString(W / 2, 18 * mm, f"Bank mandate: {mandate}")
-    c.drawCentredString(W / 2, 14 * mm, "Funds are accepted as voluntary subscriptions/donations for committee activities (non-profit).")
 
     c.showPage()
     c.save()

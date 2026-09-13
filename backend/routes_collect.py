@@ -406,8 +406,13 @@ async def cashfree_webhook_disabled():
 
 
 async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, debit_account, request=None,
-                         paid_amount_paise=None):
-    """Atomically settle (full or partial), allocate heads, post ledger and issue ONE receipt."""
+                         paid_amount_paise=None, bank_verified: bool = True,
+                         issuance_source: str = "collection"):
+    """Atomically settle (full or partial), allocate heads, post ledger and issue ONE receipt.
+
+    bank_verified=True for committee/cash/bank collection paths.
+    bank_verified=False for resident screenshot self-serve (issued, not bank verified).
+    """
     due = _intent_due_paise(intent)
     paid = int(paid_amount_paise if paid_amount_paise is not None else due)
     if paid <= 0:
@@ -511,6 +516,8 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "total_amount": paid,
         "components": alloc_comps,
         "method": method, "masked_ref": masked_ref, "status": "issued",
+        "bank_verified": bool(bank_verified),
+        "issuance_source": issuance_source or ("payment_screenshot" if not bank_verified else "collection"),
         "journal_id": journal["id"], "issued_at": iso(),
         "campaign_title": campaign_title,
         "donor_type": intent.get("donor_type") or "",
@@ -602,7 +609,7 @@ async def payment_status(token: str):
         "receipt_no": receipt["receipt_no"] if receipt else None,
         "verify_token": receipt["verify_token"] if receipt else None,
         "receipt_amount": receipt.get("total_amount") if receipt else None,
-        "bank_verified": False if receipt and receipt.get("method") in ("upi_qr", "bank_transfer") else None,
+        "bank_verified": (_receipt_is_bank_verified(receipt) if receipt else None),
         "submission_status": submission.get("status") if submission else None,
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,
@@ -959,6 +966,7 @@ async def upi_submit(request: Request):
         else:
             # Refresh intent in case of concurrent partials
             intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
+            # Screenshot self-serve: issued, but explicitly not bank verified.
             receipt = await _issue_receipt(
                 intent,
                 method="upi_qr",
@@ -967,17 +975,21 @@ async def upi_submit(request: Request):
                 debit_account="1001",
                 request=request,
                 paid_amount_paise=settle_amount,
+                bank_verified=False,
+                issuance_source="payment_screenshot",
             )
             if receipt:
                 await db.receipts.update_one(
                     {"id": receipt["id"]},
                     {"$set": {
                         "bank_verified": False,
+                        "issuance_source": "payment_screenshot",
                         "verification_level": "committee_recorded",
                         "proof_doc_id": proof_doc_id,
                     }},
                 )
                 receipt["bank_verified"] = False
+                receipt["issuance_source"] = "payment_screenshot"
                 final_status = "partial" if receipt.get("is_partial") else "issued"
                 if receipt.get("is_partial"):
                     due_after = int(receipt.get("amount_due_after") or 0)
@@ -1079,8 +1091,15 @@ async def _receipt_lookup_rate_limit(request: Request, *, kind: str, tower_id: s
     })
 
 
+def _receipt_is_bank_verified(receipt: dict) -> bool:
+    """Screenshot self-serve receipts are not bank verified; collection/found receipts are."""
+    from docs import receipt_is_bank_verified
+    return receipt_is_bank_verified(receipt)
+
+
 def _receipt_public_card(receipt: dict) -> dict:
     token = receipt.get("verify_token") or ""
+    bank_verified = _receipt_is_bank_verified(receipt)
     return {
         "receipt_no": receipt.get("receipt_no"),
         "verify_token": token,
@@ -1089,7 +1108,8 @@ def _receipt_public_card(receipt: dict) -> dict:
         "kind": receipt.get("kind") or "subscription",
         "payer_name": receipt.get("payer_name") or "",
         "pdf_url": f"/api/receipt/pdf/{token}" if token else None,
-        "bank_verified": bool(receipt.get("bank_verified")),
+        "status": receipt.get("status") or "issued",
+        "bank_verified": bank_verified,
     }
 
 

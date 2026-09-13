@@ -55,7 +55,9 @@ function ReceiptCards({ receipts, household }) {
                 {r.issued_at ? ` · ${new Date(r.issued_at).toLocaleString("en-IN")}` : ""}
               </div>
             )}
-            {r.bank_verified === false && (
+            {r.bank_verified ? (
+              <p className="mt-2 text-sm font-semibold text-emerald-700">Bank verified</p>
+            ) : (
               <p className="mt-2 text-sm font-semibold text-[#A85A2A]">Not bank verified</p>
             )}
             <div className="mt-4 flex flex-wrap gap-3">

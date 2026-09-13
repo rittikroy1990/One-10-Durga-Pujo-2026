@@ -27,6 +27,7 @@ ROLES = {
     "coordinator": "Volunteer / cultural coordinator.",
     "inventory_custodian": "Inventory custodian.",
     "auditor": "Read-only auditor.",
+    "committee_member": "Committee member — view access to portal data.",
     "resident": "Resident / public user.",
 }
 
@@ -53,15 +54,18 @@ P = {
 ROLE_PERMISSIONS = {
     "system_admin": {"settings:read", "settings:manage", "users:manage", "audit:read",
                      "reports:read", "households:read", "payments:read", "receipts:read",
-                     "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read"},
+                     "receipts:manage", "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read"},
     "convenor": {"settings:read", "reports:read", "audit:read", "households:read", "payments:read",
                  "receipts:read", "receipts:manage", "manual:approve", "refunds:approve",
                  "accounting:read", "recon:read", "budget:read", "budget:approve",
                  "procurement:approve", "payment_run:approve", "expense:approve",
                  "ops:read", "ops:manage", "period:close", "public_report:publish",
                  "advance:manage", "documents:read", "documents:write"},
+    # Treasurers may both record and approve manual collections in a small EOC;
+    # self-approval is still blocked at accept/approve endpoints.
     "treasurer": {"reports:read", "households:read", "payments:read", "payments:manage",
-                  "receipts:read", "receipts:manage", "manual:approve", "refunds:create",
+                  "receipts:read", "receipts:manage", "manual:create", "manual:approve",
+                  "refunds:create",
                   "accounting:read", "accounting:post", "recon:read", "recon:manage",
                   "budget:read", "payment_run:approve", "period:close",
                   "advance:manage", "documents:read", "documents:write", "audit:read"},
@@ -82,6 +86,11 @@ ROLE_PERMISSIONS = {
     "auditor": {"reports:read", "audit:read", "households:read", "payments:read", "receipts:read",
                 "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
                 "settings:read"},
+    # All EOC members: view portal data; elevated roles add write/approve powers
+    "committee_member": {
+        "settings:read", "reports:read", "households:read", "payments:read", "receipts:read",
+        "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
+    },
     "resident": set(),
 }
 
@@ -211,24 +220,54 @@ async def exchange_session(session_id: str) -> dict:
     return {"user": {k: v for k, v in user.items() if k != "_id"}, "session_token": session_token}
 
 
-DEMO_USERS = [
-    ("superadmin@one10.test", "Demo Super Admin", ["system_admin"]),
-    ("convenor@one10.test", "Demo Convenor", ["convenor"]),
-    ("treasurer@one10.test", "Demo Treasurer", ["treasurer"]),
-    ("collector@one10.test", "Demo Collector", ["collector"]),
-    ("recon@one10.test", "Demo Reconciliation Officer", ["reconciliation_officer"]),
-    ("auditor@one10.test", "Demo Auditor", ["auditor"]),
-    ("budget@one10.test", "Demo Budget Owner", ["budget_owner"]),
-    ("procure.maker@one10.test", "Demo Procurement Maker", ["procurement_maker"]),
-    ("procure.approver@one10.test", "Demo Procurement Approver", ["procurement_approver"]),
-    ("pay.maker@one10.test", "Demo Payment Maker", ["payment_maker"]),
-    ("pay.approver@one10.test", "Demo Payment Approver", ["payment_approver"]),
-    ("coordinator@one10.test", "Demo Coordinator", ["coordinator"]),
-    ("custodian@one10.test", "Demo Inventory Custodian", ["inventory_custodian"]),
+DEMO_USERS = []
+
+# Active committee portal logins (password auth). Maker-checker still requires two different users.
+COMMITTEE_PASSWORD = "EOC@2026"
+COMMITTEE_LOGINS = [
+    {"login_id": "apc", "name": "APC", "designation": "Joint Treasurer",
+     "roles": ["committee_member", "treasurer", "collector", "convenor"]},
+    {"login_id": "arka", "name": "Arka", "designation": "Committee Admin",
+     "roles": ["committee_member", "treasurer", "collector", "convenor"]},
+    {"login_id": "suman", "name": "Suman", "designation": "Asst. Secretary",
+     "roles": ["committee_member", "treasurer", "collector", "convenor"]},
 ]
 
 
+def hash_password(password: str) -> str:
+    import hashlib
+    return hashlib.sha256(f"one10_eoc_v1:{password}".encode()).hexdigest()
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    import hmac
+    return hmac.compare_digest(hash_password(password), password_hash or "")
+
+
+async def create_password_session(user: dict) -> dict:
+    import secrets
+    session_token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.insert_one({
+        "user_id": user["user_id"], "session_token": session_token,
+        "expires_at": expires, "created_at": now_utc(),
+    })
+    safe = {k: v for k, v in user.items() if k not in ("_id", "password_hash")}
+    return {"user": safe, "session_token": session_token}
+
+
+async def login_with_password(login_id: str, password: str) -> dict:
+    lid = (login_id or "").strip().lower()
+    if not lid or not password:
+        raise HTTPException(status_code=400, detail="User ID and password required")
+    user = await db.users.find_one({"login_id": lid, "is_active": True})
+    if not user or not verify_password(password, user.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid user ID or password")
+    return await create_password_session(user)
+
+
 async def seed_demo_users():
+    """Upsert the allowed committee logins and deactivate every other account."""
     from db import new_id
     created = []
     for email, name, roles in DEMO_USERS:
@@ -239,4 +278,56 @@ async def seed_demo_users():
                 "roles": roles, "is_active": True, "is_demo": True, "created_at": iso(),
             })
             created.append(email)
+
+    pw_hash = hash_password(COMMITTEE_PASSWORD)
+    allowed_login_ids = set()
+    for row in COMMITTEE_LOGINS:
+        lid = row["login_id"]
+        allowed_login_ids.add(lid)
+        existing = await db.users.find_one({"login_id": lid})
+        email = f"{lid}@committee.one10"
+        doc = {
+            "login_id": lid,
+            "email": email,
+            "name": row["name"],
+            "designation": row["designation"],
+            "picture": "",
+            "roles": row["roles"],
+            "password_hash": pw_hash,
+            "is_active": True,
+            "is_demo": False,
+            "is_committee": True,
+            "updated_at": iso(),
+        }
+        if not existing:
+            doc["user_id"] = new_id("user")
+            doc["created_at"] = iso()
+            await db.users.insert_one(doc)
+            created.append(lid)
+        else:
+            await db.users.update_one(
+                {"login_id": lid},
+                {"$set": {
+                    "name": row["name"],
+                    "designation": row["designation"],
+                    "roles": row["roles"],
+                    "password_hash": pw_hash,
+                    "is_active": True,
+                    "is_demo": False,
+                    "is_committee": True,
+                    "email": email,
+                    "updated_at": iso(),
+                }},
+            )
+
+    # Remove access for every other account (demo, Google, old committee logins).
+    await db.users.update_many(
+        {"login_id": {"$nin": list(allowed_login_ids)}},
+        {"$set": {"is_active": False, "password_hash": "", "updated_at": iso()}},
+    )
+    await db.users.update_many(
+        {"login_id": {"$exists": False}},
+        {"$set": {"is_active": False, "updated_at": iso()}},
+    )
+    await db.user_sessions.delete_many({})
     return created

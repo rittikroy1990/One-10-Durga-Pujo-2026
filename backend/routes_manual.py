@@ -141,8 +141,11 @@ async def cash_accept(cash_id: str, request: Request = None,
     rec = await db.cash_collections.find_one({"id": cash_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["collector_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Collector cannot accept their own cash.")
+    if rec.get("collector_id") and rec["collector_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must Accept. You recorded this entry.",
+        )
     if rec["status"] != "pending_acceptance":
         raise HTTPException(status_code=409, detail="Not pending acceptance.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})
@@ -211,8 +214,11 @@ async def bank_transfer_approve(btr_id: str, body: dict = Body(default={}), requ
     rec = await db.bank_transfers.find_one({"id": btr_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["maker_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Maker cannot approve their own transfer.")
+    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must Approve. You recorded this transfer.",
+        )
     if rec["status"] != "pending_match":
         raise HTTPException(status_code=409, detail="Not pending match.")
     if not body.get("bank_statement_matched"):
@@ -251,8 +257,11 @@ async def cheque_clear(chq_id: str, body: dict = Body(default={}), request: Requ
     rec = await db.cheques.find_one({"id": chq_id})
     if not rec:
         raise HTTPException(status_code=404, detail="Not found.")
-    if rec["maker_id"] == user["user_id"]:
-        raise HTTPException(status_code=403, detail="Maker cannot clear their own cheque.")
+    if rec.get("maker_id") and rec["maker_id"] == user.get("user_id"):
+        raise HTTPException(
+            status_code=403,
+            detail="Maker-checker: another admin must clear this. You recorded this cheque.",
+        )
     if rec["status"] != "pending_clearing":
         raise HTTPException(status_code=409, detail="Not pending clearing.")
     intent = await db.subscription_intents.find_one({"id": rec["intent_id"]})

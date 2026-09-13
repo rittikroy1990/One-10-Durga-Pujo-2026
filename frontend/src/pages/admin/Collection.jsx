@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { useAuth } from "../../context/AuthContext";
 import { FileText, Check, Plus, RefreshCw, Undo2, FileDown, Download, Upload } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
@@ -174,6 +175,7 @@ function Receipts() {
 }
 
 function Manual() {
+  const { user } = useAuth();
   const [towers, setTowers] = useState([]);
   const [flats, setFlats] = useState([]);
   const [mode, setMode] = useState("cash");
@@ -247,21 +249,36 @@ function Manual() {
       {queues && (
         <div className="grid gap-4 lg:grid-cols-3">
           <QueueCard title="Cash — pending acceptance" testid="queue-cash" rows={queues.cash_pending || []}
-            render={(c) => (
-              <QueueRow
-                key={c.id}
-                label={queueLabel(c)}
-                onAct={() => act(`/manual/cash/${c.id}/accept`)}
-                actLabel="Accept"
-                onCancel={() => act(`/manual/cash/${c.id}/cancel`)}
-              />
-            )} />
+            render={(c) => {
+              const isMine = user?.user_id && c.collector_id === user.user_id;
+              return (
+                <QueueRow
+                  key={c.id}
+                  label={queueLabel(c) + (isMine ? " · waiting for another admin" : "")}
+                  onAct={isMine ? null : () => act(`/manual/cash/${c.id}/accept`)}
+                  actLabel="Accept"
+                  onCancel={() => act(`/manual/cash/${c.id}/cancel`)}
+                />
+              );
+            }} />
           <QueueCard title="Bank transfer — pending match" testid="queue-bank" rows={queues.bank_transfer_pending || queues.bank_pending || []}
-            render={(c) => <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · UTR ${c.utr}`}
-              onAct={() => act(`/manual/bank-transfer/${c.id}/approve`, { bank_statement_matched: true })} actLabel="Approve" />} />
+            render={(c) => {
+              const isMine = user?.user_id && c.maker_id === user.user_id;
+              return (
+                <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · UTR ${c.utr}` + (isMine ? " · waiting for another admin" : "")}
+                  onAct={isMine ? null : () => act(`/manual/bank-transfer/${c.id}/approve`, { bank_statement_matched: true })}
+                  actLabel="Approve" />
+              );
+            }} />
           <QueueCard title="Cheque — pending clearing" testid="queue-cheque" rows={queues.cheque_pending || []}
-            render={(c) => <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · ${c.cheque_no}`}
-              onAct={() => act(`/manual/cheque/${c.id}/clear`)} actLabel="Mark cleared" />} />
+            render={(c) => {
+              const isMine = user?.user_id && c.maker_id === user.user_id;
+              return (
+                <QueueRow key={c.id} label={`${formatPaise(c.amount_paise)} · ${c.cheque_no}` + (isMine ? " · waiting for another admin" : "")}
+                  onAct={isMine ? null : () => act(`/manual/cheque/${c.id}/clear`)}
+                  actLabel="Mark cleared" />
+              );
+            }} />
         </div>
       )}
 
@@ -324,7 +341,7 @@ function QueueRow({ label, onAct, actLabel, onCancel }) {
       <span className="min-w-0 flex-1">{label}</span>
       <div className="flex shrink-0 gap-2">
         {onCancel && <Button variant="subtle" size="sm" onClick={onCancel}>Cancel</Button>}
-        <Button variant="admin" size="sm" onClick={onAct}><Check className="h-3.5 w-3.5" /> {actLabel}</Button>
+        {onAct && <Button variant="admin" size="sm" onClick={onAct}><Check className="h-3.5 w-3.5" /> {actLabel}</Button>}
       </div>
     </div>
   );

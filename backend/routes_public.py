@@ -97,6 +97,8 @@ async def public_announcements():
 @router.get("/receipt/verify/{token}")
 async def verify_receipt(token: str):
     """Limited public verification — masked identity only, no personal data."""
+    from docs import receipt_is_bank_verified
+
     receipt_id = read_receipt_token(token)
     if not receipt_id:
         raise HTTPException(status_code=404, detail="Invalid verification token")
@@ -112,5 +114,6 @@ async def verify_receipt(token: str):
         "issued_at": r.get("issued_at"),
         "status": "VALID" if r.get("status") == "issued" else r.get("status", "").upper(),
         "verified": r.get("status") == "issued",
+        "bank_verified": receipt_is_bank_verified(r),
         "campaign_title": r.get("campaign_title", ""),
     }

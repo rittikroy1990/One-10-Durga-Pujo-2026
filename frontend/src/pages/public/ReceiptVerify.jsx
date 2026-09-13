@@ -36,6 +36,11 @@ export default function ReceiptVerify() {
                     {data.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />} {data.status}
                   </div>
                 </div>
+                {data.bank_verified ? (
+                  <p className="mt-2 text-center text-sm font-semibold text-emerald-700">Bank verified</p>
+                ) : data.bank_verified === false ? (
+                  <p className="mt-2 text-center text-sm font-semibold text-[#A85A2A]">Not bank verified</p>
+                ) : null}
                 <div className="my-6 divider-diya" />
                 <dl className="grid grid-cols-2 gap-y-4 text-sm">
                   <dt className="text-brown-800/50">Receipt Number</dt>

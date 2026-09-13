@@ -193,11 +193,11 @@ DURGOTSAV_2026_RECEIPT = {
         "and does not require a physical signature."
     ),
     "verification_note": (
-        "Committee-recorded against the payment reference you submitted. "
-        "This is not a bank settlement confirmation."
+        "This receipt is a committee record of the payment reference and/or screenshot "
+        "submitted by the payer. It is not confirmation from the bank that funds have settled."
     ),
     "refund_policy_ref": "See /refund-policy",
-    "document_version": "v1.2",
+    "document_version": "v1.3",
     "tax_deductible": False,
     "letterhead_title": "Events Organizations Committee of One10",
     "letterhead_subtitle": "ONE10 Events Committee · Unregistered non-profit community association",
@@ -661,10 +661,16 @@ async def ensure_settings():
         if flags != (existing.get("feature_flags") or {}):
             patch["feature_flags"] = flags
 
-        # Receipt verification note for QR/screenshot receipts
+        # Receipt verification note for QR/screenshot receipts (force refresh for clearer wording)
         rc_existing = existing.get("receipt") or {}
-        if not rc_existing.get("verification_note"):
-            rc_merge = dict(rc_existing)
+        rc_merge = dict(rc_existing)
+        old_note = (rc_existing.get("verification_note") or "").strip()
+        weak_notes = (
+            "",
+            "Committee-recorded against the payment reference you submitted. "
+            "This is not a bank settlement confirmation.",
+        )
+        if old_note in weak_notes or "not confirmation from the bank" not in old_note.lower():
             rc_merge["verification_note"] = DURGOTSAV_2026_RECEIPT["verification_note"]
             rc_merge["document_version"] = DURGOTSAV_2026_RECEIPT["document_version"]
             patch["receipt"] = rc_merge
@@ -680,7 +686,7 @@ async def ensure_settings():
             patch["sponsorship"] = SPONSORSHIP_PACKAGES
 
         # Receipt letterhead defaults on settings + active cycle
-        rc = existing.get("receipt") or {}
+        rc = dict((patch.get("receipt") if "receipt" in patch else None) or existing.get("receipt") or {})
         rc_patch = {}
         for key in ("letterhead_title", "letterhead_subtitle", "computer_generated_note", "document_version"):
             if key not in rc or _is_placeholder(rc.get(key)) or key in ("letterhead_title", "letterhead_subtitle"):

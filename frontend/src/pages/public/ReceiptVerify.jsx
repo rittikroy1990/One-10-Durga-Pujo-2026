@@ -36,6 +36,20 @@ export default function ReceiptVerify() {
                     {data.verified ? <ShieldCheck className="h-4 w-4" /> : <ShieldX className="h-4 w-4" />} {data.status}
                   </div>
                 </div>
+                {data.bank_verified === false && (
+                  <div
+                    className="mt-5 rounded-xl border border-[#C45C26]/45 bg-[#FDF2E9] px-4 py-3"
+                    data-testid="not-bank-verified-notice"
+                  >
+                    <p className="text-sm font-semibold uppercase tracking-wide text-[#C45C26]">
+                      Not bank verified
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-brown-800/80">
+                      This receipt is a committee record of the payment reference and/or screenshot
+                      submitted by the payer. It is not confirmation from the bank that funds have settled.
+                    </p>
+                  </div>
+                )}
                 <div className="my-6 divider-diya" />
                 <dl className="grid grid-cols-2 gap-y-4 text-sm">
                   <dt className="text-brown-800/50">Receipt Number</dt>
@@ -52,11 +66,6 @@ export default function ReceiptVerify() {
                 <p className="mt-6 text-center text-xs text-brown-800/40">
                   Only masked identity is shown to protect resident privacy. This is a computer-generated verification.
                 </p>
-                {data.bank_verified === false && (
-                  <p className="mt-2 text-center text-xs text-brown-800/45">
-                    Committee-recorded against the submitted payment reference — not a bank settlement confirmation.
-                  </p>
-                )}
               </div>
             )}
           </div>

@@ -46,9 +46,18 @@ export default function PaymentStatus() {
               <h1 className="mt-3 font-display text-4xl">Receipt issued</h1>
               <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been recorded.</p>
               {data.bank_verified === false && (
-                <p className="mt-3 text-xs text-brown-800/55">
-                  Committee-recorded against your payment reference — not a bank settlement confirmation.
-                </p>
+                <div
+                  className="mt-4 rounded-xl border border-[#C45C26]/45 bg-[#FDF2E9] px-4 py-3 text-left"
+                  data-testid="not-bank-verified-notice"
+                >
+                  <p className="text-sm font-semibold uppercase tracking-wide text-[#C45C26]">
+                    Not bank verified
+                  </p>
+                  <p className="mt-1 text-xs leading-relaxed text-brown-800/80">
+                    This receipt is a committee record of the payment reference and/or screenshot you
+                    submitted. It is not confirmation from the bank that funds have settled.
+                  </p>
+                </div>
               )}
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">

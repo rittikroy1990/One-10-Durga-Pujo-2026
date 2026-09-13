@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { FileText, Check, Plus, RefreshCw, Undo2 } from "lucide-react";
+import { FileText, Check, Plus, RefreshCw, Undo2, FileDown, Download, Upload } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
@@ -15,11 +15,13 @@ export default function Collection() {
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
         { value: "manual", label: "Cash & Manual" },
+        { value: "excel", label: "Excel import" },
         { value: "refunds", label: "Refunds" },
       ]} />
       {tab === "households" && <Households />}
       {tab === "receipts" && <Receipts />}
       {tab === "manual" && <Manual />}
+      {tab === "excel" && <ExcelImport />}
       {tab === "refunds" && <Refunds />}
     </div>
   );
@@ -219,6 +221,186 @@ function Refunds() {
         <div className="mt-3"><Label>Reason</Label><Input data-testid="refund-reason" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
         <p className="mt-2 text-xs text-brown-800/50">A linked credit note and reversal ledger entries are generated on approval. Refund is tracked until the provider confirms completion.</p>
       </Dialog>
+    </div>
+  );
+}
+
+function ExcelImport() {
+  const fileRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const downloadTemplate = async () => {
+    setDownloading(true);
+    try {
+      const r = await api.get("/admin/subscription-imports/template", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "one10_subscription_payment_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Template downloaded");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not download template");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const upload = async (dryRun) => {
+    const file = fileRef.current?.files?.[0];
+    if (!file) {
+      toast.error("Choose an Excel/CSV file first");
+      return;
+    }
+    dryRun ? setPreviewing(true) : setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post(`/admin/subscription-imports/import?dry_run=${dryRun ? "true" : "false"}`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setResult(r.data);
+      if (dryRun) toast.success(r.data.message || "Dry run complete");
+      else toast.success(r.data.message || "Import complete — receipts issued");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Import failed");
+    } finally {
+      setPreviewing(false);
+      setUploading(false);
+    }
+  };
+
+  const issued = result?.issued || [];
+  const would = result?.would_issue || [];
+  const skipped = result?.skipped || [];
+  const errors = result?.errors || [];
+
+  return (
+    <div className="space-y-5" data-testid="excel-import-panel">
+      <Card>
+        <CardBody className="space-y-4">
+          <div>
+            <div className="mb-1 font-display text-xl text-brown-900">UPI payment Excel import</div>
+            <p className="text-sm text-brown-800/60">
+              Download the template, fill one row per UPI payment (or donation), then upload to create households and issue receipts.
+              Subscription rows must match the configured base amount. Each UTR can only be used once.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="subtle" onClick={downloadTemplate} disabled={downloading} data-testid="excel-download-template">
+              {downloading ? <Spinner className="h-4 w-4" /> : <Download className="h-4 w-4" />} Download template
+            </Button>
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-brown-800/15 bg-white px-4 py-2 text-sm font-medium text-brown-900 hover:bg-ivory-50">
+              <Upload className="h-4 w-4" /> Choose file
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" data-testid="excel-file-input" />
+            </label>
+            <Button variant="subtle" onClick={() => upload(true)} disabled={previewing || uploading} data-testid="excel-dry-run">
+              {previewing ? <Spinner className="h-4 w-4" /> : <FileDown className="h-4 w-4" />} Dry run
+            </Button>
+            <Button onClick={() => upload(false)} disabled={previewing || uploading} data-testid="excel-import-live">
+              {uploading ? <Spinner className="h-4 w-4" /> : <Check className="h-4 w-4" />} Import & issue receipts
+            </Button>
+          </div>
+          {result?.message && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" data-testid="excel-import-message">
+              {result.message}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {!!would.length && (
+        <Card>
+          <CardBody>
+            <div className="mb-3 font-semibold text-brown-900">Would issue ({would.length})</div>
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Name</TH><TH>Tower</TH><TH>Flat</TH><TH>Txn</TH><TH>Kind</TH><TH>Amount</TH>
+                </TR>
+              </THead>
+              <tbody>
+                {would.map((r, i) => (
+                  <TR key={i}>
+                    <TD>{r.name}</TD><TD>{r.tower}</TD><TD>{r.flat}</TD><TD className="font-mono text-xs">{r.txn}</TD>
+                    <TD>{r.kind}</TD><TD>{formatPaise(r.amount_paise)}</TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
+
+      {!!issued.length && (
+        <Card>
+          <CardBody>
+            <div className="mb-3 font-semibold text-brown-900">Issued ({issued.length})</div>
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Receipt</TH><TH>Name</TH><TH>Tower</TH><TH>Flat</TH><TH>Txn</TH><TH>Kind</TH>
+                </TR>
+              </THead>
+              <tbody>
+                {issued.map((r, i) => (
+                  <TR key={i}>
+                    <TD className="font-mono text-xs">{r.receipt_no}</TD>
+                    <TD>{r.name}</TD><TD>{r.tower}</TD><TD>{r.flat}</TD>
+                    <TD className="font-mono text-xs">{r.txn}</TD><TD>{r.kind}</TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
+
+      {!!skipped.length && (
+        <Card>
+          <CardBody>
+            <div className="mb-3 font-semibold text-brown-900">Skipped ({skipped.length})</div>
+            <Table>
+              <THead>
+                <TR><TH>Name</TH><TH>Tower</TH><TH>Flat</TH><TH>Txn</TH><TH>Reason</TH></TR>
+              </THead>
+              <tbody>
+                {skipped.map((r, i) => (
+                  <TR key={i}>
+                    <TD>{r.name}</TD><TD>{r.tower}</TD><TD>{r.flat}</TD>
+                    <TD className="font-mono text-xs">{r.txn}</TD><TD>{r.reason}</TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
+
+      {!!errors.length && (
+        <Card>
+          <CardBody>
+            <div className="mb-3 font-semibold text-vermilion-700">Errors ({errors.length})</div>
+            <Table>
+              <THead>
+                <TR><TH>Name</TH><TH>Tower</TH><TH>Flat</TH><TH>Txn</TH><TH>Reason</TH></TR>
+              </THead>
+              <tbody>
+                {errors.map((r, i) => (
+                  <TR key={i}>
+                    <TD>{r.name}</TD><TD>{r.tower}</TD><TD>{r.flat}</TD>
+                    <TD className="font-mono text-xs">{r.txn}</TD><TD className="text-vermilion-700">{r.reason}</TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          </CardBody>
+        </Card>
+      )}
     </div>
   );
 }

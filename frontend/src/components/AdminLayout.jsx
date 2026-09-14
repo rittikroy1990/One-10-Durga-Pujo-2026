@@ -3,7 +3,7 @@ import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
   ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, Receipt,
-  UtensilsCrossed,
+  UtensilsCrossed, ClipboardList,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Spinner } from "./ui";
@@ -12,7 +12,8 @@ const NAV = [
   { to: "/admin", label: "Control Tower", icon: LayoutDashboard, end: true, perm: "reports:read" },
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
   { to: "/admin/expenses", label: "Expenses", icon: Receipt, perm: "budget:read" },
-  { to: "/admin/food", label: "Food subscriptions", icon: UtensilsCrossed, perm: "households:read" },
+  { to: "/admin/food", label: "Food subscriptions", icon: ClipboardList, perm: "households:read" },
+  { to: "/admin/food-menu", label: "Food Menu", icon: UtensilsCrossed, perm: "households:read" },
   // Hidden for now — finance/ops modules not needed in current committee workflow
   { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read", hidden: true },
   { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read", hidden: true },

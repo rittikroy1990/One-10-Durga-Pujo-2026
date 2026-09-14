@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { Save, Users2, AlertTriangle, CalendarRange, CheckCircle2, Upload, QrCode, Lock } from "lucide-react";
+import { Save, Users2, AlertTriangle, Upload, QrCode, Lock } from "lucide-react";
 import api from "../../lib/api";
-import { Card, CardBody, Button, Tabs, Label, Input, StatusBadge, Spinner, Textarea } from "../../components/ui";
-import { formatPaise } from "../../lib/utils";
+import { Card, CardBody, Button, Tabs, Label, Input, StatusBadge, Spinner } from "../../components/ui";
 
 export default function Settings() {
   const [tab, setTab] = useState("general");
@@ -18,12 +17,10 @@ export default function Settings() {
         onChange={setTab}
         tabs={[
           { value: "general", label: "Organisation" },
-          { value: "campaigns", label: "Campaigns" },
           { value: "users", label: "Users & Roles" },
         ]}
       />
       {tab === "general" && <General />}
-      {tab === "campaigns" && <Campaigns />}
       {tab === "users" && <UsersRoles />}
     </div>
   );
@@ -241,180 +238,6 @@ function General() {
         </Button>
       </CardBody>
     </Card>
-  );
-}
-
-function Campaigns() {
-  const [items, setItems] = useState([]);
-  const [activeId, setActiveId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({
-    name: "",
-    slug: "",
-    kind: "event",
-    summary: "",
-    theme_line: "",
-    venue: "",
-    base_amount_rupees: "",
-    receipt_prefix: "",
-    is_published: false,
-  });
-
-  const load = useCallback(() => {
-    setLoading(true);
-    api
-      .get("/admin/campaigns")
-      .then((r) => {
-        setItems(r.data.items || []);
-        setActiveId(r.data.active_cycle_id || "");
-      })
-      .catch((e) => toast.error(e?.response?.data?.detail || "Could not load campaigns"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(load, [load]);
-
-  const activate = async (id) => {
-    try {
-      await api.post(`/admin/campaigns/${id}/activate`);
-      toast.success("Campaign activated — public subscribe now uses this cycle");
-      load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not activate");
-    }
-  };
-
-  const togglePublish = async (c) => {
-    try {
-      await api.put(`/admin/campaigns/${c.id}`, { is_published: !c.is_published });
-      toast.success(c.is_published ? "Unpublished" : "Published on public site");
-      load();
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not update");
-    }
-  };
-
-  const create = async (e) => {
-    e.preventDefault();
-    try {
-      await api.post("/admin/campaigns", form);
-      toast.success("Campaign created");
-      setForm({
-        name: "",
-        slug: "",
-        kind: "event",
-        summary: "",
-        theme_line: "",
-        venue: "",
-        base_amount_rupees: "",
-        receipt_prefix: "",
-        is_published: false,
-      });
-      load();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not create campaign");
-    }
-  };
-
-  if (loading) return <Spinner className="text-vermilion-500" />;
-
-  return (
-    <div className="space-y-6" data-testid="campaigns-admin">
-      <Card>
-        <CardBody>
-          <h3 className="mb-1 flex items-center gap-2 font-display text-xl">
-            <CalendarRange className="h-5 w-5" /> Campaign cycles
-          </h3>
-          <p className="mb-4 text-sm text-brown-800/50">
-            Activate one campaign at a time for subscriptions and receipts. Publish to show it on the public site.
-          </p>
-          <div className="space-y-3">
-            {items.map((c) => {
-              const sub = c.subscription || {};
-              const camp = c.campaign || {};
-              const isActive = c.id === activeId || c.is_current;
-              return (
-                <div key={c.id} className="rounded-lg border border-brown-800/10 p-4" data-testid={`campaign-row-${c.slug}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-display text-2xl">{camp.title || c.name}</span>
-                        {isActive && <StatusBadge status="active" />}
-                        {c.is_published ? <StatusBadge status="verified" /> : <StatusBadge status="pending" />}
-                        {c.is_locked && <StatusBadge status="locked" />}
-                      </div>
-                      <div className="mt-1 text-xs text-brown-800/50">
-                        {c.slug} · {c.kind} · {c.id}
-                      </div>
-                      <p className="mt-2 text-sm text-brown-800/70">{c.summary || camp.theme_line}</p>
-                      <div className="mt-2 text-sm font-semibold tabular-nums">
-                        Base: {sub.base_amount_paise ? formatPaise(sub.base_amount_paise) : "₹0.00 (draft)"}
-                        {c.receipt?.prefix ? ` · Receipt ${c.receipt.prefix}` : ""}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="subtle" size="sm" onClick={() => togglePublish(c)} data-testid={`campaign-publish-${c.slug}`}>
-                        {c.is_published ? "Unpublish" : "Publish"}
-                      </Button>
-                      {!isActive && !c.is_locked && (
-                        <Button variant="admin" size="sm" onClick={() => activate(c.id)} data-testid={`campaign-activate-${c.slug}`}>
-                          <CheckCircle2 className="h-4 w-4" /> Activate
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardBody>
-          <h3 className="mb-3 font-display text-xl">Create campaign</h3>
-          <form onSubmit={create} className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label>Name</Label>
-              <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slug || e.target.value.toLowerCase().replace(/\s+/g, "-") })} data-testid="campaign-name" />
-            </div>
-            <div>
-              <Label>Slug</Label>
-              <Input required value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") })} data-testid="campaign-slug" />
-            </div>
-            <div>
-              <Label>Kind</Label>
-              <Input value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} placeholder="durgotsav / kali / diwali_milan" />
-            </div>
-            <div>
-              <Label>Base amount (₹)</Label>
-              <Input type="number" min="0" step="1" value={form.base_amount_rupees} onChange={(e) => setForm({ ...form, base_amount_rupees: e.target.value })} data-testid="campaign-base" />
-            </div>
-            <div>
-              <Label>Receipt prefix</Label>
-              <Input value={form.receipt_prefix} onChange={(e) => setForm({ ...form, receipt_prefix: e.target.value })} placeholder="ONE10-XX26" />
-            </div>
-            <div>
-              <Label>Venue</Label>
-              <Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
-            </div>
-            <div className="sm:col-span-2">
-              <Label>Theme line</Label>
-              <Input value={form.theme_line} onChange={(e) => setForm({ ...form, theme_line: e.target.value })} />
-            </div>
-            <div className="sm:col-span-2">
-              <Label>Summary</Label>
-              <Textarea value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} rows={2} />
-            </div>
-            <div className="sm:col-span-2">
-              <Button variant="admin" type="submit" data-testid="campaign-create-btn">
-                Create campaign
-              </Button>
-            </div>
-          </form>
-        </CardBody>
-      </Card>
-    </div>
   );
 }
 

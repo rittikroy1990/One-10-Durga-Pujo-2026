@@ -351,13 +351,18 @@ export default function Dashboard() {
 
             <section>
               <SectionTitle icon={UtensilsCrossed} title="Food subscriptions" to="/admin/food" linkLabel="Food →" />
-              <div className="mb-3 grid grid-cols-2 gap-3">
-                <Stat label="Orders" value={foodStats.total} sub={`${foodStats.meals} meal lines`} />
+              <div className="mb-3 grid grid-cols-3 gap-3">
+                <Stat label="Subscriptions" value={foodStats.total} sub={`${foodStats.meals} meal lines`} />
                 <Stat
-                  label="Paid orders"
+                  label="Paid"
                   value={foodStats.paidCount}
                   accent="text-emerald-700"
                   sub={foodStats.paymentEnabled ? "Payment open" : "Payment not open yet"}
+                />
+                <Stat
+                  label="Not paid"
+                  value={foodStats.unpaidCount}
+                  accent="text-amber-700"
                 />
               </div>
               <Card><CardBody>

@@ -95,59 +95,25 @@ function StepBar({ current, paymentEnabled }) {
   );
 }
 
-function QtyControl({ value, onBump, onSet, label, testId, quickAmounts }) {
+function QtyControl({ value, onBump, onSet, label, testId }) {
   const qty = value || 0;
-  const quick = Array.isArray(quickAmounts) ? quickAmounts.filter((n) => n > 0) : [];
   if (qty <= 0) {
     return (
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        {quick.map((n) => (
-          <Button
-            key={n}
-            type="button"
-            variant="subtle"
-            size="sm"
-            className="min-h-11 rounded-xl px-3"
-            onClick={() => onBump(n)}
-            data-testid={testId ? `${testId}-quick-${n}` : undefined}
-            aria-label={`Quick add ${n} ${label}`}
-          >
-            +{n}
-          </Button>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-11 min-w-[7.5rem] rounded-xl"
-          onClick={() => onBump(1)}
-          data-testid={testId ? `${testId}-add` : undefined}
-          aria-label={`Add ${label}`}
-        >
-          <Plus className="h-4 w-4" /> Add
-        </Button>
-      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="min-h-11 min-w-[7.5rem] rounded-xl"
+        onClick={() => onBump(1)}
+        data-testid={testId ? `${testId}-add` : undefined}
+        aria-label={`Add ${label}`}
+      >
+        <Plus className="h-4 w-4" /> Add
+      </Button>
     );
   }
   return (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
-      {quick.length > 0 && (
-        <div className="flex items-center gap-1">
-          {quick.map((n) => (
-            <button
-              key={n}
-              type="button"
-              className="grid h-10 min-w-10 place-items-center rounded-lg border border-sun-400/40 bg-sun-50 px-2 text-sm font-semibold text-brown-900 hover:border-vermilion-500/40 hover:bg-vermilion-500/10"
-              onClick={() => onBump(n)}
-              data-testid={testId ? `${testId}-quick-${n}` : undefined}
-              aria-label={`Quick add ${n} ${label}`}
-            >
-              +{n}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="inline-flex items-center gap-1 rounded-xl border border-vermilion-500/40 bg-vermilion-500/5 p-1">
+    <div className="inline-flex items-center gap-1 rounded-xl border border-vermilion-500/40 bg-vermilion-500/5 p-1">
       <button
         type="button"
         aria-label={`Remove one ${label}`}
@@ -176,8 +142,7 @@ function QtyControl({ value, onBump, onSet, label, testId, quickAmounts }) {
       >
         <Plus className="h-4 w-4" />
       </button>
-      </div>
-      </div>
+    </div>
   );
 }
 
@@ -195,6 +160,8 @@ export default function Food() {
   const [screenshot, setScreenshot] = useState(null);
   const [cart, setCart] = useState({});
   const [menuDetail, setMenuDetail] = useState(null);
+  const [catalogFilter, setCatalogFilter] = useState("all");
+  const [mealFilter, setMealFilter] = useState("all");
   const [form, setForm] = useState({
     name: "",
     mobile: "",
@@ -223,6 +190,26 @@ export default function Food() {
   const catalogMode = catalogItems.length > 0 || menu?.mode === "items";
   const days = useMemo(() => filterDays(menu?.menu?.days || []), [menu]);
   const paymentEnabled = !!menu?.payment_enabled;
+
+  const catalogFilterOptions = useMemo(() => {
+    const seen = new Map();
+    for (const item of catalogItems) {
+      const key = String(item.category || item.category_label || "").trim().toLowerCase();
+      if (!key) continue;
+      if (!seen.has(key)) {
+        seen.set(key, item.category_label || item.category || key);
+      }
+    }
+    return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+  }, [catalogItems]);
+
+  const filteredCatalogItems = useMemo(() => {
+    if (catalogFilter === "all") return catalogItems;
+    return catalogItems.filter((item) => {
+      const key = String(item.category || item.category_label || "").trim().toLowerCase();
+      return key === catalogFilter;
+    });
+  }, [catalogFilter, catalogItems]);
 
   const priceByMeal = useMemo(() => {
     const map = {};
@@ -818,7 +805,7 @@ export default function Food() {
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Menu
                         </h2>
                         <p className="mt-1 text-sm text-brown-800/60">
-                          Use <span className="font-semibold">Quick add</span> below, or open a card and tap +1 / +2 / Add.
+                          Filter the list, or quick-add one item below.
                         </p>
                       </div>
                       {cartCount > 0 && (
@@ -829,37 +816,43 @@ export default function Food() {
                     </div>
 
                     {catalogItems.length > 0 && (
-                      <div className="mt-4" data-testid="food-catalog-quick-add">
-                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-brown-800/45">
-                          Quick add
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2" data-testid="food-catalog-quick-add">
+                        <div>
+                          <Label htmlFor="food-catalog-filter" className="text-xs text-brown-800/55">Filter</Label>
+                          <Select
+                            id="food-catalog-filter"
+                            data-testid="food-catalog-filter"
+                            value={catalogFilter}
+                            onChange={(e) => setCatalogFilter(e.target.value)}
+                          >
+                            <option value="all">All meals</option>
+                            {catalogFilterOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </Select>
                         </div>
-                        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
-                          {catalogItems.map((item) => {
-                            const qty = cart[item.id] || 0;
-                            const unit = Number(item.amount_paise) || 0;
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => quickAddCatalogItem(item, 1)}
-                                className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
-                                  qty > 0
-                                    ? "border-vermilion-500/40 bg-vermilion-500/10"
-                                    : "border-sun-400/40 bg-sun-50 hover:border-vermilion-500/40 hover:bg-vermilion-500/5"
-                                }`}
-                                data-testid={`food-quick-add-${item.id}`}
-                                aria-label={`Quick add ${item.name || "item"}`}
-                              >
-                                <div className="max-w-[9.5rem] truncate text-sm font-semibold text-brown-900">
-                                  + {item.name || "Item"}
-                                </div>
-                                <div className="mt-0.5 text-xs text-brown-800/55">
-                                  {item.amount_label || formatPaise(unit)}
-                                  {qty > 0 ? ` · ${qty} in cart` : ""}
-                                </div>
-                              </button>
-                            );
-                          })}
+                        <div>
+                          <Label htmlFor="food-quick-add-select" className="text-xs text-brown-800/55">Quick add</Label>
+                          <Select
+                            id="food-quick-add-select"
+                            data-testid="food-quick-add-select"
+                            value=""
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (!id) return;
+                              const item = filteredCatalogItems.find((i) => i.id === id)
+                                || catalogItems.find((i) => i.id === id);
+                              if (item) quickAddCatalogItem(item, 1);
+                            }}
+                          >
+                            <option value="">Choose item to add…</option>
+                            {filteredCatalogItems.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name || "Item"}
+                                {item.amount_label ? ` · ${item.amount_label}` : ""}
+                              </option>
+                            ))}
+                          </Select>
                         </div>
                       </div>
                     )}
@@ -869,10 +862,14 @@ export default function Food() {
                     <div className="rounded-2xl border border-sun-400/30 bg-white p-8 text-center text-sm text-brown-800/55">
                       No menu items published yet. Check back soon.
                     </div>
+                  ) : filteredCatalogItems.length === 0 ? (
+                    <div className="rounded-2xl border border-sun-400/30 bg-white p-8 text-center text-sm text-brown-800/55">
+                      No items match this filter.
+                    </div>
                   ) : (
                     <div className="space-y-6" data-testid="food-catalog-grid">
                       {Object.entries(
-                        catalogItems.reduce((acc, item) => {
+                        filteredCatalogItems.reduce((acc, item) => {
                           const key = item.menu_date || item.day_code || "menu";
                           if (!acc[key]) acc[key] = [];
                           acc[key].push(item);
@@ -981,7 +978,6 @@ export default function Food() {
                                           value={qty}
                                           label={item.name}
                                           testId={`food-qty-${item.id}`}
-                                          quickAmounts={[2, 5]}
                                           onBump={(d) => bump(item.id, d)}
                                           onSet={(v) => setQty(item.id, v)}
                                         />
@@ -1005,32 +1001,54 @@ export default function Food() {
                         <h2 className="flex items-center gap-2 font-display text-2xl text-brown-900">
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Choose meals
                         </h2>
-                        <p className="mt-1 text-sm text-brown-800/60">Tap <span className="font-semibold">Add</span>, use +2 / +5 for quick multi-add, or add 1 of a meal for every day below.</p>
+                        <p className="mt-1 text-sm text-brown-800/60">Filter meals, or quick-add one type for every day.</p>
                       </div>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <span className="self-center text-xs text-brown-800/45">Quick add 1 for every day:</span>
-                      {[
-                        ["breakfast", "Breakfast"],
-                        ["lunch", "Lunch"],
-                        ["dinner", "Dinner"],
-                      ].map(([code, label]) => (
-                        <Button key={code} type="button" variant="subtle" size="sm" onClick={() => addOneOfMealAcrossDays(code)} data-testid={`food-quick-${code}`}>
-                          + {label}
-                        </Button>
-                      ))}
-                      {cartCount > 0 && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={clearCart}
-                          data-testid="food-reset-btn"
-                          className="ml-auto"
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2" data-testid="food-meal-quick-add">
+                      <div>
+                        <Label htmlFor="food-meal-filter" className="text-xs text-brown-800/55">Filter</Label>
+                        <Select
+                          id="food-meal-filter"
+                          data-testid="food-meal-filter"
+                          value={mealFilter}
+                          onChange={(e) => setMealFilter(e.target.value)}
                         >
-                          <Trash2 className="h-3.5 w-3.5" /> Reset cart
-                        </Button>
+                          <option value="all">All meals</option>
+                          <option value="breakfast">Breakfast</option>
+                          <option value="lunch">Lunch</option>
+                          <option value="dinner">Dinner</option>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="food-meal-quick-select" className="text-xs text-brown-800/55">Quick add</Label>
+                        <Select
+                          id="food-meal-quick-select"
+                          data-testid="food-meal-quick-select"
+                          value=""
+                          onChange={(e) => {
+                            const code = e.target.value;
+                            if (code) addOneOfMealAcrossDays(code);
+                          }}
+                        >
+                          <option value="">Add 1 for every day…</option>
+                          <option value="breakfast">Breakfast</option>
+                          <option value="lunch">Lunch</option>
+                          <option value="dinner">Dinner</option>
+                        </Select>
+                      </div>
+                      {cartCount > 0 && (
+                        <div className="sm:col-span-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={clearCart}
+                            data-testid="food-reset-btn"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Reset cart
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1044,7 +1062,9 @@ export default function Food() {
                         ) : null}
                       </div>
                       <ul className="divide-y divide-sun-400/15">
-                        {(day.meals || []).map((meal) => {
+                        {(day.meals || [])
+                          .filter((meal) => mealFilter === "all" || meal.code === mealFilter)
+                          .map((meal) => {
                           const key = lineKey(day.code, meal.code);
                           const qty = cart[key] || 0;
                           const Icon = MEAL_ICON[meal.code] || UtensilsCrossed;
@@ -1069,7 +1089,6 @@ export default function Food() {
                                 value={qty}
                                 label={`${day.label} ${meal.label}`}
                                 testId={`food-qty-${key}`}
-                                quickAmounts={[2, 5]}
                                 onBump={(d) => bump(key, d)}
                                 onSet={(v) => setQty(key, v)}
                               />

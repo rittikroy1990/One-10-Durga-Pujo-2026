@@ -304,7 +304,10 @@ export default function Faq() {
           <FaqItem q="How do committee members log in?" id="faq-committee-login">
             <p>
               Use <PageLink to="/admin/login">Committee login</PageLink> with your short User ID (for example{" "}
-              <code className="rounded bg-sky-50 px-1">apc</code>) and the shared committee password. This area
+              <code className="rounded bg-sky-50 px-1">apc</code>,{" "}
+              <code className="rounded bg-sky-50 px-1">arka</code>,{" "}
+              <code className="rounded bg-sky-50 px-1">suman</code>, or{" "}
+              <code className="rounded bg-sky-50 px-1">rittik</code>) and the shared committee password. This area
               is for EOC office bearers only.
             </p>
           </FaqItem>

@@ -95,25 +95,59 @@ function StepBar({ current, paymentEnabled }) {
   );
 }
 
-function QtyControl({ value, onBump, onSet, label, testId }) {
+function QtyControl({ value, onBump, onSet, label, testId, quickAmounts }) {
   const qty = value || 0;
+  const quick = Array.isArray(quickAmounts) ? quickAmounts.filter((n) => n > 0) : [];
   if (qty <= 0) {
     return (
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="min-h-11 min-w-[7.5rem] rounded-xl"
-        onClick={() => onBump(1)}
-        data-testid={testId ? `${testId}-add` : undefined}
-        aria-label={`Add ${label}`}
-      >
-        <Plus className="h-4 w-4" /> Add
-      </Button>
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {quick.map((n) => (
+          <Button
+            key={n}
+            type="button"
+            variant="subtle"
+            size="sm"
+            className="min-h-11 rounded-xl px-3"
+            onClick={() => onBump(n)}
+            data-testid={testId ? `${testId}-quick-${n}` : undefined}
+            aria-label={`Quick add ${n} ${label}`}
+          >
+            +{n}
+          </Button>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="min-h-11 min-w-[7.5rem] rounded-xl"
+          onClick={() => onBump(1)}
+          data-testid={testId ? `${testId}-add` : undefined}
+          aria-label={`Add ${label}`}
+        >
+          <Plus className="h-4 w-4" /> Add
+        </Button>
+      </div>
     );
   }
   return (
-    <div className="inline-flex items-center gap-1 rounded-xl border border-vermilion-500/40 bg-vermilion-500/5 p-1">
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      {quick.length > 0 && (
+        <div className="flex items-center gap-1">
+          {quick.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="grid h-10 min-w-10 place-items-center rounded-lg border border-sun-400/40 bg-sun-50 px-2 text-sm font-semibold text-brown-900 hover:border-vermilion-500/40 hover:bg-vermilion-500/10"
+              onClick={() => onBump(n)}
+              data-testid={testId ? `${testId}-quick-${n}` : undefined}
+              aria-label={`Quick add ${n} ${label}`}
+            >
+              +{n}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="inline-flex items-center gap-1 rounded-xl border border-vermilion-500/40 bg-vermilion-500/5 p-1">
       <button
         type="button"
         aria-label={`Remove one ${label}`}
@@ -142,7 +176,8 @@ function QtyControl({ value, onBump, onSet, label, testId }) {
       >
         <Plus className="h-4 w-4" />
       </button>
-    </div>
+      </div>
+      </div>
   );
 }
 
@@ -298,6 +333,13 @@ export default function Food() {
     if (Object.keys(cart).length === 0) return;
     setCart({});
     toast.message("Cart cleared");
+  };
+
+  const quickAddCatalogItem = (item, amount = 1) => {
+    if (!item?.id) return;
+    bump(item.id, amount);
+    const label = item.name || "item";
+    toast.success(amount === 1 ? `Added ${label}` : `Added ${amount}× ${label}`);
   };
 
   const addOneOfMealAcrossDays = (mealCode) => {
@@ -776,7 +818,7 @@ export default function Food() {
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Menu
                         </h2>
                         <p className="mt-1 text-sm text-brown-800/60">
-                          Browse the photo for each meal first, then add quantities. Your cart total updates instantly.
+                          Use <span className="font-semibold">Quick add</span> below, or open a card and tap +1 / +2 / Add.
                         </p>
                       </div>
                       {cartCount > 0 && (
@@ -785,6 +827,42 @@ export default function Food() {
                         </Button>
                       )}
                     </div>
+
+                    {catalogItems.length > 0 && (
+                      <div className="mt-4" data-testid="food-catalog-quick-add">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-brown-800/45">
+                          Quick add
+                        </div>
+                        <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+                          {catalogItems.map((item) => {
+                            const qty = cart[item.id] || 0;
+                            const unit = Number(item.amount_paise) || 0;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => quickAddCatalogItem(item, 1)}
+                                className={`shrink-0 rounded-xl border px-3 py-2 text-left transition ${
+                                  qty > 0
+                                    ? "border-vermilion-500/40 bg-vermilion-500/10"
+                                    : "border-sun-400/40 bg-sun-50 hover:border-vermilion-500/40 hover:bg-vermilion-500/5"
+                                }`}
+                                data-testid={`food-quick-add-${item.id}`}
+                                aria-label={`Quick add ${item.name || "item"}`}
+                              >
+                                <div className="max-w-[9.5rem] truncate text-sm font-semibold text-brown-900">
+                                  + {item.name || "Item"}
+                                </div>
+                                <div className="mt-0.5 text-xs text-brown-800/55">
+                                  {item.amount_label || formatPaise(unit)}
+                                  {qty > 0 ? ` · ${qty} in cart` : ""}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {catalogItems.length === 0 ? (
@@ -903,6 +981,7 @@ export default function Food() {
                                           value={qty}
                                           label={item.name}
                                           testId={`food-qty-${item.id}`}
+                                          quickAmounts={[2, 5]}
                                           onBump={(d) => bump(item.id, d)}
                                           onSet={(v) => setQty(item.id, v)}
                                         />

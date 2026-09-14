@@ -15,7 +15,7 @@ const LINKS = [
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
   { to: "/faq", label: "FAQ" },
-  { to: "/transparency", label: "Transparency" },
+  { to: "/transparency", label: "Pandal Meter" },
 ];
 
 export function PublicNav() {
@@ -105,7 +105,7 @@ export function PublicFooter() {
             <li><Link to="/sponsors" className="hover:text-ivory-100">Sponsorship</Link></li>
             <li><Link to="/participate" className="hover:text-ivory-100">Participate</Link></li>
             <li><Link to="/events" className="hover:text-ivory-100">Programme</Link></li>
-            <li><Link to="/transparency" className="hover:text-ivory-100">Public Transparency</Link></li>
+            <li><Link to="/transparency" className="hover:text-ivory-100">Digital Pandal Meter</Link></li>
           </ul>
         </div>
         <div>

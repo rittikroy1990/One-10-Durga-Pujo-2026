@@ -7,11 +7,19 @@ import {
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
-import { Button, Input, Label, Select, Spinner } from "../../components/ui";
+import { Button, Input, Label, Select, Spinner, Dialog } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
 const ALLOWED_MEALS = new Set(["breakfast", "lunch", "dinner"]);
 const MAX_QTY = 50;
+
+/** Split comma / semicolon menu write-ups into clean dish lines. */
+function parseMenuDishes(text) {
+  return String(text || "")
+    .split(/[,;•|]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 const MEAL_ICON = {
   breakfast: Coffee,
@@ -151,6 +159,7 @@ export default function Food() {
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
   const [cart, setCart] = useState({});
+  const [menuDetail, setMenuDetail] = useState(null);
   const [form, setForm] = useState({
     name: "",
     mobile: "",
@@ -867,10 +876,20 @@ export default function Food() {
                                       </div>
                                     </div>
                                     <div className="p-4 sm:p-5">
-                                      <h3 className="font-display text-2xl text-brown-900">{item.name}</h3>
-                                      {item.description ? (
-                                        <p className="mt-1.5 text-sm leading-relaxed text-brown-800/70">{item.description}</p>
-                                      ) : null}
+                                      <div className="flex items-start justify-between gap-2">
+                                        <h3 className="font-display text-2xl text-brown-900">{item.name}</h3>
+                                        {item.description ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setMenuDetail(item)}
+                                            className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-sun-400/40 bg-sun-50 text-vermilion-600 transition hover:border-vermilion-500/50 hover:bg-vermilion-500/10"
+                                            aria-label={`View full menu for ${item.name}`}
+                                            data-testid={`food-menu-info-${item.id}`}
+                                          >
+                                            <Info className="h-4 w-4" />
+                                          </button>
+                                        ) : null}
+                                      </div>
                                       {item.complimentary_note || item.price_note ? (
                                         <p className="mt-2 text-xs leading-relaxed text-amber-900/80">
                                           {item.complimentary_note || item.price_note}
@@ -1042,6 +1061,58 @@ export default function Food() {
           </div>
         </div>
       )}
+
+      <Dialog
+        open={!!menuDetail}
+        onClose={() => setMenuDetail(null)}
+        title={menuDetail?.name || "Full menu"}
+        size="md"
+        footer={
+          <Button type="button" variant="primary" onClick={() => setMenuDetail(null)} data-testid="food-menu-info-close">
+            Close
+          </Button>
+        }
+      >
+        {menuDetail ? (
+          <div className="space-y-4" data-testid="food-menu-info-dialog">
+            <div className="flex flex-wrap gap-2 text-xs">
+              {(menuDetail.category_label || menuDetail.category) ? (
+                <span className="rounded-full bg-sun-50 px-2.5 py-1 font-semibold uppercase tracking-wide text-brown-800/70">
+                  {menuDetail.category_label || menuDetail.category}
+                </span>
+              ) : null}
+              {menuDetail.diet_label ? (
+                <span className={`rounded-full px-2.5 py-1 font-semibold uppercase tracking-wide ${
+                  menuDetail.diet === "veg" ? "bg-emerald-100 text-emerald-800" : "bg-vermilion-100 text-vermilion-700"
+                }`}>
+                  {menuDetail.diet_label}
+                </span>
+              ) : null}
+              {menuDetail.day_label || menuDetail.menu_date ? (
+                <span className="rounded-full bg-brown-800/5 px-2.5 py-1 font-medium text-brown-800/60">
+                  {menuDetail.day_label || menuDetail.menu_date}
+                </span>
+              ) : null}
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">What’s included</p>
+              <ul className="mt-2 space-y-2">
+                {parseMenuDishes(menuDetail.description).map((dish) => (
+                  <li key={dish} className="flex items-start gap-2.5 text-sm text-brown-900">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-vermilion-500" />
+                    <span>{dish}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {(menuDetail.complimentary_note || menuDetail.price_note) ? (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900/85">
+                {menuDetail.complimentary_note || menuDetail.price_note}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </Dialog>
 
     </PublicLayout>
   );

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { Upload, Link2, RefreshCw } from "lucide-react";
 import api from "../../lib/api";
-import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Stat, Label, Input, Spinner } from "../../components/ui";
+import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Stat, Label, Input } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
 export default function Reconciliation() {

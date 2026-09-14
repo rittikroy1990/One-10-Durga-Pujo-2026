@@ -244,11 +244,6 @@ function Refunds() {
       toast.success("Refund requested (awaiting convenor approval)"); setOpen(false); loadRefunds();
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not request refund"); }
   };
-  const approve = async (rid) => {
-    try { await api.post(`/refunds/${rid}/approve`, {}, { headers: { "X-Reauth": "true" } }); toast.success("Refund approved — credit note issued"); loadRefunds(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Could not approve"); }
-  };
-
   return (
     <div className="space-y-5">
       <Card><CardBody>

@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { HandHeart, Music, Loader2 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
-import { Button, Label, Input, Textarea, Select } from "../../components/ui";
+import { Button, Label, Input, Textarea } from "../../components/ui";
 
 export default function Participate() {
   const [kind, setKind] = useState("volunteer");

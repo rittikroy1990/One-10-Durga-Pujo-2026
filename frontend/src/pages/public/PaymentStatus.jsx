@@ -46,8 +46,11 @@ export default function PaymentStatus() {
               <h1 className="mt-3 font-display text-4xl">Receipt issued</h1>
               <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been recorded.</p>
               {data.bank_verified === false && (
-                <p className="mt-3 text-xs text-brown-800/55">
-                  Committee-recorded against your payment reference — not a bank settlement confirmation.
+                <p
+                  className="mt-2 text-sm font-semibold text-[#A85A2A]"
+                  data-testid="not-bank-verified-notice"
+                >
+                  Not bank verified
                 </p>
               )}
               <div className="mt-6 flex flex-wrap justify-center gap-3">

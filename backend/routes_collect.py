@@ -180,12 +180,8 @@ async def donate(body: DonateIn, request: Request):
         raise HTTPException(status_code=400, detail="Enter the donor full name.")
 
     donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
-    min_paise = int(sub.get("donation_min_paise") or 10000)  # default ₹100
-    if donation < min_paise:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Minimum donation is {fmt_inr(min_paise)}.",
-        )
+    if donation <= 0:
+        raise HTTPException(status_code=400, detail="Enter a donation amount greater than zero.")
 
     tower_name = ""
     flat_number = ""

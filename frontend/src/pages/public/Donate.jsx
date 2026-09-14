@@ -91,7 +91,6 @@ export default function Donate() {
 
   const selectedItems = useMemo(() => selected.map(findDonationItem).filter(Boolean), [selected]);
   const headsTotal = useMemo(() => selectedItems.reduce((s, i) => s + i.amount, 0), [selectedItems]);
-  const minPaise = cfg?.subscription?.donation_min_paise ?? 10000;
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
@@ -105,8 +104,8 @@ export default function Donate() {
 
   const continueFromHeads = () => {
     if (customMode) {
-      if (!(Number(form.donation_rupees) > 0) || donationPaise < minPaise) {
-        toast.error(`Enter an amount of at least ${formatPaise(minPaise)}.`);
+      if (!(Number(form.donation_rupees) > 0)) {
+        toast.error("Enter a donation amount greater than zero.");
         return;
       }
       set("notes", form.notes || "Custom voluntary donation");
@@ -142,11 +141,11 @@ export default function Donate() {
 
   const validDetails = useMemo(() => {
     if (!form.donor_name.trim() || !/^[6-9]\d{9}$/.test(form.mobile)) return false;
-    if (!(Number(form.donation_rupees) > 0) || donationPaise < minPaise) return false;
+    if (!(Number(form.donation_rupees) > 0)) return false;
     if (form.donor_type === "resident") return !!(form.tower_id && form.flat_id && form.occupancy_type);
     if (form.donor_type === "other") return true;
     return false;
-  }, [form, donationPaise, minPaise]);
+  }, [form, donationPaise]);
 
   const submit = async () => {
     if (!(form.accuracy_confirmed && form.privacy_consent && form.terms_consent)) {
@@ -282,10 +281,10 @@ export default function Donate() {
                     id="custom-amt"
                     data-testid="donate-custom-amount"
                     type="number"
-                    min={minPaise / 100}
+                    min="1"
                     value={form.donation_rupees}
                     onChange={(e) => set("donation_rupees", e.target.value)}
-                    placeholder={`Minimum ${formatPaise(minPaise)}`}
+                    placeholder="Any amount in ₹"
                     className="mt-1"
                   />
                   <div className="mt-4">
@@ -490,8 +489,8 @@ export default function Donate() {
 
                 <div className="sm:col-span-2">
                   <Label required htmlFor="damt">Donation amount (₹)</Label>
-                  <Input id="damt" data-testid="donate-amount" type="number" min={minPaise / 100} value={form.donation_rupees} onChange={(e) => set("donation_rupees", e.target.value)} />
-                  <p className="mt-1 text-xs text-[#5C3530]/50">Pre-filled from your selected heads. You can adjust if needed. Minimum {formatPaise(minPaise)}.</p>
+                  <Input id="damt" data-testid="donate-amount" type="number" min="1" value={form.donation_rupees} onChange={(e) => set("donation_rupees", e.target.value)} />
+                  <p className="mt-1 text-xs text-[#5C3530]/50">Pre-filled from your selected heads. You can adjust if needed.</p>
                 </div>
                 <div className="sm:col-span-2">
                   <Label htmlFor="dnotes">Note / heads covered</Label>

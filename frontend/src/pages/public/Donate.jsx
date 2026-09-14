@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, Heart, Loader2, Upload, QrCode, ExternalLink, Copy, ShieldCheck, Home, Users,
+  ArrowRight, ArrowLeft, Heart, Loader2, Upload, QrCode, ExternalLink, Copy,
+  ShieldCheck, Home, Users, Check, Sparkles, Flower2,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Label, Input, Select } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
+import { DONATION_HEADS, formatInr, findDonationItem } from "../../data/donationHeads";
 
 const OCCUPANCY = [
   { v: "owner_resident", l: "Owner — Resident" },
@@ -17,19 +19,46 @@ const OCCUPANCY = [
   { v: "other", l: "Other" },
 ];
 
-const SUGGESTED = [501, 1100, 2100, 5100, 11000];
+const STEPS = ["Choose", "Who", "Details", "Confirm", "Pay"];
+
+function SelectionSummary({ customMode, items, total, onEdit }) {
+  return (
+    <div className="rounded-2xl border border-[#D4AF37]/35 bg-gradient-to-r from-[#FFF8F0] to-[#F6E8E4] px-5 py-4 text-[#3A1518]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-[#5C3530]/50">Your selection</div>
+          <div className="font-display text-3xl text-[#7A1F2B]">{formatInr(total || 0)}</div>
+          {customMode ? (
+            <p className="mt-1 text-sm text-[#5C3530]/65">Custom voluntary donation</p>
+          ) : (
+            <ul className="mt-2 space-y-0.5 text-sm text-[#5C3530]/75">
+              {items.map((i) => (
+                <li key={i.id}>{i.label} — {formatInr(i.amount)}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <button type="button" onClick={onEdit} className="text-sm font-semibold text-[#C0392B] underline underline-offset-2">
+          Edit heads
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function Donate() {
   const navigate = useNavigate();
   const [cfg, setCfg] = useState(null);
   const [towers, setTowers] = useState([]);
   const [flats, setFlats] = useState([]);
-  const [step, setStep] = useState(0); // 0=type, 1=details, 2=confirm, 3=pay
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [intent, setIntent] = useState(null);
   const [upiSession, setUpiSession] = useState(null);
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
+  const [selected, setSelected] = useState([]);
+  const [customMode, setCustomMode] = useState(false);
 
   const [form, setForm] = useState({
     donor_type: "",
@@ -55,16 +84,43 @@ export default function Donate() {
     api.get("/towers").then((r) => setTowers(r.data.items || [])).catch(() => {});
   }, []);
   useEffect(() => {
-    if (form.tower_id) api.get(`/towers/${form.tower_id}/flats`).then((r) => setFlats(r.data.items || [])).catch(() => setFlats([]));
-    else setFlats([]);
+    if (form.tower_id) {
+      api.get(`/towers/${form.tower_id}/flats`).then((r) => setFlats(r.data.items || [])).catch(() => setFlats([]));
+    } else setFlats([]);
   }, [form.tower_id]);
 
+  const selectedItems = useMemo(() => selected.map(findDonationItem).filter(Boolean), [selected]);
+  const headsTotal = useMemo(() => selectedItems.reduce((s, i) => s + i.amount, 0), [selectedItems]);
   const minPaise = cfg?.subscription?.donation_min_paise ?? 10000;
   const donationPaise = Math.max(0, Math.round(Number(form.donation_rupees || 0) * 100));
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
   const appLinks = pay?.upi_app_links || {};
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
+
+  const toggleItem = (id) => {
+    setCustomMode(false);
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const continueFromHeads = () => {
+    if (customMode) {
+      if (!(Number(form.donation_rupees) > 0) || donationPaise < minPaise) {
+        toast.error(`Enter an amount of at least ${formatPaise(minPaise)}.`);
+        return;
+      }
+      set("notes", form.notes || "Custom voluntary donation");
+      setStep(1);
+      return;
+    }
+    if (!selectedItems.length) {
+      toast.error("Pick one or more donation heads, or choose a custom amount.");
+      return;
+    }
+    set("donation_rupees", String(headsTotal));
+    set("notes", selectedItems.map((i) => `${i.label} (${formatInr(i.amount)})`).join("; "));
+    setStep(1);
+  };
 
   const copyText = async (text, label) => {
     try {
@@ -99,14 +155,11 @@ export default function Donate() {
     }
     setBusy(true);
     try {
-      const r = await api.post("/donate", {
-        ...form,
-        donation_rupees: Number(form.donation_rupees),
-      });
+      const r = await api.post("/donate", { ...form, donation_rupees: Number(form.donation_rupees) });
       setIntent(r.data);
       const s = await api.get("/payments/upi/session", { params: { intent_id: r.data.intent_id } });
       setUpiSession(s.data);
-      setStep(3);
+      setStep(4);
     } catch (e) {
       const d = e?.response?.data?.detail;
       toast.error(typeof d === "string" ? d : "Could not start donation. Please check your details.");
@@ -144,185 +197,341 @@ export default function Donate() {
     }
   };
 
-  const stepLabels = form.donor_type === "resident"
-    ? ["Who", "Details", "Confirm", "Pay"]
-    : ["Who", "Details", "Confirm", "Pay"];
-
   return (
     <PublicLayout>
-      <div className="mx-auto max-w-3xl px-5 pb-16 pt-24 sm:pt-28">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-vermilion-500">Voluntary contribution</p>
-        <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">Donate</h1>
-        <p className="mt-3 max-w-2xl text-brown-800/75">
-          Support One 10 Durgotsav 2026 with a voluntary donation — separate from the family subscription.
-          {cfg?.campaign?.title ? ` Active campaign: ${cfg.campaign.title}.` : ""}
-        </p>
-        <p className="mt-2 text-sm text-brown-800/60">
-          Looking for the ₹3,500 family subscription?{" "}
-          <Link to="/subscribe" className="font-semibold text-vermilion-600 underline">Subscribe &amp; Pay</Link>
-        </p>
-
-        {step > 0 && (
-          <div className="mt-6 flex flex-wrap items-center gap-2 text-xs">
-            {stepLabels.map((s, i) => (
-              <div key={s} className={`flex items-center gap-2 ${step >= i ? "text-vermilion-600" : "text-brown-800/35"}`}>
-                <span className={`grid h-6 w-6 place-items-center rounded-full border ${step >= i ? "border-vermilion-500 bg-vermilion-500/10" : "border-brown-800/20"}`}>{i + 1}</span>
-                {s}{i < stepLabels.length - 1 && <span className="mx-1 h-px w-6 bg-brown-800/15" />}
-              </div>
-            ))}
-          </div>
-        )}
-
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mt-8 rounded-2xl border border-sun-400/35 bg-white p-6 text-brown-900 shadow-sm"
-        >
-          {step === 0 && (
-            <div className="space-y-4" data-testid="donate-type-step">
-              <h2 className="font-display text-2xl">Are you a One 10 resident?</h2>
-              <p className="text-sm text-brown-800/65">
-                Residents get tower &amp; flat details so we can link your gift to your household. Others follow a simpler donor form.
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  data-testid="donate-type-resident"
-                  onClick={() => { set("donor_type", "resident"); setStep(1); }}
-                  className="rounded-2xl border border-sun-400/40 bg-sky-50/80 p-5 text-left transition hover:border-vermilion-500/50 hover:bg-sun-50"
-                >
-                  <Home className="h-6 w-6 text-vermilion-500" />
-                  <div className="mt-3 font-display text-xl">Yes — One 10 resident</div>
-                  <p className="mt-1 text-sm text-brown-800/60">Tower / flat dropdowns &amp; occupancy</p>
-                </button>
-                <button
-                  type="button"
-                  data-testid="donate-type-other"
-                  onClick={() => { set("donor_type", "other"); setStep(1); }}
-                  className="rounded-2xl border border-sun-400/40 bg-sky-50/80 p-5 text-left transition hover:border-vermilion-500/50 hover:bg-sun-50"
-                >
-                  <Users className="h-6 w-6 text-vermilion-500" />
-                  <div className="mt-3 font-display text-xl">No — other donor</div>
-                  <p className="mt-1 text-sm text-brown-800/60">Friends, family, brands &amp; well-wishers</p>
-                </button>
-              </div>
+      <section className="relative overflow-hidden border-b border-[#7A1F2B]/25">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse 80% 60% at 15% 20%, rgba(212,175,55,0.22), transparent 55%), radial-gradient(ellipse 70% 50% at 90% 10%, rgba(192,57,43,0.16), transparent 50%), linear-gradient(165deg, #FFF8F0 0%, #F3E6D8 45%, #EDE0D0 100%)",
+          }}
+        />
+        <div className="relative mx-auto max-w-6xl px-5 pb-12 pt-28 sm:pt-32">
+          <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}>
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#7A1F2B]/20 bg-white/55 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#7A1F2B] backdrop-blur">
+              <Flower2 className="h-3.5 w-3.5" /> One 10 Durgotsav 2026
             </div>
+            <h1 className="mt-4 max-w-3xl font-display text-5xl leading-[1.05] text-[#3A1518] sm:text-6xl md:text-7xl">
+              Donation Heads
+            </h1>
+            <p className="mt-4 max-w-2xl text-lg text-[#5C3530]/85 sm:text-xl">
+              Small contributions make a grander celebration. Choose a puja head — or several — and pay via the committee UPI QR.
+            </p>
+            <p className="mt-3 text-sm text-[#5C3530]/60">
+              Separate from the{" "}
+              <Link to="/subscribe" className="font-semibold text-[#C0392B] underline decoration-[#C0392B]/30 underline-offset-2">
+                family subscription
+              </Link>
+              . Looking for brand packages?{" "}
+              <Link to="/sponsors" className="font-semibold text-[#C0392B] underline decoration-[#C0392B]/30 underline-offset-2">
+                Sponsorship
+              </Link>
+              .
+            </p>
+          </motion.div>
+        </div>
+      </section>
+
+      <div className={`mx-auto max-w-6xl px-5 pt-8 ${step === 0 ? "pb-32" : "pb-20"}`}>
+        <div className="mb-8 flex flex-wrap items-center gap-2 text-xs">
+          {STEPS.map((label, i) => (
+            <div key={label} className={`flex items-center gap-2 ${step >= i ? "text-[#F3D9A4]" : "text-ivory-100/35"}`}>
+              <span className={`grid h-6 w-6 place-items-center rounded-full border text-[11px] font-semibold ${step >= i ? "border-[#D4AF37] bg-[#D4AF37]/15 text-[#F8E7B8]" : "border-ivory-100/20"}`}>
+                {i + 1}
+              </span>
+              {label}
+              {i < STEPS.length - 1 && <span className="mx-1 h-px w-5 bg-ivory-100/15" />}
+            </div>
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          {step === 0 && (
+            <motion.div key="heads" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} data-testid="donate-heads-step">
+              <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-3xl text-ivory-100">Pick what you&apos;d like to support</h2>
+                  <p className="mt-1 text-sm text-ivory-100/65">
+                    Tap items to add them. Totals update instantly. You can also enter a custom amount.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="donate-custom-toggle"
+                  onClick={() => {
+                    setCustomMode((v) => {
+                      if (!v) setSelected([]);
+                      return !v;
+                    });
+                  }}
+                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                    customMode
+                      ? "border-vermilion-500 bg-vermilion-500 text-ivory-100"
+                      : "border-[#D4AF37]/40 bg-[#D4AF37]/10 text-[#F3D9A4] hover:border-[#D4AF37]/70"
+                  }`}
+                >
+                  {customMode ? "Using custom amount" : "Or enter a custom amount"}
+                </button>
+              </div>
+
+              {customMode ? (
+                <div className="mx-auto max-w-xl rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0] p-6 text-[#3A1518] shadow-sm">
+                  <Label required htmlFor="custom-amt">Custom donation (₹)</Label>
+                  <Input
+                    id="custom-amt"
+                    data-testid="donate-custom-amount"
+                    type="number"
+                    min={minPaise / 100}
+                    value={form.donation_rupees}
+                    onChange={(e) => set("donation_rupees", e.target.value)}
+                    placeholder={`Minimum ${formatPaise(minPaise)}`}
+                    className="mt-1"
+                  />
+                  <div className="mt-4">
+                    <Label htmlFor="custom-note">Note (optional)</Label>
+                    <Input
+                      id="custom-note"
+                      data-testid="donate-custom-note"
+                      value={form.notes}
+                      onChange={(e) => set("notes", e.target.value)}
+                      placeholder="e.g. In memory of…"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {DONATION_HEADS.map((cat, idx) => (
+                    <motion.section
+                      key={cat.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.04, duration: 0.4 }}
+                      className="overflow-hidden rounded-2xl border border-black/5 bg-[#FFF8F0] text-[#3A1518] shadow-[0_12px_40px_-24px_rgba(0,0,0,0.55)]"
+                      style={{ borderTop: `3px solid ${cat.accent}` }}
+                      data-testid={`donate-cat-${cat.id}`}
+                    >
+                      <div
+                        className="flex items-start justify-between gap-3 px-5 py-4"
+                        style={{ background: `linear-gradient(120deg, ${cat.soft}, transparent 70%)` }}
+                      >
+                        <div>
+                          <h3 className="font-display text-2xl tracking-tight" style={{ color: cat.accent }}>{cat.title}</h3>
+                          <p className="mt-0.5 text-xs uppercase tracking-[0.18em] text-[#5C3530]/50">{cat.subtitle}</p>
+                        </div>
+                        <Sparkles className="mt-1 h-4 w-4 opacity-40" style={{ color: cat.accent }} />
+                      </div>
+                      <ul className="divide-y divide-[#5C3530]/10 px-2 pb-2">
+                        {cat.items.map((item) => {
+                          const on = selected.includes(item.id);
+                          return (
+                            <li key={item.id}>
+                              <button
+                                type="button"
+                                data-testid={`donate-item-${item.id}`}
+                                onClick={() => toggleItem(item.id)}
+                                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition ${on ? "bg-[#7A1F2B]/06" : "hover:bg-black/[0.02]"}`}
+                              >
+                                <span className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border transition ${on ? "border-[#7A1F2B] bg-[#7A1F2B] text-white" : "border-[#5C3530]/25 bg-white text-transparent"}`}>
+                                  <Check className="h-3 w-3" strokeWidth={3} />
+                                </span>
+                                <span className={`min-w-0 flex-1 text-[15px] font-semibold leading-snug ${on ? "text-[#3A1518]" : "text-[#2A1215]"}`}>
+                                  {item.label}
+                                </span>
+                                <span
+                                  className="shrink-0 font-display text-xl font-semibold tabular-nums"
+                                  style={{ color: on ? cat.accent : "#3A1518" }}
+                                >
+                                  {formatInr(item.amount)}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </motion.section>
+                  ))}
+                </div>
+              )}
+
+              <details className="mt-10 group">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-[#F3D9A4]/90">
+                  <span className="underline decoration-[#D4AF37]/40 underline-offset-4 group-open:no-underline">
+                    View original committee flyer
+                  </span>
+                </summary>
+                <div className="mt-4 overflow-hidden rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0]/90 p-2">
+                  <img
+                    src="/images/donation-heads-flyer.jpg"
+                    alt="One 10 Durgotsav 2026 donation heads flyer"
+                    className="mx-auto max-h-[70vh] w-auto rounded-xl object-contain"
+                  />
+                </div>
+              </details>
+
+              <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#7A1F2B]/20 bg-[#2A1410]/95 backdrop-blur-md">
+                <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#F3D9A4]/70">Selected total</div>
+                    <div className="font-display text-3xl font-semibold text-[#F8E7B8]" data-testid="donate-heads-total">
+                      {customMode ? (form.donation_rupees ? formatInr(Number(form.donation_rupees)) : "—") : formatInr(headsTotal)}
+                    </div>
+                    {!customMode && selectedItems.length > 0 && (
+                      <div className="mt-0.5 max-w-md truncate text-xs font-medium text-ivory-100/70">
+                        {selectedItems.length} head{selectedItems.length > 1 ? "s" : ""} · {selectedItems.map((i) => i.label).join(", ")}
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    data-testid="donate-heads-continue"
+                    onClick={continueFromHeads}
+                    disabled={customMode ? !(Number(form.donation_rupees) > 0) : selectedItems.length === 0}
+                  >
+                    Continue <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
           )}
 
           {step === 1 && (
-            <div className="grid gap-4 sm:grid-cols-2" data-testid="donate-details-step">
-              <div className="sm:col-span-2 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="font-display text-2xl">Donor details</h2>
-                  <p className="text-sm text-brown-800/60">
-                    {form.donor_type === "resident" ? "One 10 resident flow" : "Non-resident / other donor flow"}
-                  </p>
+            <motion.div key="who" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mx-auto max-w-3xl" data-testid="donate-type-step">
+              <SelectionSummary customMode={customMode} items={selectedItems} total={Number(form.donation_rupees) || headsTotal} onEdit={() => setStep(0)} />
+              <div className="mt-6 rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0] p-6 text-[#3A1518] shadow-sm">
+                <h2 className="font-display text-2xl">Are you a One 10 resident?</h2>
+                <p className="mt-1 text-sm text-[#5C3530]/65">Residents share tower &amp; flat so we can link your gift to your household.</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <button type="button" data-testid="donate-type-resident" onClick={() => { set("donor_type", "resident"); setStep(2); }} className="rounded-2xl border border-[#7A1F2B]/15 bg-white p-5 text-left transition hover:border-[#C0392B]/40 hover:bg-[#FBF1E6]">
+                    <Home className="h-6 w-6 text-[#C0392B]" />
+                    <div className="mt-3 font-display text-xl">Yes — One 10 resident</div>
+                    <p className="mt-1 text-sm text-[#5C3530]/60">Tower / flat &amp; occupancy</p>
+                  </button>
+                  <button type="button" data-testid="donate-type-other" onClick={() => { set("donor_type", "other"); setStep(2); }} className="rounded-2xl border border-[#7A1F2B]/15 bg-white p-5 text-left transition hover:border-[#C0392B]/40 hover:bg-[#FBF1E6]">
+                    <Users className="h-6 w-6 text-[#C0392B]" />
+                    <div className="mt-3 font-display text-xl">No — other donor</div>
+                    <p className="mt-1 text-sm text-[#5C3530]/60">Friends, family &amp; well-wishers</p>
+                  </button>
                 </div>
-                <Button variant="subtle" size="sm" onClick={() => setStep(0)}>Change</Button>
+                <button type="button" className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-[#7A1F2B]" onClick={() => setStep(0)}>
+                  <ArrowLeft className="h-4 w-4" /> Back to donation heads
+                </button>
               </div>
-
-              <div className="sm:col-span-2">
-                <Label required htmlFor="dname">Full name</Label>
-                <Input id="dname" data-testid="donate-name" value={form.donor_name} onChange={(e) => set("donor_name", e.target.value)} placeholder="Donor name" />
-              </div>
-              <div>
-                <Label required htmlFor="dmobile">Mobile</Label>
-                <Input id="dmobile" data-testid="donate-mobile" value={form.mobile} onChange={(e) => set("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="10-digit Indian mobile" />
-              </div>
-              <div>
-                <Label htmlFor="demail">Email (optional)</Label>
-                <Input id="demail" data-testid="donate-email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="you@example.com" />
-              </div>
-
-              {form.donor_type === "resident" ? (
-                <>
-                  <div>
-                    <Label required htmlFor="dtower">Tower / Block</Label>
-                    <Select id="dtower" data-testid="donate-tower" value={form.tower_id} onChange={(e) => { set("tower_id", e.target.value); set("flat_id", ""); }}>
-                      <option value="">Select tower</option>
-                      {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </Select>
-                  </div>
-                  <div>
-                    <Label required htmlFor="dflat">Flat number</Label>
-                    <Select id="dflat" data-testid="donate-flat" value={form.flat_id} onChange={(e) => set("flat_id", e.target.value)} disabled={!form.tower_id}>
-                      <option value="">Select flat</option>
-                      {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
-                    </Select>
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Label required htmlFor="docc">Occupancy type</Label>
-                    <Select id="docc" data-testid="donate-occupancy" value={form.occupancy_type} onChange={(e) => set("occupancy_type", e.target.value)}>
-                      {OCCUPANCY.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-                    </Select>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div>
-                    <Label htmlFor="dcity">City (optional)</Label>
-                    <Input id="dcity" data-testid="donate-city" value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="e.g. Kolkata" />
-                  </div>
-                  <div>
-                    <Label htmlFor="dorg">Organisation (optional)</Label>
-                    <Input id="dorg" data-testid="donate-org" value={form.organisation} onChange={(e) => set("organisation", e.target.value)} placeholder="Company / group name" />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Label htmlFor="drel">Relation to One10 (optional)</Label>
-                    <Input id="drel" data-testid="donate-relation" value={form.relation_to_one10} onChange={(e) => set("relation_to_one10", e.target.value)} placeholder="e.g. Friend of Tower 5 resident" />
-                  </div>
-                </>
-              )}
-
-              <div className="sm:col-span-2">
-                <Label required htmlFor="damt">Donation amount (₹)</Label>
-                <div className="mb-2 flex flex-wrap gap-2">
-                  {SUGGESTED.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => set("donation_rupees", String(n))}
-                      className={`rounded-full border px-3 py-1.5 text-sm ${Number(form.donation_rupees) === n ? "border-vermilion-500 bg-vermilion-500/10 text-vermilion-600" : "border-brown-800/15 text-brown-800/70"}`}
-                    >
-                      ₹{n.toLocaleString("en-IN")}
-                    </button>
-                  ))}
-                </div>
-                <Input id="damt" data-testid="donate-amount" type="number" min={minPaise / 100} step="1" value={form.donation_rupees} onChange={(e) => set("donation_rupees", e.target.value)} placeholder={`Minimum ${formatPaise(minPaise)}`} />
-                <p className="mt-1 text-xs text-brown-800/50">Minimum {formatPaise(minPaise)}. This is a voluntary gift — not the family subscription.</p>
-              </div>
-
-              <div className="sm:col-span-2">
-                <Label htmlFor="dnotes">Note (optional)</Label>
-                <Input id="dnotes" data-testid="donate-notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Message for the committee" />
-              </div>
-
-              <div className="sm:col-span-2 flex justify-between">
-                <Button variant="subtle" onClick={() => setStep(0)}><ArrowLeft className="h-4 w-4" /> Back</Button>
-                <Button variant="primary" data-testid="donate-next-btn" disabled={!validDetails} onClick={() => setStep(2)}>
-                  Continue <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
+            </motion.div>
           )}
 
           {step === 2 && (
-            <div className="space-y-5" data-testid="donate-confirm-step">
-              <div className="rounded-xl border border-sun-400/35 bg-sky-50/80 p-4">
-                <div className="text-sm text-brown-800/60">You are donating</div>
-                <div className="font-display text-4xl text-vermilion-600" data-testid="donate-total">{formatPaise(donationPaise)}</div>
-                <div className="mt-3 space-y-1 text-sm text-brown-800/80">
-                  <div><span className="text-brown-800/50">Donor</span> · {form.donor_name}</div>
-                  <div><span className="text-brown-800/50">Mobile</span> · {form.mobile}</div>
+            <motion.div key="details" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mx-auto max-w-3xl rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0] p-6 text-[#3A1518] shadow-sm" data-testid="donate-details-step">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-2xl">Donor details</h2>
+                  <p className="text-sm text-[#5C3530]/60">
+                    {form.donor_type === "resident" ? "One 10 resident" : "Other donor"} · {formatInr(Number(form.donation_rupees) || 0)}
+                  </p>
+                </div>
+                <Button variant="subtle" size="sm" onClick={() => setStep(1)}>Change</Button>
+              </div>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <Label required htmlFor="dname">Full name</Label>
+                  <Input id="dname" data-testid="donate-name" value={form.donor_name} onChange={(e) => set("donor_name", e.target.value)} placeholder="Donor name" />
+                </div>
+                <div>
+                  <Label required htmlFor="dmobile">Mobile</Label>
+                  <Input id="dmobile" data-testid="donate-mobile" value={form.mobile} onChange={(e) => set("mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="10-digit Indian mobile" />
+                </div>
+                <div>
+                  <Label htmlFor="demail">Email (optional)</Label>
+                  <Input id="demail" data-testid="donate-email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="you@example.com" />
+                </div>
+
+                {form.donor_type === "resident" ? (
+                  <>
+                    <div>
+                      <Label required htmlFor="dtower">Tower / Block</Label>
+                      <Select id="dtower" data-testid="donate-tower" value={form.tower_id} onChange={(e) => { set("tower_id", e.target.value); set("flat_id", ""); }}>
+                        <option value="">Select tower</option>
+                        {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </Select>
+                    </div>
+                    <div>
+                      <Label required htmlFor="dflat">Flat number</Label>
+                      <Select id="dflat" data-testid="donate-flat" value={form.flat_id} onChange={(e) => set("flat_id", e.target.value)} disabled={!form.tower_id}>
+                        <option value="">Select flat</option>
+                        {flats.map((f) => <option key={f.id} value={f.id}>{f.number || f.name}</option>)}
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label required htmlFor="docc">Occupancy type</Label>
+                      <Select id="docc" data-testid="donate-occupancy" value={form.occupancy_type} onChange={(e) => set("occupancy_type", e.target.value)}>
+                        {OCCUPANCY.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </Select>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <Label htmlFor="dcity">City (optional)</Label>
+                      <Input id="dcity" data-testid="donate-city" value={form.city} onChange={(e) => set("city", e.target.value)} placeholder="e.g. Kolkata" />
+                    </div>
+                    <div>
+                      <Label htmlFor="dorg">Organisation (optional)</Label>
+                      <Input id="dorg" data-testid="donate-org" value={form.organisation} onChange={(e) => set("organisation", e.target.value)} placeholder="Company / group" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="drel">Relation to One 10 (optional)</Label>
+                      <Input id="drel" data-testid="donate-relation" value={form.relation_to_one10} onChange={(e) => set("relation_to_one10", e.target.value)} placeholder="e.g. Friend of Tower 5 resident" />
+                    </div>
+                  </>
+                )}
+
+                <div className="sm:col-span-2">
+                  <Label required htmlFor="damt">Donation amount (₹)</Label>
+                  <Input id="damt" data-testid="donate-amount" type="number" min={minPaise / 100} value={form.donation_rupees} onChange={(e) => set("donation_rupees", e.target.value)} />
+                  <p className="mt-1 text-xs text-[#5C3530]/50">Pre-filled from your selected heads. You can adjust if needed. Minimum {formatPaise(minPaise)}.</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="dnotes">Note / heads covered</Label>
+                  <Input id="dnotes" data-testid="donate-notes" value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-between">
+                <Button variant="subtle" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4" /> Back</Button>
+                <Button variant="primary" data-testid="donate-next-btn" disabled={!validDetails} onClick={() => setStep(3)}>
+                  Continue <ArrowRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
+          {step === 3 && (
+            <motion.div key="confirm" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mx-auto max-w-3xl space-y-5 rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0] p-6 text-[#3A1518] shadow-sm" data-testid="donate-confirm-step">
+              <div className="rounded-xl border border-[#D4AF37]/35 bg-white p-4">
+                <div className="text-sm text-[#5C3530]/60">You are donating</div>
+                <div className="font-display text-4xl text-[#C0392B]" data-testid="donate-total">{formatPaise(donationPaise)}</div>
+                {selectedItems.length > 0 && !customMode && (
+                  <ul className="mt-3 space-y-1 text-sm text-[#5C3530]/80">
+                    {selectedItems.map((i) => (
+                      <li key={i.id} className="flex justify-between gap-3">
+                        <span>{i.label}</span>
+                        <span className="tabular-nums">{formatInr(i.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 space-y-1 border-t border-[#7A1F2B]/10 pt-3 text-sm text-[#5C3530]/80">
+                  <div><span className="text-[#5C3530]/50">Donor</span> · {form.donor_name}</div>
+                  <div><span className="text-[#5C3530]/50">Mobile</span> · {form.mobile}</div>
                   {form.donor_type === "resident" ? (
                     <div>
-                      <span className="text-brown-800/50">Flat</span> ·{" "}
-                      {towers.find((t) => t.id === form.tower_id)?.name || form.tower_id} /{" "}
-                      {flats.find((f) => f.id === form.flat_id)?.number || form.flat_id}
+                      <span className="text-[#5C3530]/50">Flat</span> · {towers.find((t) => t.id === form.tower_id)?.name || form.tower_id} / {flats.find((f) => f.id === form.flat_id)?.number || flats.find((f) => f.id === form.flat_id)?.name || form.flat_id}
                     </div>
                   ) : (
-                    <div><span className="text-brown-800/50">Type</span> · Other / non-resident donor</div>
+                    <div><span className="text-[#5C3530]/50">Type</span> · Other / non-resident donor</div>
                   )}
                 </div>
               </div>
@@ -333,42 +542,42 @@ export default function Donate() {
               </label>
               <label className="flex items-start gap-2.5 text-sm">
                 <input type="checkbox" data-testid="donate-privacy" checked={form.privacy_consent} onChange={(e) => set("privacy_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I consent to the <a href="/privacy" className="text-vermilion-600 underline">Privacy Policy</a>.
+                I consent to the <a href="/privacy" className="text-[#C0392B] underline">Privacy Policy</a>.
               </label>
               <label className="flex items-start gap-2.5 text-sm">
                 <input type="checkbox" data-testid="donate-terms" checked={form.terms_consent} onChange={(e) => set("terms_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I agree to the <a href="/terms" className="text-vermilion-600 underline">payment terms</a>.
+                I agree to the <a href="/terms" className="text-[#C0392B] underline">payment terms</a>.
               </label>
 
               <div className="flex justify-between">
-                <Button variant="subtle" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4" /> Back</Button>
+                <Button variant="subtle" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4" /> Back</Button>
                 <Button variant="primary" data-testid="donate-submit-btn" onClick={submit} disabled={busy}>
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Heart className="h-4 w-4" />} Proceed to pay
                 </Button>
               </div>
-            </div>
+            </motion.div>
           )}
 
-          {step === 3 && upiSession && (
-            <div className="space-y-5" data-testid="donate-pay-step">
+          {step === 4 && upiSession && (
+            <motion.div key="pay" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mx-auto max-w-3xl space-y-5 rounded-2xl border border-[#D4AF37]/25 bg-[#FFF8F0] p-6 text-[#3A1518] shadow-sm" data-testid="donate-pay-step">
               <div className="text-center">
-                <div className="font-display text-3xl">Pay your donation</div>
-                <div className="mt-1 text-brown-800/70">
-                  Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
+                <div className="font-display text-3xl">Pay via UPI QR</div>
+                <div className="mt-1 text-[#5C3530]/70">
+                  Amount: <span className="font-semibold text-[#C0392B]">{formatPaise(upiSession.total_amount)}</span>
                 </div>
               </div>
 
               <div className="grid gap-5 sm:grid-cols-2">
-                <div className="flex flex-col items-center rounded-xl border border-sun-400/35 bg-sky-50/50 p-4">
-                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or open UPI app
+                <div className="flex flex-col items-center rounded-xl border border-[#D4AF37]/35 bg-white p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+                    <QrCode className="h-4 w-4 text-[#C0392B]" /> Scan or open UPI app
                   </div>
                   {pay?.upi_intent_url ? (
                     <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
-                      <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
+                      <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-[#5C3530]/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
                     </a>
                   ) : (
-                    <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
+                    <img src={staticQr} alt="Donation UPI QR" className="h-48 w-48 rounded-lg border border-[#5C3530]/10 bg-white object-contain p-1" data-testid="donate-qr-img" />
                   )}
                   <div className="mt-3 grid w-full grid-cols-2 gap-2">
                     {[
@@ -384,32 +593,32 @@ export default function Donate() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-sun-400/35 bg-white p-4 text-sm">
-                  <div className="font-semibold text-brown-900">Bank / net banking</div>
-                  <div className="mt-3 space-y-2 text-brown-800/80">
+                <div className="rounded-xl border border-[#D4AF37]/35 bg-white p-4 text-sm">
+                  <div className="font-semibold">Bank / net banking</div>
+                  <div className="mt-3 space-y-2 text-[#5C3530]/80">
                     <div>{bank?.account_name || "ONE 10 EVENT ORGANISING COMMITTEE"}</div>
                     <div className="flex items-center justify-between gap-2">
                       <span>A/C {bank?.account_number || "572205000037"}</span>
-                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.account_number || "572205000037", "Account number")} aria-label="Copy account"><Copy className="h-4 w-4" /></button>
+                      <button type="button" className="text-[#C0392B]" onClick={() => copyText(bank?.account_number || "572205000037", "Account number")} aria-label="Copy account"><Copy className="h-4 w-4" /></button>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span>IFSC {bank?.ifsc || "ICIC0005722"}</span>
-                      <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.ifsc || "ICIC0005722", "IFSC")} aria-label="Copy IFSC"><Copy className="h-4 w-4" /></button>
+                      <button type="button" className="text-[#C0392B]" onClick={() => copyText(bank?.ifsc || "ICIC0005722", "IFSC")} aria-label="Copy IFSC"><Copy className="h-4 w-4" /></button>
                     </div>
                     <div>{bank?.bank || "ICICI Bank"}</div>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-4 rounded-xl border border-brown-800/10 bg-sky-50/40 p-4">
+              <div className="space-y-4 rounded-xl border border-[#5C3530]/10 bg-white/80 p-4">
                 <div>
                   <Label required htmlFor="dref">UTR / UPI reference number</Label>
                   <Input id="dref" data-testid="donate-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="e.g. 312345678901" />
                 </div>
                 <div>
                   <Label required htmlFor="dshot">Payment screenshot</Label>
-                  <label htmlFor="dshot" className="mt-1 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brown-800/25 bg-white px-4 py-6 text-center hover:border-vermilion-500/50">
-                    <Upload className="h-6 w-6 text-vermilion-500" />
+                  <label htmlFor="dshot" className="mt-1 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-[#5C3530]/25 bg-[#FFF8F0] px-4 py-6 text-center hover:border-[#C0392B]/50">
+                    <Upload className="h-6 w-6 text-[#C0392B]" />
                     <span className="mt-2 text-sm font-medium">{screenshot ? screenshot.name : "Tap to upload PNG / JPG"}</span>
                     <input id="dshot" data-testid="donate-screenshot" type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => setScreenshot(e.target.files?.[0] || null)} />
                   </label>
@@ -417,21 +626,21 @@ export default function Donate() {
                 <Button variant="primary" size="lg" className="w-full" data-testid="donate-upload-btn" onClick={submitProof} disabled={busy}>
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Upload & get receipt"}
                 </Button>
-                <p className="flex items-start justify-center gap-2 text-xs text-brown-800/55">
+                <p className="flex items-start justify-center gap-2 text-xs text-[#5C3530]/55">
                   <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                   Receipt is committee-recorded against your reference.
                 </p>
               </div>
-            </div>
+            </motion.div>
           )}
 
-          {step === 3 && !upiSession && (
-            <div className="space-y-3 text-center text-sm text-brown-800/70">
+          {step === 4 && !upiSession && (
+            <div className="mx-auto max-w-3xl space-y-3 text-center text-sm text-ivory-100/70">
               <p>Could not start donation payment. Please go back and try again.</p>
-              <Button variant="subtle" onClick={() => setStep(2)}><ArrowLeft className="h-4 w-4" /> Back</Button>
+              <Button variant="subtle" onClick={() => setStep(3)}><ArrowLeft className="h-4 w-4" /> Back</Button>
             </div>
           )}
-        </motion.div>
+        </AnimatePresence>
       </div>
     </PublicLayout>
   );

@@ -614,6 +614,38 @@ async def payment_status(token: str):
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,
     }
+    donation_receipt = None
+    if receipt and receipt.get("linked_donation_receipt_id"):
+        donation_receipt = await db.receipts.find_one(
+            {"id": receipt["linked_donation_receipt_id"]}, {"_id": 0}
+        )
+    elif submission and submission.get("donation_receipt_id"):
+        donation_receipt = await db.receipts.find_one(
+            {"id": submission["donation_receipt_id"]}, {"_id": 0}
+        )
+    if donation_receipt:
+        payload["donation_receipt_no"] = donation_receipt.get("receipt_no")
+        payload["donation_verify_token"] = donation_receipt.get("verify_token")
+        payload["donation_receipt_amount"] = donation_receipt.get("total_amount")
+        payload["receipts"] = [
+            {
+                "kind": receipt.get("kind") if receipt else "subscription",
+                "receipt_no": receipt.get("receipt_no") if receipt else None,
+                "verify_token": receipt.get("verify_token") if receipt else None,
+                "amount": receipt.get("total_amount") if receipt else None,
+            },
+            {
+                "kind": "donation",
+                "receipt_no": donation_receipt.get("receipt_no"),
+                "verify_token": donation_receipt.get("verify_token"),
+                "amount": donation_receipt.get("total_amount"),
+            },
+        ]
+        if status == "paid" and receipt:
+            payload["message"] = (
+                f"Subscription receipt {receipt.get('receipt_no')} and donation receipt "
+                f"{donation_receipt.get('receipt_no')} issued."
+            )
     if residual_payment:
         payload["residual_amount"] = due
         payload["residual_amount_fmt"] = fmt_inr(due)
@@ -741,6 +773,71 @@ async def upi_qr_png(intent_id: str):
         raise HTTPException(status_code=404, detail="Dynamic UPI QR not configured.")
     from docs import qr_png
     return Response(content=qr_png(qr_source, box=6), media_type="image/png")
+
+
+
+async def _insert_upi_payment(*, intent_id: str, provider_payment_id: str, amount_paise: int,
+                              proof_doc_id: str | None, kind: str) -> None:
+    """Record a captured UPI payment row (unique on provider + provider_payment_id)."""
+    await db.payments.insert_one({
+        "id": new_id("pay"),
+        "provider": "upi_qr",
+        "provider_payment_id": provider_payment_id,
+        "intent_id": intent_id,
+        "amount": int(amount_paise),
+        "currency": "INR",
+        "status": "captured",
+        "bank_verified": False,
+        "kind": kind,
+        "proof_doc_id": proof_doc_id,
+        "created_at": iso(),
+    })
+
+
+async def _mark_screenshot_receipt(receipt: dict | None, *, proof_doc_id: str | None) -> dict | None:
+    if not receipt:
+        return receipt
+    await db.receipts.update_one(
+        {"id": receipt["id"]},
+        {"$set": {
+            "bank_verified": False,
+            "issuance_source": "payment_screenshot",
+            "verification_level": "committee_recorded",
+            "proof_doc_id": proof_doc_id,
+        }},
+    )
+    receipt = dict(receipt)
+    receipt["bank_verified"] = False
+    receipt["issuance_source"] = "payment_screenshot"
+    return receipt
+
+
+async def _create_linked_donation_intent(*, parent_intent: dict, donation_paise: int,
+                                         source_ref: str) -> dict:
+    """Sibling donation intent on the same household for subscribe overpayment."""
+    don_intent = {
+        "id": new_id("intent"),
+        "cycle_id": parent_intent.get("cycle_id"),
+        "household_id": parent_intent.get("household_id"),
+        "kind": "donation",
+        "donor_type": "resident",
+        "base_amount": 0,
+        "donation_amount": int(donation_paise),
+        "total_amount": int(donation_paise),
+        "components": [],
+        "payer_is_member": True,
+        "payer_name": parent_intent.get("payer_name") or "",
+        "payer_mobile": parent_intent.get("payer_mobile") or "",
+        "payer_relationship": "donor",
+        "status": "payment_pending",
+        "method": "upi_qr",
+        "notes": f"Auto-split from subscription overpayment (UTR {source_ref})",
+        "linked_subscription_intent_id": parent_intent.get("id"),
+        "source_upi_ref": source_ref,
+        "created_at": iso(),
+    }
+    await db.subscription_intents.insert_one(dict(don_intent))
+    return don_intent
 
 
 @router.post("/payments/upi/submit")
@@ -887,20 +984,30 @@ async def upi_submit(request: Request):
         await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
 
     llm = extract_payment_screenshot(data, content_type=content_type)
+    from vision_extract import coerce_amount_paise
+
+    # Screenshot OCR rules:
+    #   Subscribe → amount ≥ ₹3,500 AND committee payee.
+    #     If OCR amount > subscription due: issue subscription receipt for due,
+    #     and a separate donation receipt for the remainder.
+    #   Donate page → committee payee AND amount ≥ pledged due; entire amount is donation only.
+    # Resident-entered UTR is stored for records — never matched against the image.
+    SUBSCRIPTION_FLOOR_PAISE = 350000  # ₹3,500
+    intent_kind = (intent.get("kind") or "subscription").strip().lower()
+
     llm_amount = llm.get("amount_paise")
-    llm_utr = normalize_ref(llm.get("utr") or "") if llm.get("utr") else ""
+    org_match = llm.get("org_match") or {}
+    org_ok = bool(org_match.get("ok"))
 
     paid_amount = None
     if llm.get("ok") and llm_amount is not None and int(llm_amount) > 0:
-        paid_amount = int(llm_amount)
+        paid_amount = coerce_amount_paise(int(llm_amount), expected)
 
-    amount_exact = paid_amount is not None and abs(paid_amount - expected) <= 100  # ± ₹1
-    amount_partial = paid_amount is not None and paid_amount >= 100 and paid_amount < (expected - 100)
-    amount_over = paid_amount is not None and paid_amount > expected + 100
-    # Prefer matching entered ref to LLM UTR when LLM found one
-    utr_ok = True
-    if llm_utr:
-        utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
+    if intent_kind == "donation":
+        amount_ok = paid_amount is not None and paid_amount >= max(expected - 100, 1)
+    else:
+        amount_ok = paid_amount is not None and paid_amount >= (SUBSCRIPTION_FLOOR_PAISE - 100)
+
     status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
     confidence = float(llm.get("confidence") or 0)
     llm_usable = bool(llm.get("ok"))
@@ -909,112 +1016,203 @@ async def upi_submit(request: Request):
     auto_issue = bool(auto_flags.get("llm_screenshot_auto_issue", True))
 
     validation = {
-        "amount_ok": amount_exact or amount_partial,
-        "amount_exact": amount_exact,
-        "amount_partial": amount_partial,
-        "amount_over": amount_over,
-        "utr_ok": utr_ok,
+        "amount_ok": amount_ok,
+        "amount_floor_paise": 0 if intent_kind == "donation" else SUBSCRIPTION_FLOOR_PAISE,
+        "utr_ok": True,
+        "org_ok": org_ok,
+        "org_match": org_match,
         "status_ok": status_ok,
         "llm_usable": llm_usable,
         "confidence": confidence,
         "paid_amount_paise": paid_amount,
+        "payee_name": llm.get("payee_name") or llm.get("org_name"),
+        "intent_kind": intent_kind,
     }
 
-    can_issue_full = auto_issue and amount_exact and utr_ok and status_ok and (
-        (llm_usable and confidence >= 0.35) or (not llm_usable and len(ref_norm) >= 8)
+    can_issue = (
+        auto_issue and org_ok and amount_ok and status_ok
+        and llm_usable and confidence >= 0.35
     )
-    # Partial requires a trusted AI amount read (never invent amount from expected)
-    can_issue_partial = (
-        auto_issue and amount_partial and utr_ok and status_ok
-        and llm_usable and confidence >= 0.35 and paid_amount is not None
-    )
-    can_issue = can_issue_full or can_issue_partial
-    if amount_over:
-        can_issue = False
 
     review_message = None
     receipt = None
+    donation_receipt = None
     final_status = "needs_review"
     residual = None
     settings = await get_settings()
 
     if can_issue:
-        settle_amount = expected if can_issue_full else paid_amount
         try:
-            await db.payments.insert_one({
-                "id": new_id("pay"),
-                "provider": "upi_qr",
-                "provider_payment_id": ref_norm,
-                "intent_id": intent_id,
-                "amount": settle_amount,
-                "currency": "INR",
-                "status": "captured",
-                "bank_verified": False,
-                "proof_doc_id": proof_doc_id,
-                "created_at": iso(),
-            })
+            if intent_kind == "donation":
+                settle = int(paid_amount)
+                if settle > expected:
+                    await db.subscription_intents.update_one(
+                        {"id": intent_id},
+                        {"$set": {
+                            "donation_amount": settle,
+                            "total_amount": settle,
+                            "amount_due_paise": settle,
+                        }},
+                    )
+                    intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
+                await _insert_upi_payment(
+                    intent_id=intent_id,
+                    provider_payment_id=ref_norm,
+                    amount_paise=settle,
+                    proof_doc_id=proof_doc_id,
+                    kind="donation",
+                )
+                receipt = await _issue_receipt(
+                    intent,
+                    method="upi_qr",
+                    masked_ref="UTR-" + ref_norm[-4:],
+                    provider_payment_id=ref_norm,
+                    debit_account="1001",
+                    request=request,
+                    paid_amount_paise=settle,
+                    bank_verified=False,
+                    issuance_source="payment_screenshot",
+                )
+                receipt = await _mark_screenshot_receipt(receipt, proof_doc_id=proof_doc_id)
+                final_status = "issued" if receipt else "needs_review"
+            else:
+                # Subscription due (typically ₹3,500); excess OCR amount → donation receipt.
+                sub_due = _intent_due_paise(intent)
+                sub_amt = min(int(sub_due), int(paid_amount))
+                don_amt = max(0, int(paid_amount) - sub_amt)
+
+                await _insert_upi_payment(
+                    intent_id=intent_id,
+                    provider_payment_id=ref_norm,
+                    amount_paise=sub_amt,
+                    proof_doc_id=proof_doc_id,
+                    kind="subscription",
+                )
+                intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
+                receipt = await _issue_receipt(
+                    intent,
+                    method="upi_qr",
+                    masked_ref="UTR-" + ref_norm[-4:],
+                    provider_payment_id=ref_norm,
+                    debit_account="1001",
+                    request=request,
+                    paid_amount_paise=sub_amt,
+                    bank_verified=False,
+                    issuance_source="payment_screenshot",
+                )
+                receipt = await _mark_screenshot_receipt(receipt, proof_doc_id=proof_doc_id)
+
+                if receipt and don_amt > 0:
+                    don_intent = await _create_linked_donation_intent(
+                        parent_intent=intent,
+                        donation_paise=don_amt,
+                        source_ref=ref_norm,
+                    )
+                    don_pay_id = f"{ref_norm}-DON"
+                    await _insert_upi_payment(
+                        intent_id=don_intent["id"],
+                        provider_payment_id=don_pay_id,
+                        amount_paise=don_amt,
+                        proof_doc_id=proof_doc_id,
+                        kind="donation",
+                    )
+                    donation_receipt = await _issue_receipt(
+                        don_intent,
+                        method="upi_qr",
+                        masked_ref="UTR-" + ref_norm[-4:],
+                        provider_payment_id=don_pay_id,
+                        debit_account="1001",
+                        request=request,
+                        paid_amount_paise=don_amt,
+                        bank_verified=False,
+                        issuance_source="payment_screenshot",
+                    )
+                    donation_receipt = await _mark_screenshot_receipt(
+                        donation_receipt, proof_doc_id=proof_doc_id,
+                    )
+                    if donation_receipt:
+                        await db.receipts.update_one(
+                            {"id": donation_receipt["id"]},
+                            {"$set": {
+                                "linked_subscription_receipt_id": receipt.get("id"),
+                                "split_from_upi_ref": ref_norm,
+                            }},
+                        )
+                        await db.receipts.update_one(
+                            {"id": receipt["id"]},
+                            {"$set": {
+                                "linked_donation_receipt_id": donation_receipt.get("id"),
+                                "split_donation_amount_paise": don_amt,
+                            }},
+                        )
+                        receipt["linked_donation_receipt_id"] = donation_receipt.get("id")
+                        receipt["split_donation_amount_paise"] = don_amt
+
+                if receipt:
+                    final_status = "partial" if receipt.get("is_partial") else "issued"
+                    if receipt.get("is_partial"):
+                        due_after = int(receipt.get("amount_due_after") or 0)
+                        residual = {
+                            "amount_paise": due_after,
+                            "amount_fmt": fmt_inr(due_after),
+                            "payment": _upi_payload(settings, due_after, note=intent_id[:20]),
+                            "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
+                        }
+                else:
+                    final_status = "duplicate_payment"
+                    review_message = "Excess / duplicate payment queued for refund review."
+        except HTTPException:
+            raise
         except Exception:
-            # Unique conflict — already processed
-            existing = await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": ref_norm})
+            existing = await db.payments.find_one(
+                {"provider": "upi_qr", "provider_payment_id": ref_norm}
+            )
             if existing and existing.get("intent_id") == intent_id:
                 receipt = await db.receipts.find_one(
                     {"intent_id": intent_id, "payment_id": ref_norm}, {"_id": 0}
-                ) or await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0}, sort=[("issued_at", -1)])
+                ) or await db.receipts.find_one(
+                    {"intent_id": intent_id}, {"_id": 0}, sort=[("issued_at", -1)]
+                )
+                donation_receipt = await db.receipts.find_one(
+                    {"payment_id": f"{ref_norm}-DON"}, {"_id": 0}
+                )
                 final_status = "issued" if receipt else "needs_review"
             else:
-                raise HTTPException(status_code=409, detail="This payment reference was already used.")
-        else:
-            # Refresh intent in case of concurrent partials
-            intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
-            # Screenshot self-serve: issued, but explicitly not bank verified.
-            receipt = await _issue_receipt(
-                intent,
-                method="upi_qr",
-                masked_ref="UTR-" + ref_norm[-4:],
-                provider_payment_id=ref_norm,
-                debit_account="1001",
-                request=request,
-                paid_amount_paise=settle_amount,
-                bank_verified=False,
-                issuance_source="payment_screenshot",
-            )
-            if receipt:
-                await db.receipts.update_one(
-                    {"id": receipt["id"]},
-                    {"$set": {
-                        "bank_verified": False,
-                        "issuance_source": "payment_screenshot",
-                        "verification_level": "committee_recorded",
-                        "proof_doc_id": proof_doc_id,
-                    }},
+                raise HTTPException(
+                    status_code=409, detail="This payment reference was already used."
                 )
-                receipt["bank_verified"] = False
-                receipt["issuance_source"] = "payment_screenshot"
-                final_status = "partial" if receipt.get("is_partial") else "issued"
-                if receipt.get("is_partial"):
-                    due_after = int(receipt.get("amount_due_after") or 0)
-                    residual = {
-                        "amount_paise": due_after,
-                        "amount_fmt": fmt_inr(due_after),
-                        "payment": _upi_payload(settings, due_after, note=intent_id[:20]),
-                        "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
-                    }
-            else:
-                final_status = "duplicate_payment"
-                review_message = "Excess / duplicate payment queued for refund review."
     else:
         reasons = []
-        if amount_over:
-            reasons.append("amount on screenshot is higher than payable total")
-        elif paid_amount is None:
+        if not org_ok:
+            reasons.append(
+                org_match.get("reason")
+                or "payee on screenshot is not M S ONE 10 EVENT ORGANISING COMMITEE"
+            )
+        if paid_amount is None:
             reasons.append("could not read payment amount from screenshot")
-        elif not (amount_exact or amount_partial):
-            reasons.append("amount on screenshot does not match payable total")
-        if not utr_ok:
-            reasons.append("UTR on screenshot does not match the reference entered")
+        elif not amount_ok:
+            if intent_kind == "donation":
+                reasons.append(
+                    f"amount on screenshot is less than the pledged donation ({fmt_inr(expected)})"
+                )
+            else:
+                reasons.append("amount on screenshot is less than ₹3,500")
         if llm_usable and not status_ok:
             reasons.append("payment status on screenshot is unclear")
-        review_message = "Could not auto-confirm: " + ("; ".join(reasons) or "needs committee review") + ". Please do not pay again."
+        if intent_kind == "donation":
+            review_message = (
+                "Could not auto-confirm: "
+                + ("; ".join(reasons) or "needs committee review")
+                + ". Donation screenshots must show payment to "
+                "M S ONE 10 EVENT ORGANISING COMMITEE. Please do not pay again."
+            )
+        else:
+            review_message = (
+                "Could not auto-confirm: "
+                + ("; ".join(reasons) or "needs committee review")
+                + ". Screenshot must show ₹3,500 or more paid to "
+                "M S ONE 10 EVENT ORGANISING COMMITEE. Please do not pay again."
+            )
 
     await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
         "status": (
@@ -1023,13 +1221,15 @@ async def upi_submit(request: Request):
         ),
         "proof_doc_id": proof_doc_id,
         "llm": {k: llm.get(k) for k in (
-            "ok", "error", "amount_paise", "utr", "txn_time", "payer_name", "payee_name",
-            "status", "confidence", "notes", "model",
+            "ok", "error", "amount_paise", "utr", "utr_candidates", "txn_time", "payer_name", "payee_name",
+            "org_name", "org_match", "status", "confidence", "notes", "model",
         )},
         "validation": validation,
         "review_message": review_message,
         "payment_id": ref_norm,
         "receipt_id": receipt.get("id") if receipt else None,
+        "donation_receipt_id": donation_receipt.get("id") if donation_receipt else None,
+        "ocr_paid_amount_paise": paid_amount,
         "processed_at": iso(),
     }})
     await audit(
@@ -1042,11 +1242,24 @@ async def upi_submit(request: Request):
     )
 
     if final_status == "issued" and receipt:
+        receipts = [clean(receipt)]
+        if donation_receipt:
+            receipts.append(clean(donation_receipt))
+        msg = "Receipt issued. Recorded against your payment reference (not a bank settlement confirmation)."
+        if donation_receipt:
+            msg = (
+                f"Subscription receipt {receipt.get('receipt_no')} for "
+                f"{fmt_inr(receipt.get('total_amount') or 0)} and donation receipt "
+                f"{donation_receipt.get('receipt_no')} for "
+                f"{fmt_inr(donation_receipt.get('total_amount') or 0)} issued."
+            )
         return {
             "status": "paid",
             "receipt": clean(receipt),
+            "donation_receipt": clean(donation_receipt) if donation_receipt else None,
+            "receipts": receipts,
             "bank_verified": False,
-            "message": "Receipt issued. Recorded against your payment reference (not a bank settlement confirmation).",
+            "message": msg,
             "status_token": status_token(intent_id),
         }
     if final_status == "partial" and receipt:

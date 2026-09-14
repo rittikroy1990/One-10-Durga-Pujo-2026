@@ -114,7 +114,13 @@ export default function Subscribe() {
       const r = await api.post("/payments/upi/submit", fd);
       const token = r.data.status_token || intent.status_token;
       if (r.data.status === "paid") {
-        toast.success(`Receipt ${r.data.receipt?.receipt_no || ""} issued`);
+        if (r.data.donation_receipt?.receipt_no) {
+          toast.success(
+            `Subscription ${r.data.receipt?.receipt_no || ""} and donation ${r.data.donation_receipt.receipt_no} issued`
+          );
+        } else {
+          toast.success(`Receipt ${r.data.receipt?.receipt_no || ""} issued`);
+        }
       } else {
         toast.message("Screenshot submitted for review");
       }
@@ -422,7 +428,9 @@ export default function Subscribe() {
                     <span className="mt-2 text-sm font-medium">
                       {screenshot ? screenshot.name : "Tap to upload PNG / JPG"}
                     </span>
-                    <span className="mt-1 text-xs text-brown-800/50">We read the screenshot to match amount & reference</span>
+                    <span className="mt-1 text-xs text-brown-800/50">
+                      We check the screenshot for ₹3,500+ paid to M S ONE 10 EVENT ORGANISING COMMITEE
+                    </span>
                     <input
                       id="shot"
                       data-testid="upi-screenshot"

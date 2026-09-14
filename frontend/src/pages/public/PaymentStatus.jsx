@@ -42,7 +42,14 @@ export default function PaymentStatus() {
             <>
               <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-600" />
               <h1 className="mt-3 font-display text-4xl">Payment verified</h1>
-              <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been issued.</p>
+              {data.donation_receipt_no ? (
+                <p className="mt-1 text-brown-800/70">
+                  Subscription receipt <b>{data.receipt_no}</b> and donation receipt{" "}
+                  <b>{data.donation_receipt_no}</b> have been issued.
+                </p>
+              ) : (
+                <p className="mt-1 text-brown-800/70">Your receipt <b>{data.receipt_no}</b> has been issued.</p>
+              )}
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">
                   <Button variant="primary" data-testid="download-receipt-btn"><FileText className="h-4 w-4" /> Download receipt</Button>
@@ -50,6 +57,18 @@ export default function PaymentStatus() {
                 <Link to={`/receipt/verify/${data.verify_token}`}>
                   <Button variant="subtle">Verify online</Button>
                 </Link>
+                {data.donation_verify_token && (
+                  <>
+                    <a href={`${API}/receipt/pdf/${data.donation_verify_token}`} target="_blank" rel="noreferrer">
+                      <Button variant="subtle" data-testid="download-donation-receipt-btn">
+                        <FileText className="h-4 w-4" /> Donation receipt
+                      </Button>
+                    </a>
+                    <Link to={`/receipt/verify/${data.donation_verify_token}`}>
+                      <Button variant="subtle">Verify donation</Button>
+                    </Link>
+                  </>
+                )}
               </div>
             </>
           )}

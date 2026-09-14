@@ -411,6 +411,7 @@ export default function Donate() {
                   <label htmlFor="dshot" className="mt-1 flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-brown-800/25 bg-white px-4 py-6 text-center hover:border-vermilion-500/50">
                     <Upload className="h-6 w-6 text-vermilion-500" />
                     <span className="mt-2 text-sm font-medium">{screenshot ? screenshot.name : "Tap to upload PNG / JPG"}</span>
+                  <span className="mt-1 block text-xs text-brown-800/50">Must show payment to One10 Events Organising Committee</span>
                     <input id="dshot" data-testid="donate-screenshot" type="file" accept="image/*,.pdf" className="hidden" onChange={(e) => setScreenshot(e.target.files?.[0] || null)} />
                   </label>
                 </div>

@@ -731,15 +731,22 @@ async def upi_submit(request: Request):
     expected = int(intent["total_amount"])
     llm_amount = llm.get("amount_paise")
     llm_utr = normalize_ref(llm.get("utr") or "") if llm.get("utr") else ""
+    org_match = llm.get("org_match") or {}
+    org_ok = bool(org_match.get("ok"))
 
-    amount_ok = llm_amount is None or abs(int(llm_amount) - expected) <= 100  # ± ₹1
+    llm_usable = bool(llm.get("ok"))
+    # When LLM read the screenshot, amount must be present and match — do not treat
+    # a missing OCR amount as a free pass (wrong-merchant receipts often still show ₹).
+    if llm_usable:
+        amount_ok = llm_amount is not None and abs(int(llm_amount) - expected) <= 100  # ± ₹1
+    else:
+        amount_ok = False
     # Prefer matching entered ref to LLM UTR when LLM found one
     utr_ok = True
     if llm_utr:
         utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
     status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
     confidence = float(llm.get("confidence") or 0)
-    llm_usable = bool(llm.get("ok"))
 
     auto_flags = (await get_settings()).get("feature_flags") or {}
     auto_issue = bool(auto_flags.get("llm_screenshot_auto_issue", True))
@@ -748,13 +755,20 @@ async def upi_submit(request: Request):
         "amount_ok": amount_ok,
         "utr_ok": utr_ok,
         "status_ok": status_ok,
+        "org_ok": org_ok,
+        "org_match": org_match,
         "llm_usable": llm_usable,
         "confidence": confidence,
+        "payee_name": llm.get("payee_name") or llm.get("org_name"),
+        "blocked_merchant": org_match.get("blocked"),
     }
 
-    # Auto-issue when: LLM ok and amount+utr pass, OR LLM unavailable but user supplied ref
-    can_issue = auto_issue and amount_ok and utr_ok and status_ok and (
-        (llm_usable and confidence >= 0.35) or (not llm_usable and len(ref_norm) >= 8)
+    # Auto-issue only when OCR/LLM shows payment to One10 Events Organising Committee
+    # (fuzzy spell-check + merchant blocklist), plus amount + UTR + status checks.
+    # Never auto-issue when LLM is down — committee must review.
+    can_issue = (
+        auto_issue and org_ok and amount_ok and utr_ok and status_ok
+        and llm_usable and confidence >= 0.35
     )
     # Hard block if LLM clearly saw wrong amount
     if llm_usable and llm_amount is not None and abs(int(llm_amount) - expected) > 100:
@@ -812,20 +826,30 @@ async def upi_submit(request: Request):
                 review_message = "Excess / duplicate payment queued for refund review."
     else:
         reasons = []
+        if not org_ok:
+            reasons.append(
+                org_match.get("reason")
+                or "organisation name on screenshot is not One10 Events Organising Committee"
+            )
         if not amount_ok:
             reasons.append("amount on screenshot does not match payable total")
         if not utr_ok:
             reasons.append("UTR on screenshot does not match the reference entered")
         if llm_usable and not status_ok:
             reasons.append("payment status on screenshot is unclear")
-        review_message = "Could not auto-confirm: " + ("; ".join(reasons) or "needs committee review") + ". Please do not pay again."
+        review_message = (
+            "Could not auto-confirm: "
+            + ("; ".join(reasons) or "needs committee review")
+            + ". Receipt is generated only when the screenshot shows payment to "
+            "One10 Events Organising Committee. Please do not pay again."
+        )
 
     await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
         "status": final_status if final_status != "issued" else "issued",
         "proof_doc_id": proof_doc_id,
         "llm": {k: llm.get(k) for k in (
             "ok", "error", "amount_paise", "utr", "txn_time", "payer_name", "payee_name",
-            "status", "confidence", "notes", "model",
+            "org_name", "org_match", "status", "confidence", "notes", "model",
         )},
         "validation": validation,
         "review_message": review_message,
@@ -837,7 +861,14 @@ async def upi_submit(request: Request):
         "upi.screenshot.submit",
         entity_type="upi_submission",
         entity_id=sub_id,
-        after={"status": final_status, "intent_id": intent_id, "ref": ref_norm[-4:]},
+        after={
+            "status": final_status,
+            "intent_id": intent_id,
+            "ref": ref_norm[-4:],
+            "org_ok": org_ok,
+            "org_score": org_match.get("score"),
+            "payee_name": llm.get("payee_name") or llm.get("org_name"),
+        },
         request=request,
     )
 

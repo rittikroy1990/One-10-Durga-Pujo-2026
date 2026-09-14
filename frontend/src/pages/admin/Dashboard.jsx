@@ -275,7 +275,7 @@ export default function Dashboard() {
           </div>
 
           {/* Collection */}
-          <section>
+          <section className="flex flex-col gap-3">
             <SectionTitle icon={Wallet} title="Collection" to="/admin/collection" linkLabel="Collection →" />
             <div className="grid items-stretch gap-4 lg:grid-cols-3">
               <Card className="flex h-full flex-col"><CardBody className="flex h-full flex-col">
@@ -308,7 +308,7 @@ export default function Dashboard() {
                 )}
               </CardBody></Card>
             </div>
-            <Card className="mt-4"><CardBody>
+            <Card><CardBody>
               <h3 className="mb-1 font-display text-lg">Daily collection trend</h3>
               <p className="mb-2 text-xs text-brown-800/50">Amount collected by day (₹)</p>
               {dailyArea.length > 0 ? (

@@ -31,6 +31,7 @@ EXPECTED_ORG_NAMES = (
     "ONE10 EVENTS ORGANISING COMMITTEE",
     "ONE 10 EVENT ORGANISING COMMITEE",  # bank UPI payee spelling on flyer
     "M/S.ONE 10 EVENT ORGANISING COMMITEE",
+    "M S ONE 10 EVENT ORGANISING COMMITEE",  # Google Pay banking name as shown
     "M/S. ONE 10 EVENT ORGANISING COMMITTEE",
     "Events Organizations Committee of One10",
     "Events Organisations Committee of One10",
@@ -69,38 +70,27 @@ BLOCKED_PAYEE_MARKERS = (
 # Minimum fuzzy ratio against a canonical name (handles OCR / spelling slips).
 ORG_FUZZY_MIN = float(os.environ.get("ORG_NAME_FUZZY_MIN") or "0.72")
 
-EXTRACT_PROMPT = """You are extracting payment details from an Indian UPI / bank transfer / payment-app screenshot.
+EXTRACT_PROMPT = """You are extracting payment details from an Indian UPI / payment-app screenshot.
 Return ONLY valid JSON with these keys:
 {
   "amount_rupees": number or null,
-  "utr_or_ref": string or null,
-  "upi_ref_candidates": [string, ...],
-  "txn_time": string or null,
-  "payer_name": string or null,
   "payee_name": string or null,
   "org_name": string or null,
   "status": "success" | "failed" | "pending" | "unknown",
   "confidence": number between 0 and 1,
   "notes": string
 }
-Rules:
-- amount_rupees: the paid amount in RUPEES as shown (e.g. 3500 for ₹3,500.00). Never return paise.
-  Strip ₹ / Rs / INR / commas. Do not invent an amount.
-- utr_or_ref: prefer the numeric UPI / UTR / bank reference if clearly visible.
-  Google Pay / PhonePe "Google transaction ID" / alphanumeric app IDs (e.g. CICAg…) are secondary —
-  put them in upi_ref_candidates, not as the primary utr_or_ref unless no UPI/UTR is visible.
-- upi_ref_candidates: ALL reference-looking strings visible on the screenshot (UPI ID, UTR,
-  Google transaction ID, bank RRNs). Empty list if none are visible.
-- CRITICAL: If no UTR / UPI reference is clearly visible on this screen, set utr_or_ref to null
-  and upi_ref_candidates to []. Do NOT invent or guess a reference number.
-- payee_name: the beneficiary / merchant / "Paid to" / "To" name exactly as shown.
-  NEVER invent or substitute our committee name. If the screenshot says Swiggy, Amazon, Zomato,
-  a person, or any other merchant, return that exact payee string.
-- org_name: the organisation or committee name on the screenshot (often same as payee_name).
-  Read it carefully even if misspelled on screen (e.g. Organising / Organization / Committte).
-  Look for names like "ONE 10 EVENT ORGANISING COMMITTEE", "M S ONE 10 EVENT ORGANISING COMMITEE",
-  or "One10 Events Organization Committee".
-  If the payee is clearly a different merchant, set org_name to null.
+Focus on ONLY these two fields (do not invent UTR / UPI reference numbers):
+1) amount_rupees — the paid amount in RUPEES as shown (e.g. 3500 for ₹3,500.00). Never return paise.
+   Strip ₹ / Rs / INR / commas. Do not invent an amount.
+2) payee_name / org_name — the beneficiary / "Paid to" / "To" name exactly as shown.
+   Look carefully for names like "M S ONE 10 EVENT ORGANISING COMMITEE",
+   "ONE 10 EVENT ORGANISING COMMITTEE", or "One10 Events Organising Committee".
+   NEVER invent or substitute our committee name. If the screenshot says Swiggy, Amazon,
+   Zomato, a person, or any other merchant, return that exact payee string.
+   If misspelled on screen (Organising / Organization / Committte), still return what you see.
+- status: success / failed / pending / unknown from the screenshot.
+- Do NOT extract or invent UTR / UPI / Google transaction IDs — leave them out of notes unless needed.
 - If unclear, use null and lower confidence.
 """
 
@@ -332,27 +322,17 @@ def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jp
         content = data["choices"][0]["message"]["content"]
         parsed = _parse_json_loose(content if isinstance(content, str) else json.dumps(content))
         amount_paise = amount_to_paise(parsed.get("amount_rupees"))
-        utr = normalize_ref(parsed.get("utr_or_ref") or "")
-        candidates_raw = parsed.get("upi_ref_candidates") or []
-        if not isinstance(candidates_raw, list):
-            candidates_raw = [candidates_raw]
-        utr_candidates = []
-        for c in candidates_raw:
-            n = normalize_ref(str(c or ""))
-            if n and n not in utr_candidates:
-                utr_candidates.append(n)
-        if utr and utr not in utr_candidates:
-            utr_candidates.insert(0, utr)
         payee_name = (parsed.get("payee_name") or "").strip() or None
         org_name = (parsed.get("org_name") or "").strip() or None
         match_source = org_name or payee_name
         org_match = org_name_match(match_source)
+        # UTR / UPI refs are intentionally NOT extracted — auto-issue uses amount + payee only.
         return {
             "ok": True,
             "error": None,
             "amount_paise": amount_paise,
-            "utr": utr or None,
-            "utr_candidates": utr_candidates,
+            "utr": None,
+            "utr_candidates": [],
             "txn_time": parsed.get("txn_time"),
             "payer_name": parsed.get("payer_name"),
             "payee_name": payee_name,

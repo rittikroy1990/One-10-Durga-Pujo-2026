@@ -1005,7 +1005,7 @@ export default function Food() {
                         <h2 className="flex items-center gap-2 font-display text-2xl text-brown-900">
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Choose meals
                         </h2>
-                        <p className="mt-1 text-sm text-brown-800/60">Tap <span className="font-semibold">Add</span>, then use + / − if you need more than one.</p>
+                        <p className="mt-1 text-sm text-brown-800/60">Tap <span className="font-semibold">Add</span>, use +2 / +5 for quick multi-add, or add 1 of a meal for every day below.</p>
                       </div>
                     </div>
 
@@ -1069,6 +1069,7 @@ export default function Food() {
                                 value={qty}
                                 label={`${day.label} ${meal.label}`}
                                 testId={`food-qty-${key}`}
+                                quickAmounts={[2, 5]}
                                 onBump={(d) => bump(key, d)}
                                 onSet={(v) => setQty(key, v)}
                               />

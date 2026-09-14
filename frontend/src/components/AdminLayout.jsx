@@ -10,13 +10,14 @@ import { Spinner } from "./ui";
 const NAV = [
   { to: "/admin", label: "Dashboards", icon: LayoutDashboard, end: true, perm: "reports:read" },
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
-  { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read" },
-  { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read" },
-  { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read" },
-  { to: "/admin/operations", label: "Operations", icon: Users2, perm: "ops:read" },
-  { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read" },
-  { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read" },
-  { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read" },
+  // Hidden for now — finance/ops modules not needed in current committee workflow
+  { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read", hidden: true },
+  { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read", hidden: true },
+  { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read", hidden: true },
+  { to: "/admin/operations", label: "Operations", icon: Users2, perm: "ops:read", hidden: true },
+  { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read", hidden: true },
+  { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read", hidden: true },
+  { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read", hidden: true },
   { to: "/upload-qr", label: "Payment QR", icon: QrCode, perm: "settings:manage" },
   { to: "/admin/settings", label: "Settings", icon: Settings2, perm: "settings:read" },
 ];
@@ -33,7 +34,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const perms = new Set(user?.permissions || []);
-  const links = NAV.filter((n) => perms.has(n.perm) || perms.size === 0);
+  const links = NAV.filter((n) => !n.hidden && (perms.has(n.perm) || perms.size === 0));
 
   const doLogout = async () => { await logout(); navigate("/admin/login"); };
 

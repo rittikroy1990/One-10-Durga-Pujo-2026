@@ -223,8 +223,6 @@ export default function Home() {
 
   const sub = cfg?.subscription;
   const camp = cfg?.campaign;
-  const org = cfg?.organisation;
-
   return (
     <PublicLayout>
       <section className="relative overflow-hidden bg-sky-50 pt-16">

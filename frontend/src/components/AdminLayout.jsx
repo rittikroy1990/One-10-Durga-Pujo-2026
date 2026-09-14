@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
-  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, Receipt,
+  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, ShieldCheck, QrCode, Receipt,
   UtensilsCrossed,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";

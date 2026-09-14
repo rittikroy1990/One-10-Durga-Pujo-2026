@@ -1,4 +1,4 @@
-import React, { useState, createContext, useContext } from "react";
+import React from "react";
 import { cn } from "../lib/utils";
 import { X, Loader2 } from "lucide-react";
 
@@ -158,7 +158,6 @@ export function Dialog({ open, onClose, title, children, footer, size = "md" }) 
 }
 
 /* Tabs */
-const TabsCtx = createContext(null);
 export function Tabs({ tabs, value, onChange }) {
   return (
     <div className="flex flex-wrap gap-1 border-b border-brown-800/10 mb-4">

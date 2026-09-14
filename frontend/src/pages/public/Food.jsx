@@ -534,7 +534,11 @@ export default function Food() {
 
   return (
     <PublicLayout>
-      <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-8 pb-8">
+      <section
+        className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-8 pb-8"
+        data-food-ui="info-v2"
+        data-testid="food-page"
+      >
         <div className="mx-auto max-w-5xl px-4 sm:px-5">
           <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Puja meals</p>
           <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">

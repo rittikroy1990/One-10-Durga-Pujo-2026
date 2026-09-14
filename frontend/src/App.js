@@ -16,6 +16,11 @@ import Participate from "./pages/public/Participate";
 import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
+import Advertise from "./pages/public/Advertise";
+import AdvertiseApply from "./pages/public/AdvertiseApply";
+import AdvertiseStatus from "./pages/public/AdvertiseStatus";
+import LocalBusinesses from "./pages/public/LocalBusinesses";
+import LocalBusinessPage from "./pages/public/LocalBusinessPage";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
@@ -28,6 +33,7 @@ import Reports from "./pages/admin/Reports";
 import AuditLog from "./pages/admin/AuditLog";
 import Periods from "./pages/admin/Periods";
 import Settings from "./pages/admin/Settings";
+import AdsAdmin from "./pages/admin/AdsAdmin";
 
 function AppRoutes() {
   const location = useLocation();
@@ -44,6 +50,11 @@ function AppRoutes() {
       <Route path="/events" element={<Events />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
+      <Route path="/advertise" element={<Advertise />} />
+      <Route path="/advertise/apply" element={<AdvertiseApply />} />
+      <Route path="/advertise/status/:token" element={<AdvertiseStatus />} />
+      <Route path="/local-businesses" element={<LocalBusinesses />} />
+      <Route path="/local-businesses/:slug" element={<LocalBusinessPage />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />
@@ -62,6 +73,7 @@ function AppRoutes() {
         <Route path="audit" element={<AuditLog />} />
         <Route path="periods" element={<Periods />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="ads" element={<AdsAdmin />} />
       </Route>
 
       <Route path="*" element={<Home />} />

@@ -8,6 +8,8 @@ const LINKS = [
   { to: "/", label: "Home" },
   { to: "/events", label: "Programme" },
   { to: "/sponsors", label: "Sponsors" },
+  { to: "/local-businesses", label: "Local businesses" },
+  { to: "/advertise", label: "Advertise" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
   { to: "/transparency", label: "Transparency" },

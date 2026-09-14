@@ -887,20 +887,35 @@ async def upi_submit(request: Request):
         await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
 
     llm = extract_payment_screenshot(data, content_type=content_type)
+    from vision_extract import coerce_amount_paise, refs_match
+
     llm_amount = llm.get("amount_paise")
     llm_utr = normalize_ref(llm.get("utr") or "") if llm.get("utr") else ""
+    utr_candidates = list(llm.get("utr_candidates") or [])
+    if llm_utr and llm_utr not in utr_candidates:
+        utr_candidates.insert(0, llm_utr)
+
+    org_match = llm.get("org_match") or {}
+    org_ok = bool(org_match.get("ok"))
 
     paid_amount = None
     if llm.get("ok") and llm_amount is not None and int(llm_amount) > 0:
-        paid_amount = int(llm_amount)
+        paid_amount = coerce_amount_paise(int(llm_amount), expected)
 
     amount_exact = paid_amount is not None and abs(paid_amount - expected) <= 100  # ± ₹1
     amount_partial = paid_amount is not None and paid_amount >= 100 and paid_amount < (expected - 100)
     amount_over = paid_amount is not None and paid_amount > expected + 100
-    # Prefer matching entered ref to LLM UTR when LLM found one
-    utr_ok = True
-    if llm_utr:
-        utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
+    # Overpay to the committee: still settle at expected (excess is donation / review later),
+    # so a correct ₹3500 payment is never blocked as "higher than payable" after OCR scale slips.
+    amount_over_settle = bool(amount_over and org_ok)
+
+    # UTR: match entered ref against ANY OCR candidate. If screenshot has no UTR
+    # (common on Google Pay success screens), trust the resident-entered reference.
+    if utr_candidates:
+        utr_ok = refs_match(ref_norm, *utr_candidates)
+    else:
+        utr_ok = True
+
     status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
     confidence = float(llm.get("confidence") or 0)
     llm_usable = bool(llm.get("ok"))
@@ -909,27 +924,38 @@ async def upi_submit(request: Request):
     auto_issue = bool(auto_flags.get("llm_screenshot_auto_issue", True))
 
     validation = {
-        "amount_ok": amount_exact or amount_partial,
+        "amount_ok": amount_exact or amount_partial or amount_over_settle,
         "amount_exact": amount_exact,
         "amount_partial": amount_partial,
         "amount_over": amount_over,
+        "amount_over_settle": amount_over_settle,
         "utr_ok": utr_ok,
+        "org_ok": org_ok,
+        "org_match": org_match,
         "status_ok": status_ok,
         "llm_usable": llm_usable,
         "confidence": confidence,
         "paid_amount_paise": paid_amount,
+        "utr_candidates": utr_candidates,
+        "payee_name": llm.get("payee_name") or llm.get("org_name"),
     }
 
-    can_issue_full = auto_issue and amount_exact and utr_ok and status_ok and (
+    can_issue_full = auto_issue and org_ok and amount_exact and utr_ok and status_ok and (
         (llm_usable and confidence >= 0.35) or (not llm_usable and len(ref_norm) >= 8)
     )
     # Partial requires a trusted AI amount read (never invent amount from expected)
     can_issue_partial = (
-        auto_issue and amount_partial and utr_ok and status_ok
+        auto_issue and org_ok and amount_partial and utr_ok and status_ok
         and llm_usable and confidence >= 0.35 and paid_amount is not None
     )
-    can_issue = can_issue_full or can_issue_partial
-    if amount_over:
+    # Committee overpay: issue full receipt for the due amount (do not leave resident hanging)
+    can_issue_over_settle = (
+        auto_issue and amount_over_settle and utr_ok and status_ok
+        and llm_usable and confidence >= 0.35
+    )
+    can_issue = can_issue_full or can_issue_partial or can_issue_over_settle
+    # Hard-block only when overpay AND payee is NOT our committee
+    if amount_over and not org_ok:
         can_issue = False
 
     review_message = None
@@ -939,7 +965,7 @@ async def upi_submit(request: Request):
     settings = await get_settings()
 
     if can_issue:
-        settle_amount = expected if can_issue_full else paid_amount
+        settle_amount = expected if (can_issue_full or can_issue_over_settle) else paid_amount
         try:
             await db.payments.insert_one({
                 "id": new_id("pay"),
@@ -1004,18 +1030,27 @@ async def upi_submit(request: Request):
                 review_message = "Excess / duplicate payment queued for refund review."
     else:
         reasons = []
-        if amount_over:
+        if not org_ok:
+            reasons.append(
+                org_match.get("reason")
+                or "organisation name on screenshot is not One10 Events Organising Committee"
+            )
+        if amount_over and not org_ok:
             reasons.append("amount on screenshot is higher than payable total")
         elif paid_amount is None:
             reasons.append("could not read payment amount from screenshot")
-        elif not (amount_exact or amount_partial):
+        elif not (amount_exact or amount_partial or amount_over_settle):
             reasons.append("amount on screenshot does not match payable total")
         if not utr_ok:
             reasons.append("UTR on screenshot does not match the reference entered")
         if llm_usable and not status_ok:
             reasons.append("payment status on screenshot is unclear")
-        review_message = "Could not auto-confirm: " + ("; ".join(reasons) or "needs committee review") + ". Please do not pay again."
-
+        review_message = (
+            "Could not auto-confirm: "
+            + ("; ".join(reasons) or "needs committee review")
+            + ". Receipt is generated only when the screenshot shows payment to "
+            "One10 Events Organising Committee. Please do not pay again."
+        )
     await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
         "status": (
             "issued" if final_status == "issued"

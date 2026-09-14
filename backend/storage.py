@@ -21,9 +21,13 @@ MIME_TYPES = {
     "csv": "text/csv", "txt": "text/plain",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "xls": "application/vnd.ms-excel",
+    # Local business ad creatives
+    "mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
 }
 ALLOWED_EXT = set(MIME_TYPES.keys())
-MAX_SIZE = 15 * 1024 * 1024  # 15 MB
+VIDEO_EXT = {"mp4", "webm", "mov"}
+MAX_SIZE = 15 * 1024 * 1024  # 15 MB (images / docs)
+MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 50 MB (short ad videos)
 
 
 def init_storage(force: bool = False):
@@ -66,8 +70,11 @@ async def save_document(*, data: bytes, filename: str, doc_type: str, linked_typ
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
     if ext not in ALLOWED_EXT:
         raise ValueError(f"File type .{ext} not allowed")
-    if len(data) > MAX_SIZE:
-        raise ValueError("File exceeds maximum size (15 MB)")
+    limit = MAX_VIDEO_SIZE if ext in VIDEO_EXT else MAX_SIZE
+    if len(data) > limit:
+        raise ValueError(
+            f"File exceeds maximum size ({'50 MB for video' if ext in VIDEO_EXT else '15 MB'})"
+        )
     content_type = content_type or MIME_TYPES.get(ext, "application/octet-stream")
     content_hash = hashlib.sha256(data).hexdigest()
     doc_id = f"doc_{uuid.uuid4().hex[:12]}"

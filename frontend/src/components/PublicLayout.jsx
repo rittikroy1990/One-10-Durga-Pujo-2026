@@ -11,6 +11,8 @@ const LINKS = [
   { to: "/nirghanto", label: "Nirghonto" },
   { to: "/donate", label: "Donate" },
   { to: "/sponsors", label: "Sponsors" },
+  { to: "/local-businesses", label: "Local businesses" },
+  { to: "/advertise", label: "Advertise" },
   { to: "/participate", label: "Participate" },
   { to: "/receipt/find", label: "Find Receipt" },
   { to: "/faq", label: "FAQ" },

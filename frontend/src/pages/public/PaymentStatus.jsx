@@ -8,22 +8,60 @@ import { Button } from "../../components/ui";
 export default function PaymentStatus() {
   const [params] = useSearchParams();
   const token = params.get("token");
+  const cashfreeOrderId = params.get("cashfree_order_id");
   const [data, setData] = useState(null);
   const [tries, setTries] = useState(0);
   const timer = useRef();
+  const verifiedRef = useRef(false);
+
+  useEffect(() => {
+    if (!cashfreeOrderId || verifiedRef.current) return;
+    verifiedRef.current = true;
+    (async () => {
+      try {
+        const r = await api.post("/payments/cashfree/verify", {
+          cashfree_order_id: cashfreeOrderId,
+        });
+        if (r.data?.status === "paid") {
+          setData({
+            status: "paid",
+            receipt_no: r.data.receipt?.receipt_no,
+            verify_token: r.data.receipt?.verify_token,
+            message: "Cashfree payment recorded and receipt issued.",
+            bank_verified: true,
+            do_not_pay_again: true,
+          });
+          return;
+        }
+        if (r.data?.status === "pending") {
+          setData({
+            status: "processing",
+            message: r.data.message || "Confirming Cashfree payment…",
+            do_not_pay_again: true,
+          });
+        }
+      } catch {
+        // Fall through to status polling with token.
+      }
+    })();
+  }, [cashfreeOrderId]);
 
   useEffect(() => {
     if (!token) return;
     const poll = async () => {
       try {
         const r = await api.get(`/payments/status/${token}`);
-        setData(r.data);
+        setData((prev) => {
+          // Prefer already-confirmed paid from Cashfree verify.
+          if (prev?.status === "paid" && r.data.status !== "paid") return prev;
+          return r.data;
+        });
         const done = ["paid", "needs_review", "error", "reconciliation_required"].includes(r.data.status);
         if (!done && tries < 20) {
           timer.current = setTimeout(() => setTries((t) => t + 1), 3000);
         }
       } catch {
-        setData({ status: "error", message: "Could not fetch status." });
+        setData((prev) => prev || { status: "error", message: "Could not fetch status." });
       }
     };
     poll();
@@ -50,6 +88,11 @@ export default function PaymentStatus() {
                   Committee-recorded against your payment reference — not a bank settlement confirmation.
                 </p>
               )}
+              {data.bank_verified === true && (
+                <p className="mt-3 text-xs text-emerald-700/80">
+                  Verified via Cashfree payment gateway.
+                </p>
+              )}
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer">
                   <Button variant="primary" data-testid="download-receipt-btn"><FileText className="h-4 w-4" /> Download receipt</Button>
@@ -63,7 +106,9 @@ export default function PaymentStatus() {
           {processing && (
             <>
               <Loader2 className="mx-auto h-14 w-14 animate-spin text-gold-500" />
-              <h1 className="mt-3 font-display text-4xl">Checking screenshot</h1>
+              <h1 className="mt-3 font-display text-4xl">
+                {cashfreeOrderId ? "Confirming Cashfree payment" : "Checking screenshot"}
+              </h1>
               <p className="mt-1 text-brown-800/70">{data.message}</p>
               <p className="mt-2 text-sm font-semibold text-vermilion-600">Please do not pay again.</p>
             </>

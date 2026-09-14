@@ -9,13 +9,14 @@ import json
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id
 from util import (now_utc, iso, valid_indian_mobile, mask_mobile, mask_name, fmt_inr,
-                  rupees_to_paise)
+                  rupees_to_paise, paise_to_rupees)
 from audit import audit, next_formatted
 from ledger import post_journal, reverse_journal
 from tokens import receipt_token, status_token, read_status_token
 from docs import receipt_pdf
 from auth import require, get_current_user, require_reauth
 import payments as pay
+import cashfree_payments as cashfree
 from notify import notify
 
 router = APIRouter(prefix="/api")
@@ -394,15 +395,17 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     return clean(receipt)
 
 
-async def _finalize_online(order, provider_payment_id, request=None):
-    """Idempotent finalisation of a verified online payment."""
+async def _finalize_online(order, provider_payment_id, request=None, *, method=None):
+    """Idempotent finalisation of a verified online payment (Razorpay or Cashfree)."""
     intent = await db.subscription_intents.find_one({"id": order["intent_id"]})
     if not intent:
         return {"status": "error", "detail": "intent missing"}
+    provider = order.get("provider") or pay.PROVIDER
+    method = method or ("cashfree" if provider == "cashfree" else "razorpay")
     # idempotency: unique payment record
     try:
         await db.payments.insert_one({
-            "id": new_id("pay"), "provider": pay.PROVIDER, "provider_payment_id": provider_payment_id,
+            "id": new_id("pay"), "provider": provider, "provider_payment_id": provider_payment_id,
             "order_id": order["id"], "intent_id": order["intent_id"],
             "amount": order["expected_amount"], "currency": "INR", "status": "captured",
             "created_at": iso()})
@@ -416,8 +419,10 @@ async def _finalize_online(order, provider_payment_id, request=None):
                     entity_id=order["id"], reason="amount mismatch")
         return {"status": "reconciliation_required"}
 
-    receipt = await _issue_receipt(intent, method="razorpay",
-                                   masked_ref="xxxx" + provider_payment_id[-4:],
+    ref = str(provider_payment_id or "")
+    masked = ("xxxx" + ref[-4:]) if len(ref) >= 4 else (ref or "cashfree")
+    receipt = await _issue_receipt(intent, method=method,
+                                   masked_ref=masked,
                                    provider_payment_id=provider_payment_id,
                                    debit_account="1003", request=request)
     await db.payment_orders.update_one({"id": order["id"]}, {"$set": {"status": "paid"}})
@@ -501,6 +506,278 @@ async def razorpay_webhook(request: Request):
     return {"status": "processed", "event_id": event_id, "result": result}
 
 
+# --------------------------------------------------------------- Cashfree (Ancholkatha gateway, temporary)
+@router.post("/payments/cashfree/session")
+async def cashfree_session(body: dict = Body(...), request: Request = None):
+    """Create a Cashfree payment session for a subscription/donation intent."""
+    if not cashfree.cashfree_configured():
+        raise HTTPException(status_code=503, detail="Cashfree online payment is not configured.")
+
+    intent_id = (body.get("intent_id") or "").strip()
+    intent = await db.subscription_intents.find_one({"id": intent_id})
+    if not intent:
+        raise HTTPException(status_code=404, detail="Subscription intent not found.")
+    if intent["status"] == "paid":
+        raise HTTPException(status_code=409, detail="This payment is already completed.")
+
+    household = await db.households.find_one({"id": intent["household_id"]}, {"_id": 0}) or {}
+    customer_name = (
+        intent.get("payer_name")
+        or household.get("primary_name")
+        or body.get("customer_name")
+        or "One10 contributor"
+    )
+    customer_phone = (
+        intent.get("payer_mobile")
+        or household.get("primary_mobile")
+        or body.get("customer_phone")
+        or ""
+    )
+    customer_email = household.get("email") or body.get("customer_email") or None
+
+    # Reuse an active Cashfree session for this intent when present.
+    existing = await db.payment_orders.find_one({
+        "intent_id": intent_id,
+        "provider": "cashfree",
+        "status": "created",
+        "cashfree_payment_session_id": {"$exists": True, "$ne": ""},
+    }, sort=[("created_at", -1)])
+    if existing and existing.get("cashfree_payment_session_id"):
+        return {
+            "internal_order_id": existing["id"],
+            "order_id": existing["provider_order_id"],
+            "payment_session_id": existing["cashfree_payment_session_id"],
+            "amount": existing["expected_amount"],
+            "currency": "INR",
+            "status_token": status_token(intent_id),
+            "mode": existing.get("mode") or cashfree.cashfree_mode(),
+            "payment_method": "cashfree",
+        }
+
+    amount_paise = int(intent["total_amount"])
+    amount_rupees = paise_to_rupees(amount_paise)
+    attempt_no = await db.payment_orders.count_documents({"intent_id": intent_id, "provider": "cashfree"}) + 1
+    internal_id = new_id("ord")
+    # Cashfree order_id: alphanumeric + underscore, max ~50.
+    cf_order_id = f"o10_{internal_id.replace('ord_', '')}"[:50]
+
+    app_url = (request_base_url() or "https://one10events.in").rstrip("/")
+    api_url = app_url  # same host serves /api
+    stoken = status_token(intent_id)
+    return_url = f"{app_url}/payment/status?token={stoken}&cashfree_order_id={{order_id}}"
+    notify_url = f"{api_url}/api/webhooks/cashfree"
+    kind = intent.get("kind") or "subscription"
+    note = f"One10 {kind} · {customer_name}"[:200]
+
+    gateway = await cashfree.create_cashfree_order(
+        order_id=cf_order_id,
+        amount_rupees=amount_rupees,
+        customer_id=(intent.get("household_id") or intent_id)[:50],
+        customer_phone=customer_phone,
+        customer_email=customer_email,
+        customer_name=customer_name,
+        return_url=return_url,
+        notify_url=notify_url,
+        order_note=note,
+    )
+    session_id = str(gateway.get("payment_session_id") or "").strip()
+    mode = cashfree.cashfree_mode()
+
+    order = {
+        "id": internal_id,
+        "intent_id": intent_id,
+        "household_id": intent["household_id"],
+        "provider": "cashfree",
+        "provider_order_id": cf_order_id,
+        "cashfree_payment_session_id": session_id,
+        "expected_amount": amount_paise,
+        "currency": "INR",
+        "status": "created",
+        "attempt_no": attempt_no,
+        "mode": mode,
+        "expires_at": iso(),
+        "created_at": iso(),
+    }
+    await db.payment_orders.insert_one(dict(order))
+    await db.payment_attempts.insert_one({
+        "id": new_id("att"), "order_id": order["id"], "intent_id": intent_id,
+        "attempt_no": attempt_no, "status": "created", "provider": "cashfree", "created_at": iso(),
+    })
+    await audit(
+        "payment.cashfree.session",
+        entity_type="payment_order",
+        entity_id=order["id"],
+        after={"provider_order_id": cf_order_id, "amount": amount_paise, "mode": mode},
+        request=request,
+    )
+    return {
+        "internal_order_id": order["id"],
+        "order_id": cf_order_id,
+        "payment_session_id": session_id,
+        "amount": amount_paise,
+        "currency": "INR",
+        "status_token": stoken,
+        "mode": mode,
+        "payment_method": "cashfree",
+    }
+
+
+@router.post("/payments/cashfree/verify")
+async def cashfree_verify(body: dict = Body(...), request: Request = None):
+    """Verify Cashfree payment against the gateway and issue receipt when paid."""
+    cf_order_id = (body.get("cashfree_order_id") or body.get("order_id") or "").strip()
+    if not cf_order_id:
+        raise HTTPException(status_code=400, detail="cashfree_order_id is required.")
+
+    order = await db.payment_orders.find_one({
+        "provider": "cashfree",
+        "provider_order_id": cf_order_id,
+    })
+    if not order and body.get("internal_order_id"):
+        order = await db.payment_orders.find_one({
+            "id": body.get("internal_order_id"),
+            "provider": "cashfree",
+        })
+    if not order:
+        raise HTTPException(status_code=404, detail="Cashfree payment order not found.")
+
+    if order.get("status") == "paid":
+        intent = await db.subscription_intents.find_one({"id": order["intent_id"]}, {"_id": 0})
+        receipt = await db.receipts.find_one({"intent_id": order["intent_id"]}, {"_id": 0})
+        return {
+            "status": "paid",
+            "receipt": clean(receipt) if receipt else None,
+            "intent_status": (intent or {}).get("status"),
+            "status_token": status_token(order["intent_id"]),
+        }
+
+    gateway_order = await cashfree.fetch_cashfree_order(order["provider_order_id"])
+    order_status = str(gateway_order.get("order_status") or "").upper()
+    expected_rupees = paise_to_rupees(int(order["expected_amount"]))
+    gateway_amount = round(float(gateway_order.get("order_amount") or 0), 2)
+    if gateway_amount != expected_rupees or gateway_order.get("order_currency") != cashfree.CASHFREE_CURRENCY:
+        await audit(
+            "payment.cashfree.amount_mismatch",
+            entity_type="payment_order",
+            entity_id=order["id"],
+            after={"expected": expected_rupees, "gateway": gateway_amount},
+            request=request,
+        )
+        raise HTTPException(status_code=400, detail="Payment amount does not match.")
+
+    payments_list = await cashfree.fetch_cashfree_payments(order["provider_order_id"])
+    success_payment = cashfree.successful_cashfree_payment(payments_list)
+    if order_status not in {"PAID", "SUCCESS"} and not success_payment:
+        return {
+            "status": "pending",
+            "order_status": order_status,
+            "message": "Payment is not completed yet.",
+            "status_token": status_token(order["intent_id"]),
+        }
+
+    payment_id = str(
+        (success_payment or {}).get("cf_payment_id")
+        or (success_payment or {}).get("payment_id")
+        or gateway_order.get("cf_order_id")
+        or order["provider_order_id"]
+    )
+    result = await _finalize_online(order, payment_id, request, method="cashfree")
+    result["status_token"] = status_token(order["intent_id"])
+    return result
+
+
+@router.get("/webhooks/cashfree")
+async def cashfree_webhook_info():
+    return {
+        "ok": True,
+        "service": "cashfree-webhook",
+        "method": "POST",
+        "notify_url": f"{(request_base_url() or 'https://one10events.in').rstrip('/')}/api/webhooks/cashfree",
+    }
+
+
+@router.post("/webhooks/cashfree")
+async def cashfree_webhook(request: Request):
+    raw = await request.body()
+    signature = request.headers.get("x-webhook-signature") or ""
+    timestamp = request.headers.get("x-webhook-timestamp") or ""
+    verified = cashfree.verify_cashfree_webhook_signature(raw, signature, timestamp)
+    try:
+        event = json.loads(raw.decode() or "{}")
+    except Exception:
+        event = {}
+
+    event_type = str(
+        event.get("type") or event.get("event") or ""
+    ).upper()
+    data = event.get("data") if isinstance(event.get("data"), dict) else event
+    order_payload = data.get("order") if isinstance(data.get("order"), dict) else {}
+    payment_payload = data.get("payment") if isinstance(data.get("payment"), dict) else {}
+    gateway_order_id = str(
+        order_payload.get("order_id") or data.get("order_id") or event.get("order_id") or ""
+    ).strip()
+    payment_id = str(
+        payment_payload.get("cf_payment_id")
+        or payment_payload.get("payment_id")
+        or data.get("cf_payment_id")
+        or ""
+    ).strip()
+    payment_status = str(
+        payment_payload.get("payment_status") or order_payload.get("order_status") or ""
+    ).upper()
+
+    event_id = (
+        request.headers.get("x-webhook-event-id")
+        or str(event.get("event_id") or event.get("id") or new_id("cfevt"))
+    )
+    try:
+        await db.webhook_events.insert_one({
+            "id": new_id("wh"), "provider": "cashfree", "event_id": event_id,
+            "event_type": event_type or payment_status, "verified": verified, "processed": False,
+            "created_at": iso(),
+        })
+    except Exception:
+        return {"received": True, "processed": False, "reason": "duplicate"}
+
+    if not verified:
+        await audit("webhook.cashfree.signature.invalid", entity_type="webhook_event", entity_id=event_id)
+        # Acknowledge so Cashfree dashboard "Test" gets 2xx; do not mark paid.
+        return {"received": True, "processed": False, "reason": "invalid_signature"}
+
+    if not gateway_order_id:
+        return {"received": True, "processed": False}
+
+    order = await db.payment_orders.find_one({
+        "provider": "cashfree",
+        "provider_order_id": gateway_order_id,
+    })
+    if not order:
+        return {"received": True, "processed": False, "reason": "order_not_found"}
+
+    if payment_status in {"FAILED", "USER_DROPPED", "CANCELLED"} or "FAILED" in event_type:
+        await db.payment_orders.update_one(
+            {"id": order["id"], "status": "created"},
+            {"$set": {"status": "failed", "cashfree_last_webhook": payment_status or event_type}},
+        )
+        await db.webhook_events.update_one({"event_id": event_id}, {"$set": {"processed": True}})
+        return {"received": True, "processed": True}
+
+    if payment_status not in {"SUCCESS", "PAID"} and "SUCCESS" not in event_type and "PAID" not in event_type:
+        return {"received": True, "processed": False}
+
+    result = await _finalize_online(
+        order,
+        payment_id or gateway_order_id,
+        request,
+        method="cashfree",
+    )
+    await db.webhook_events.update_one(
+        {"event_id": event_id},
+        {"$set": {"processed": True, "result": result}},
+    )
+    return {"received": True, "processed": True, "result": result}
+
+
 @router.get("/payments/status/{token}")
 async def payment_status(token: str):
     intent_id = read_status_token(token)
@@ -538,7 +815,11 @@ async def payment_status(token: str):
         "total_amount": intent["total_amount"],
         "receipt_no": receipt["receipt_no"] if receipt else None,
         "verify_token": receipt["verify_token"] if receipt else None,
-        "bank_verified": False if receipt and receipt.get("method") in ("upi_qr", "bank_transfer") else None,
+        "bank_verified": (
+            False if receipt and receipt.get("method") in ("upi_qr", "bank_transfer")
+            else True if receipt and receipt.get("method") in ("cashfree", "razorpay")
+            else None
+        ),
         "submission_status": submission.get("status") if submission else None,
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,

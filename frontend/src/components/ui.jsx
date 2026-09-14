@@ -183,13 +183,13 @@ export function Spinner({ className }) {
   return <Loader2 className={cn("h-5 w-5 animate-spin", className)} />;
 }
 
-export function Stat({ label, value, sub, accent }) {
+export function Stat({ label, value, sub, accent, className }) {
   return (
-    <Card className="overflow-hidden">
-      <CardBody className="p-4">
-        <div className="text-xs uppercase tracking-wider text-brown-800/50 font-semibold">{label}</div>
+    <Card className={cn("h-full overflow-hidden", className)}>
+      <CardBody className="flex h-full flex-col p-4">
+        <div className="text-xs font-semibold uppercase tracking-wider text-brown-800/50">{label}</div>
         <div className={cn("mt-1 text-2xl font-bold tabular-nums", accent || "text-brown-900")}>{value}</div>
-        {sub && <div className="mt-0.5 text-xs text-brown-800/50">{sub}</div>}
+        {sub ? <div className="mt-auto pt-0.5 text-xs text-brown-800/50">{sub}</div> : null}
       </CardBody>
     </Card>
   );

@@ -47,3 +47,7 @@ async def ensure_indexes():
     await db.audit_events.create_index("seq", unique=True)
     await db.audit_events.create_index("created_at")
     await db.journal_entries.create_index("journal_no", unique=True, sparse=True)
+    await db.business_ads.create_index("status_token", unique=True, sparse=True)
+    await db.business_ads.create_index("slug", unique=True, sparse=True)
+    await db.business_ads.create_index([("status", 1), ("published_at", -1)])
+    await db.business_ads.create_index("package_code")

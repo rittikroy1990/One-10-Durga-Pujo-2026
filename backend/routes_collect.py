@@ -144,8 +144,9 @@ async def subscribe(body: SubscribeIn, request: Request):
     }
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
-                entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid,
-                                               "method": intent["method"]},
+                entity_id=intent["id"], correlation_id=intent["id"],
+                after={"total": intent["total_amount"], "household": hid,
+                       "method": intent["method"]},
                 request=request)
 
     return {
@@ -274,6 +275,7 @@ async def donate(body: DonateIn, request: Request):
         "donation.intent.create",
         entity_type="subscription_intent",
         entity_id=intent["id"],
+        correlation_id=intent["id"],
         after={"total": donation, "donor_type": donor_type, "household": hid},
         request=request,
     )
@@ -322,6 +324,7 @@ async def create_order(body: dict = Body(...)):
         "id": new_id("att"), "order_id": order["id"], "intent_id": intent_id,
         "attempt_no": attempt_no, "status": "created", "created_at": iso()})
     await audit("payment.order.create", entity_type="payment_order", entity_id=order["id"],
+                correlation_id=intent_id,
                 after={"provider_order_id": provider_order_id, "amount": amount})
     return {"internal_order_id": order["id"], "provider_order_id": provider_order_id,
             "amount": amount, "currency": "INR", "key_id": pay.KEY_ID,
@@ -387,6 +390,7 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
+                correlation_id=intent.get("id") or "",
                 after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind}, request=request)
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
                  subject=f"Your {campaign_title} receipt {receipt_no}",
@@ -837,6 +841,7 @@ async def upi_submit(request: Request):
         "upi.screenshot.submit",
         entity_type="upi_submission",
         entity_id=sub_id,
+        correlation_id=intent_id,
         after={"status": final_status, "intent_id": intent_id, "ref": ref_norm[-4:]},
         request=request,
     )
@@ -925,11 +930,13 @@ async def create_refund(body: dict = Body(...), request: Request = None,
     if amount <= 0 or (already + amount) > receipt["total_amount"]:
         raise HTTPException(status_code=400, detail="Refund exceeds eligible captured amount.")
     refund = {"id": new_id("rfnd"), "receipt_id": receipt["id"], "household_id": receipt["household_id"],
+              "intent_id": receipt.get("intent_id") or "",
               "amount_paise": amount, "reason": body.get("reason", ""), "status": "requested",
               "requested_by": user["user_id"], "provider_reference": body.get("provider_reference", ""),
               "created_at": iso()}
     await db.refunds.insert_one(dict(refund))
     await audit("refund.request", actor=user, entity_type="refund", entity_id=refund["id"],
+                correlation_id=receipt.get("intent_id") or "",
                 after={"amount": amount}, reason=refund["reason"], request=request)
     return clean(refund)
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { FileText, Check, Plus, RefreshCw, Undo2 } from "lucide-react";
+import { FileText, Check, Plus, RefreshCw, Undo2, FileDown } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
@@ -72,16 +72,45 @@ function Households() {
 
 function Receipts() {
   const { items, loading, load } = useList("/admin/receipts");
+
+  const downloadTrail = async (receiptNo) => {
+    try {
+      const r = await api.get(`/audit/transaction/${encodeURIComponent(receiptNo)}/export`, { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `transaction_audit_${String(receiptNo).replace(/[^\w.-]+/g, "_")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Transaction audit downloaded");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not download audit trail");
+    }
+  };
+
   return (
     <Card><CardBody>
       <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
-        <Table><THead><TR><TH>Receipt No</TH><TH>Payer</TH><TH>Household</TH><TH right>Total</TH><TH>Method</TH><TH>Status</TH><TH>PDF</TH></TR></THead>
+        <Table><THead><TR><TH>Receipt No</TH><TH>Payer</TH><TH>Household</TH><TH right>Total</TH><TH>Method</TH><TH>Status</TH><TH>Issued</TH><TH>PDF</TH><TH>Audit</TH></TR></THead>
           <tbody>{items.map((r) => (
             <TR key={r.id}><TD>{r.receipt_no}</TD><TD>{r.payer_name}</TD><TD>{r.tower_name}, {r.flat_number}</TD>
               <TD right>{formatPaise(r.total_amount)}</TD><TD className="capitalize">{(r.method || "").replace(/_/g, " ")}</TD>
               <TD><StatusBadge status={r.refund_status || r.status} /></TD>
-              <TD><a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600"><FileText className="h-4 w-4" /></a></TD></TR>
+              <TD className="whitespace-nowrap text-xs">{formatDateIST(r.issued_at)}</TD>
+              <TD><a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600"><FileText className="h-4 w-4" /></a></TD>
+              <TD>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  data-testid={`receipt-audit-${r.receipt_no}`}
+                  onClick={() => downloadTrail(r.receipt_no)}
+                  title="Download timestamped audit trail"
+                >
+                  <FileDown className="h-4 w-4" />
+                </Button>
+              </TD>
+            </TR>
           ))}</tbody></Table>
       )}
     </CardBody></Card>

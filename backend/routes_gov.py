@@ -10,7 +10,7 @@ from fastapi import (APIRouter, Depends, Request, Response, HTTPException, Body,
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id, list_campaigns, DEFAULT_SETTINGS
 from util import iso, now_utc, fmt_inr, to_ist
-from audit import audit
+from audit import audit, fetch_transaction_trail, transaction_trail_csv_rows
 from ledger import trial_balance, account_balance
 from auth import (get_current_user, exchange_session, login_with_password, require, ROLES, ROLE_PERMISSIONS,
                   sod_conflicts, user_permissions)
@@ -561,14 +561,63 @@ async def dashboard_audit(user: dict = Depends(require("audit:read"))):
 # =============================================================== AUDIT TRAIL
 @router.get("/audit/events")
 async def audit_events(action: str = Query(""), entity_type: str = Query(""),
-                       limit: int = Query(200), user: dict = Depends(require("audit:read"))):
+                       entity_id: str = Query(""), limit: int = Query(200),
+                       user: dict = Depends(require("audit:read"))):
     q = {}
     if action:
-        q["action"] = {"$regex": action}
+        q["action"] = {"$regex": action, "$options": "i"}
     if entity_type:
         q["entity_type"] = entity_type
+    if entity_id:
+        q["entity_id"] = entity_id
     events = await db.audit_events.find(q, {"_id": 0}).sort("seq", -1).to_list(min(limit, 2000))
     return {"items": events, "count": len(events)}
+
+
+@router.get("/audit/transaction/{key}")
+async def audit_transaction_trail(key: str, user: dict = Depends(require("audit:read"))):
+    """Per-transaction audit timeline (receipt no / intent / order / payment id)."""
+    trail = await fetch_transaction_trail(key)
+    if not trail.get("related_ids"):
+        raise HTTPException(status_code=404, detail="No transaction found for that reference.")
+    return trail
+
+
+@router.get("/audit/transaction/{key}/export")
+async def audit_transaction_export(key: str, request: Request = None,
+                                   user: dict = Depends(require("audit:read"))):
+    """Download CSV audit trail for one transaction, with timestamps."""
+    trail = await fetch_transaction_trail(key)
+    if not trail.get("related_ids"):
+        raise HTTPException(status_code=404, detail="No transaction found for that reference.")
+    headers, rows = transaction_trail_csv_rows(trail)
+    # Context preamble rows help admins without opening JSON
+    ctx = trail.get("context") or {}
+    meta_rows = [
+        ["meta", "lookup", key, "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "receipt_no", ctx.get("receipt_no", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "intent_id", ctx.get("intent_id", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "issued_at", ctx.get("issued_at", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "method", ctx.get("method", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "provider_order_id", ctx.get("provider_order_id", ""), "", "", "", "", "", "", "", "", "", ""],
+        ["meta", "event_count", trail.get("count", 0), "", "", "", "", "", "", "", "", "", ""],
+    ]
+    data = export_csv(headers, meta_rows + rows)
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)[:48] or "transaction"
+    await audit(
+        "audit.transaction.export",
+        actor=user,
+        entity_type="transaction",
+        entity_id=ctx.get("receipt_id") or ctx.get("intent_id") or key,
+        correlation_id=ctx.get("intent_id") or "",
+        after={"key": key, "count": trail.get("count", 0), "receipt_no": ctx.get("receipt_no")},
+        request=request,
+    )
+    return Response(
+        content=data,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="transaction_audit_{safe}.csv"'},
+    )
 
 
 @router.get("/audit/verify-chain")

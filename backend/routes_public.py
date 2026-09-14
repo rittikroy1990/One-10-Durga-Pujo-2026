@@ -5,6 +5,7 @@ from db import db
 from config import get_settings, list_campaigns, get_active_cycle_id
 from tokens import read_receipt_token
 from util import mask_name, fmt_inr
+import cashfree_payments as cashfree
 
 router = APIRouter(prefix="/api")
 
@@ -18,6 +19,8 @@ async def health():
 async def public_config():
     s = await get_settings()
     campaigns = await list_campaigns(published_only=True)
+    cashfree_enabled = cashfree.cashfree_configured()
+    cashfree_mode_public = cashfree.cashfree_mode() if cashfree_enabled else None
     # Only expose non-sensitive, public-facing configuration.
     return {
         "platform": s.get("platform") or {
@@ -49,6 +52,10 @@ async def public_config():
             "provider": (s.get("feature_flags") or {}).get("payment_provider", "upi_qr"),
             "upi": (s.get("organisation") or {}).get("upi") or {},
             "bank_account": (s.get("organisation") or {}).get("bank_account") or {},
+            "cashfree": {
+                "enabled": cashfree_enabled,
+                "mode": cashfree_mode_public,
+            },
         },
     }
 

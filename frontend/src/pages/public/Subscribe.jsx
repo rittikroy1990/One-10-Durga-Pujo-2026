@@ -114,7 +114,13 @@ export default function Subscribe() {
       const r = await api.post("/payments/upi/submit", fd);
       const token = r.data.status_token || intent.status_token;
       if (r.data.status === "paid") {
-        toast.success(`Receipt ${r.data.receipt?.receipt_no || ""} issued`);
+        if (r.data.donation_receipt?.receipt_no) {
+          toast.success(
+            `Subscription ${r.data.receipt?.receipt_no || ""} and donation ${r.data.donation_receipt.receipt_no} issued`
+          );
+        } else {
+          toast.success(`Receipt ${r.data.receipt?.receipt_no || ""} issued`);
+        }
       } else {
         toast.message("Screenshot submitted for review");
       }

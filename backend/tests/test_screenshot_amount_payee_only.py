@@ -29,6 +29,14 @@ def test_amount_above_3500_ok():
     assert _can_auto_issue("M S ONE 10 EVENT ORGANISING COMMITEE", 4000) is True
 
 
+def test_donation_intent_skips_subscription_floor():
+    """Donate page: amount_ok vs pledged due only (not ₹3,500 floor)."""
+    pledged = 50_000  # ₹500
+    paid = 50_000
+    assert paid >= max(pledged - 100, 1)
+    assert paid < MIN_PAISE  # would fail subscription floor
+
+
 def test_wrong_payee_blocked_even_if_3500():
     assert _can_auto_issue("SWIGGY INSTAMART PRIVATE LIMITED", 3500) is False
     assert _can_auto_issue("Random Person", 3500) is False

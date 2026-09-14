@@ -61,8 +61,10 @@ export default function Sponsors() {
                   Discuss partnership <ArrowRight className="h-5 w-5" />
                 </Button>
               </a>
-              <Link to="/subscribe">
-                <Button variant="outline" size="lg">Household subscribe</Button>
+              <Link to="/advertise">
+                <Button variant="outline" size="lg" data-testid="sponsors-advertise-cta">
+                  Advertise your business
+                </Button>
               </Link>
             </div>
           </motion.div>

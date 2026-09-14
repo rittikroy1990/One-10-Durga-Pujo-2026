@@ -29,12 +29,41 @@ EXPECTED_ORG_NAMES = (
     "ONE 10 EVENTS ORGANISING COMMITTEE",
     "ONE10 EVENT ORGANISING COMMITTEE",
     "ONE10 EVENTS ORGANISING COMMITTEE",
+    "ONE 10 EVENT ORGANISING COMMITEE",  # bank UPI payee spelling on flyer
+    "M/S.ONE 10 EVENT ORGANISING COMMITEE",
+    "M/S. ONE 10 EVENT ORGANISING COMMITTEE",
     "Events Organizations Committee of One10",
     "Events Organisations Committee of One10",
     "One10 Events Organization Committee",
     "One10 Events Organisation Committee",
     "One 10 Events Organising Committee",
     "One10 events organization committee",
+    "EOC One10",
+    "Events Organising Committee of One10",
+)
+
+# Obvious non-committee merchants — hard reject even before fuzzy match.
+# Protects against LLM hallucinations / partial OCR when the screenshot is clearly
+# a food / shopping / personal payment app receipt.
+BLOCKED_PAYEE_MARKERS = (
+    "swiggy",
+    "instamart",
+    "zomato",
+    "blinkit",
+    "zepto",
+    "amazon",
+    "flipkart",
+    "myntra",
+    "phonepe merchant",
+    "google play",
+    "netflix",
+    "spotify",
+    "uber",
+    "ola cabs",
+    "rapido",
+    "irctc",
+    "bookmyshow",
+    "paytm mall",
 )
 
 # Minimum fuzzy ratio against a canonical name (handles OCR / spelling slips).
@@ -57,9 +86,12 @@ Rules:
 - Prefer UTR / UPI Ref / Transaction ID / Reference No as utr_or_ref (alphanumeric).
 - amount_rupees must be the paid amount only (no commas).
 - payee_name: the beneficiary / merchant / "Paid to" / "To" name exactly as shown.
+  NEVER invent or substitute our committee name. If the screenshot says Swiggy, Amazon, Zomato,
+  a person, or any other merchant, return that exact payee string.
 - org_name: the organisation or committee name on the screenshot (often same as payee_name).
   Read it carefully even if misspelled on screen (e.g. Organising / Organization / Committte).
   Look for names like "ONE 10 EVENT ORGANISING COMMITTEE" or "One10 Events Organization Committee".
+  If the payee is clearly a different merchant, set org_name to null.
 - If unclear, use null and lower confidence.
 """
 
@@ -129,10 +161,18 @@ def _token_set(text: str) -> set[str]:
     return {t for t in _fold(text).split() if t}
 
 
+def _blocked_merchant(folded: str) -> Optional[str]:
+    """Return the blocked marker if payee looks like a known non-committee merchant."""
+    for marker in BLOCKED_PAYEE_MARKERS:
+        if marker in folded:
+            return marker
+    return None
+
+
 def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None = None) -> dict:
     """Fuzzy spell-check: does candidate look like One10 Events Organising Committee?
 
-    Returns {ok, score, matched_against, normalized, reason}.
+    Returns {ok, score, matched_against, normalized, reason, blocked}.
     """
     names = expected_names or EXPECTED_ORG_NAMES
     raw = (candidate or "").strip()
@@ -144,9 +184,25 @@ def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None
             "normalized": "",
             "reason": "organisation / payee name not found on screenshot",
             "token_gate": False,
+            "blocked": None,
         }
 
     folded = _fold(raw)
+    blocked = _blocked_merchant(folded)
+    if blocked:
+        return {
+            "ok": False,
+            "score": 0.0,
+            "matched_against": None,
+            "normalized": folded,
+            "reason": (
+                f"screenshot shows payment to a different merchant ({blocked}) — "
+                "not One10 Events Organising Committee"
+            ),
+            "token_gate": False,
+            "blocked": blocked,
+        }
+
     tokens = _token_set(raw)
     best_name = None
     best_score = 0.0
@@ -186,6 +242,7 @@ def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None
         "normalized": folded,
         "reason": reason,
         "token_gate": token_gate,
+        "blocked": None,
     }
 
 

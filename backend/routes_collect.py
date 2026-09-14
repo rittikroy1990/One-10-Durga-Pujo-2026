@@ -734,14 +734,19 @@ async def upi_submit(request: Request):
     org_match = llm.get("org_match") or {}
     org_ok = bool(org_match.get("ok"))
 
-    amount_ok = llm_amount is None or abs(int(llm_amount) - expected) <= 100  # ± ₹1
+    llm_usable = bool(llm.get("ok"))
+    # When LLM read the screenshot, amount must be present and match — do not treat
+    # a missing OCR amount as a free pass (wrong-merchant receipts often still show ₹).
+    if llm_usable:
+        amount_ok = llm_amount is not None and abs(int(llm_amount) - expected) <= 100  # ± ₹1
+    else:
+        amount_ok = False
     # Prefer matching entered ref to LLM UTR when LLM found one
     utr_ok = True
     if llm_utr:
         utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
     status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
     confidence = float(llm.get("confidence") or 0)
-    llm_usable = bool(llm.get("ok"))
 
     auto_flags = (await get_settings()).get("feature_flags") or {}
     auto_issue = bool(auto_flags.get("llm_screenshot_auto_issue", True))
@@ -754,10 +759,13 @@ async def upi_submit(request: Request):
         "org_match": org_match,
         "llm_usable": llm_usable,
         "confidence": confidence,
+        "payee_name": llm.get("payee_name") or llm.get("org_name"),
+        "blocked_merchant": org_match.get("blocked"),
     }
 
     # Auto-issue only when OCR/LLM shows payment to One10 Events Organising Committee
-    # (fuzzy spell-check), plus amount + UTR + status checks.
+    # (fuzzy spell-check + merchant blocklist), plus amount + UTR + status checks.
+    # Never auto-issue when LLM is down — committee must review.
     can_issue = (
         auto_issue and org_ok and amount_ok and utr_ok and status_ok
         and llm_usable and confidence >= 0.35

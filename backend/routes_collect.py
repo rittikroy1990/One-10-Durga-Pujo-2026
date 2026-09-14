@@ -861,6 +861,112 @@ async def upi_submit(request: Request):
 
 
 # --------------------------------------------------------------- Receipt retrieval (resident)
+@router.post("/receipt/pending-payment")
+async def receipt_pending_payment(body: dict = Body(...), request: Request = None):
+    """Find a pending subscription payment for a flat so resident can upload UTR + screenshot."""
+    ip = request.client.host if request and request.client else "?"
+    since = now_utc().timestamp() - 60
+    recent = await db.receipt_lookups.count_documents({"ip": ip, "ts": {"$gt": since}, "kind": "pending_lookup"})
+    if recent >= 8:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute.")
+    await db.receipt_lookups.insert_one({
+        "ip": ip, "ts": now_utc().timestamp(), "kind": "pending_lookup",
+        "tower_id": body.get("tower_id", ""), "flat_id": body.get("flat_id", ""),
+    })
+
+    name = (body.get("name") or "").strip()
+    tower_id = (body.get("tower_id") or "").strip()
+    flat_id = (body.get("flat_id") or "").strip()
+    mobile = (body.get("mobile") or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter the name used at subscription.")
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="Select tower and flat.")
+    if mobile and not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile, or leave it blank.")
+
+    cycle_id = await get_active_cycle_id()
+    household = await db.households.find_one({
+        "cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id,
+        "is_deleted": {"$ne": True},
+    })
+    if not household:
+        raise HTTPException(
+            status_code=404,
+            detail="No subscription found for this flat. Please Subscribe & Pay first.",
+        )
+
+    def _norm_name(s: str) -> str:
+        return " ".join((s or "").strip().lower().split())
+
+    stored_names = {
+        _norm_name(household.get("primary_name") or ""),
+        _norm_name(household.get("family_display_name") or ""),
+    }
+    stored_names.discard("")
+    if stored_names and _norm_name(name) not in stored_names:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
+    hh_mobile = (household.get("primary_mobile") or "").strip()
+    if mobile and hh_mobile and mobile != hh_mobile:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
+    intent = await db.subscription_intents.find_one(
+        {
+            "household_id": household["id"],
+            "kind": "subscription",
+            "status": {"$in": ["payment_pending", "pending", "authorised"]},
+        },
+        sort=[("created_at", -1)],
+    )
+    if intent:
+        payer = _norm_name(intent.get("payer_name") or "")
+        if payer:
+            stored_names.add(payer)
+        if stored_names and _norm_name(name) not in stored_names:
+            raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+    if not intent:
+        paid = await db.subscription_intents.find_one(
+            {"household_id": household["id"], "kind": "subscription", "status": "paid"},
+            sort=[("created_at", -1)],
+        )
+        if paid:
+            receipt = await db.receipts.find_one({"intent_id": paid["id"]}, {"_id": 0})
+            if receipt:
+                return {
+                    "status": "already_paid",
+                    "receipt_no": receipt.get("receipt_no"),
+                    "verify_token": receipt.get("verify_token"),
+                    "amount": fmt_inr(receipt.get("total_amount") or paid.get("total_amount") or 0),
+                    "pdf_url": f"/api/receipt/pdf/{receipt['verify_token']}",
+                    "message": "This flat already has a receipt.",
+                }
+        raise HTTPException(
+            status_code=404,
+            detail="No pending subscription payment for this flat.",
+        )
+
+    await audit(
+        "receipt.pending_lookup",
+        entity_type="subscription_intent",
+        entity_id=intent["id"],
+        request=request,
+    )
+    return {
+        "status": "payment_pending",
+        "intent_id": intent["id"],
+        "status_token": status_token(intent["id"]),
+        "total_amount": intent.get("total_amount"),
+        "amount": fmt_inr(intent.get("total_amount") or 0),
+        "household": {
+            "tower_name": household.get("tower_name") or "",
+            "flat_number": household.get("flat_number") or "",
+            "primary_name": household.get("primary_name") or "",
+        },
+        "message": "Upload your UTR / UPI reference and payment screenshot to generate the receipt.",
+    }
+
+
 @router.post("/receipt/find")
 async def find_receipt(body: dict = Body(...), request: Request = None):
     ip = request.client.host if request and request.client else "?"

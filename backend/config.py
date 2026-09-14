@@ -423,6 +423,51 @@ SPONSORSHIP_PACKAGES = {
         {"code": "bw_half", "name": "B/W Half Page", "amount_paise": 350000},
         {"code": "bw_quarter", "name": "B/W Quarter Page", "amount_paise": 250000},
     ],
+    # Website & social rate-card cut — packages that can close via the site / digital channels
+    "digital": [
+        {
+            "code": "website_presence",
+            "name": "Website Presence Partner",
+            "amount_paise": 5000000,
+            "channel": "website",
+            "benefits": [
+                "Logo on one10events.in homepage sponsor strip (Pujo season)",
+                "Featured placement on the public Sponsors page with brand blurb",
+                "Logo acknowledgement on Subscribe / Donate / campaign pages",
+                "One dedicated sponsor spotlight post on the website news/announcements strip",
+                "Hyperlink to your website or campaign landing page",
+                "Placement proof pack (screenshots + live URLs) after go-live",
+            ],
+        },
+        {
+            "code": "social_presence",
+            "name": "Social Media Presence Partner",
+            "amount_paise": 4000000,
+            "channel": "social",
+            "benefits": [
+                "3 feed posts across Facebook / Instagram (pre-Pujo + during Pujo)",
+                "5 Stories / short updates tagging your brand during the celebration days",
+                "1 Reel or short video mention (logo end-card + brand name in caption)",
+                "WhatsApp community broadcast shout-out to One10 resident groups",
+                "Tagged in live-update creatives where relevant",
+                "Analytics snapshot (reach / impressions) shared after the campaign",
+            ],
+        },
+        {
+            "code": "digital_bundle",
+            "name": "Digital Presence Bundle",
+            "amount_paise": 7500000,
+            "amount_label": "₹75,000 · save ₹15,000",
+            "channel": "website_social",
+            "benefits": [
+                "All Website Presence Partner deliverables",
+                "All Social Media Presence Partner deliverables",
+                "Priority logo size on homepage strip vs. standard digital partners",
+                "Co-branded thank-you creatives for website + social after Pujo",
+                "Ideal for brands that want measurable online recall without on-ground booths",
+            ],
+        },
+    ],
     "gallery": [
         "/images/campaign/full-35.jpg",
         "/images/campaign/full-13.jpg",
@@ -674,6 +719,7 @@ async def ensure_settings():
             not sp
             or not sp.get("premium")
             or not sp.get("souvenir_ads")
+            or not sp.get("digital")
             or not (sp.get("social") or {}).get("facebook")
         ):
             # Refresh sponsorship catalog from proposal; never touches organisation contacts/bank

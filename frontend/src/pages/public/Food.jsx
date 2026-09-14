@@ -874,6 +874,18 @@ export default function Food() {
                                           </span>
                                         ) : null}
                                       </div>
+                                      {item.description ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setMenuDetail(item)}
+                                          className="absolute right-3 top-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-vermilion-600 shadow-md ring-1 ring-brown-900/10 transition hover:bg-vermilion-500 hover:text-white"
+                                          aria-label={`View full menu for ${item.name}`}
+                                          data-testid={`food-menu-info-${item.id}`}
+                                          title="View full menu"
+                                        >
+                                          <Info className="h-5 w-5" strokeWidth={2.5} />
+                                        </button>
+                                      ) : null}
                                     </div>
                                     <div className="p-4 sm:p-5">
                                       <div className="flex items-start justify-between gap-2">
@@ -882,11 +894,12 @@ export default function Food() {
                                           <button
                                             type="button"
                                             onClick={() => setMenuDetail(item)}
-                                            className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full border border-sun-400/40 bg-sun-50 text-vermilion-600 transition hover:border-vermilion-500/50 hover:bg-vermilion-500/10"
+                                            className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full border border-vermilion-500/40 bg-vermilion-500/10 px-2.5 py-1 text-xs font-semibold text-vermilion-700 transition hover:bg-vermilion-500/15"
                                             aria-label={`View full menu for ${item.name}`}
-                                            data-testid={`food-menu-info-${item.id}`}
+                                            data-testid={`food-menu-info-label-${item.id}`}
                                           >
-                                            <Info className="h-4 w-4" />
+                                            <Info className="h-3.5 w-3.5" />
+                                            Menu
                                           </button>
                                         ) : null}
                                       </div>

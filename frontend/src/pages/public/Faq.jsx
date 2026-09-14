@@ -19,7 +19,7 @@ const DIRECTORY = [
   { to: "/sponsors", label: "Sponsors", blurb: "Brand partnership packages", icon: Handshake },
   { to: "/participate", label: "Participate", blurb: "Volunteer, perform, family activities", icon: Users },
   { to: "/receipt/find", label: "Find Receipt", blurb: "Look up your verified digital receipt", icon: Receipt },
-  { to: "/transparency", label: "Transparency", blurb: "Public finance summary (when published)", icon: ShieldCheck },
+  { to: "/transparency", label: "Pandal Meter", blurb: "Live Digital Pandal Meter", icon: ShieldCheck },
   { to: "/contact", label: "Contact", blurb: "Committee phone & address", icon: Phone },
   { to: "/privacy", label: "Privacy", blurb: "What data we collect", icon: ShieldCheck },
   { to: "/terms", label: "Terms", blurb: "Payment & contribution terms", icon: Building2 },
@@ -334,7 +334,7 @@ export default function Faq() {
           <FaqItem q="Privacy and terms?" id="faq-legal">
             <p>
               <PageLink to="/privacy">Privacy Policy</PageLink> · <PageLink to="/terms">Payment & Terms</PageLink> ·{" "}
-              <PageLink to="/transparency">Transparency</PageLink>
+              <PageLink to="/transparency">Digital Pandal Meter</PageLink>
             </p>
           </FaqItem>
         </section>

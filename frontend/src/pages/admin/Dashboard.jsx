@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { TrendingUp, Wallet, ShieldAlert, RefreshCw } from "lucide-react";
 import api from "../../lib/api";
 import { Card, CardBody, Stat, Tabs, StatusBadge, Spinner, Button } from "../../components/ui";
+import { FootfallDayChart } from "../../components/Footfall";
 import { formatPaise } from "../../lib/utils";
 
 function Bar({ value, max, label, right }) {
@@ -19,6 +20,7 @@ export default function Dashboard() {
   const [col, setCol] = useState(null);
   const [fin, setFin] = useState(null);
   const [aud, setAud] = useState(null);
+  const [foot, setFoot] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const load = () => {
@@ -27,6 +29,7 @@ export default function Dashboard() {
       api.get("/dashboards/collection").then((r) => setCol(r.data)),
       api.get("/dashboards/financial").then((r) => setFin(r.data)),
       api.get("/dashboards/audit").then((r) => setAud(r.data)),
+      api.get("/admin/footfall").then((r) => setFoot(r.data)).catch(() => setFoot(null)),
     ]).finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -48,6 +51,7 @@ export default function Dashboard() {
         { value: "collection", label: "Collection" },
         { value: "financial", label: "Financial" },
         { value: "audit", label: "Audit / Control" },
+        { value: "footfall", label: "Footfall" },
       ]} />
 
       {loading && <div className="flex justify-center py-16"><Spinner className="text-vermilion-500" /></div>}
@@ -137,6 +141,44 @@ export default function Dashboard() {
           </CardBody></Card>
         </div>
       )}
+
+      {!loading && tab === "footfall" && (
+        <div className="space-y-5" data-testid="footfall-dashboard">
+          {!foot ? (
+            <p className="text-sm text-brown-800/50">Could not load footfall stats.</p>
+          ) : (
+            <>
+              <p className="text-sm text-brown-800/60">{foot.note || "Website session visits — no resident PII."}</p>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Stat label="Today" value={foot.today_label || foot.today} />
+                <Stat label="Last 7 days" value={foot.last7_label || foot.last7} />
+                <Stat label="All-time" value={foot.total_label || foot.total} accent="text-vermilion-600" />
+                <Stat label="Next prize" value={foot.next_milestone_label || "—"} sub={foot.next_prize ? foot.next_prize.title : "—"} />
+              </div>
+              {foot.prizes?.length ? (
+                <Card><CardBody>
+                  <h3 className="mb-2 font-display text-xl">Prize milestones</h3>
+                  <p className="mb-4 text-xs text-brown-800/50">{foot.prize_note}</p>
+                  <ul className="space-y-2 text-sm">
+                    {foot.prizes.map((p) => (
+                      <li key={p.at} className="flex flex-wrap items-baseline gap-2 border-b border-brown-800/5 py-2">
+                        <span className="font-semibold tabular-nums text-vermilion-600">{p.at_label}</span>
+                        <span className="flex-1 text-brown-800/70">{p.title} — {p.prize}</span>
+                        {p.reached ? <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Unlocked</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </CardBody></Card>
+              ) : null}
+              <Card><CardBody>
+                <h3 className="mb-3 font-display text-xl">Daily visits</h3>
+                <FootfallDayChart series={foot.series || []} />
+              </CardBody></Card>
+            </>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

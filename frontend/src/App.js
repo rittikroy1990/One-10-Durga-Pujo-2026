@@ -3,8 +3,10 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "./context/AuthContext";
+import { FootfallProvider } from "./context/FootfallContext";
 import AuthCallback from "./components/AuthCallback";
 import AdminLayout, { RequireAuth } from "./components/AdminLayout";
+import { FootfallWelcomeCard, FootfallMilestoneBanner } from "./components/Footfall";
 
 import Home from "./pages/public/Home";
 import Subscribe from "./pages/public/Subscribe";
@@ -80,8 +82,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Toaster position="top-center" richColors closeButton />
-        <AppRoutes />
+        <FootfallProvider>
+          <Toaster position="top-center" richColors closeButton />
+          <FootfallMilestoneBanner />
+          <FootfallWelcomeCard />
+          <AppRoutes />
+        </FootfallProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -47,3 +47,5 @@ async def ensure_indexes():
     await db.audit_events.create_index("seq", unique=True)
     await db.audit_events.create_index("created_at")
     await db.journal_entries.create_index("journal_no", unique=True, sparse=True)
+    await db.footfall_days.create_index("date", unique=True)
+    await db.footfall_meta.create_index("_id", unique=True)

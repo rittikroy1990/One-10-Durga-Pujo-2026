@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Menu, X, Flower2 } from "lucide-react";
 import { Button } from "./ui";
 import TechSupportBrand from "./TechSupportBrand";
+import { FootfallTopBar } from "./Footfall";
 import api from "../lib/api";
 
 const LINKS = [
@@ -131,6 +132,7 @@ export function PublicFooter() {
 export default function PublicLayout({ children }) {
   return (
     <div className="min-h-screen bg-brown-800 text-ivory-100">
+      <FootfallTopBar />
       <PublicNav />
       <main>{children}</main>
       <PublicFooter />

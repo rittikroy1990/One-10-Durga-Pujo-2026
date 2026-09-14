@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import { FootfallHeroStrip } from "../../components/Footfall";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
@@ -72,6 +73,9 @@ export default function Home() {
             <motion.div variants={fade} custom={4} className="mt-7 flex items-center gap-2 text-sm text-ivory-100/60">
               <ShieldCheck className="h-4 w-4 text-emerald-400" />
               Every rupee is ledgered. Receipts issue only after payment is verified.
+            </motion.div>
+            <motion.div variants={fade} custom={5}>
+              <FootfallHeroStrip />
             </motion.div>
           </motion.div>
         </div>

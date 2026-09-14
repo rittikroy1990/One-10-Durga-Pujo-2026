@@ -5,8 +5,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from db import ensure_indexes
 from config import ensure_settings
@@ -37,6 +41,53 @@ app.add_middleware(
 for module in (routes_public, routes_collect, routes_manual, routes_finance,
                routes_procure, routes_ops, routes_gov, routes_ads):
     app.include_router(module.router)
+
+# Public uploaded PDFs / assets
+_UPLOADS = Path(__file__).resolve().parent.parent / "frontend" / "public" / "uploads"
+_UPLOADS.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS)), name="uploads")
+
+# Serve CRA production build when present (nginx also serves /static from disk).
+FRONTEND_BUILD = Path(__file__).resolve().parent.parent / "frontend" / "build"
+if FRONTEND_BUILD.is_dir() and (FRONTEND_BUILD / "index.html").exists():
+    assets = FRONTEND_BUILD / "static"
+    if assets.is_dir():
+        app.mount("/static", StaticFiles(directory=str(assets)), name="static")
+    images = FRONTEND_BUILD / "images"
+    if images.is_dir():
+        app.mount("/images", StaticFiles(directory=str(images)), name="images")
+
+    def _spa_index_response():
+        return FileResponse(
+            FRONTEND_BUILD / "index.html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
+    @app.get("/")
+    async def spa_index():
+        return _spa_index_response()
+
+    _ASSET_EXT = {
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".ico",
+        ".css", ".js", ".map", ".woff", ".woff2", ".ttf", ".pdf",
+    }
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        if full_path.startswith("api/") or full_path in ("docs", "openapi.json", "redoc"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404)
+        candidate = FRONTEND_BUILD / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        if Path(full_path).suffix.lower() in _ASSET_EXT:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Asset not found")
+        return _spa_index_response()
 
 
 @app.on_event("startup")

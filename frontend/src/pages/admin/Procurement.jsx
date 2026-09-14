@@ -28,7 +28,7 @@ export default function Procurement() {
 
   return (
     <div data-testid="procurement-page">
-      <h1 className="mb-1 font-display text-4xl">Budget & Procurement</h1>
+      <h1 className="mb-1 font-display text-4xl">Procurement</h1>
       <p className="mb-4 text-sm text-brown-800/50">Procure-to-pay with budget checks, thresholds, three-way match and maker-checker.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "budget", label: "Budget vs Actual" }, { value: "pr", label: "Purchase Requests" },

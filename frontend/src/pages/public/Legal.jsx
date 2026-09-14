@@ -1,18 +1,32 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Mail, MapPin, Phone, Building2, PenLine } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import TechSupportBrand from "../../components/TechSupportBrand";
+
+/** Authorised signatories under MoA — President, Joint Secretaries, Joint Treasurers. */
+const SIGNATORY_ROLES = /^(president|joint secretary|joint treasurer)$/i;
+
+function isSignatory(bearer) {
+  const role = (bearer?.designation || "").trim();
+  return SIGNATORY_ROLES.test(role);
+}
 
 export default function Legal({ type }) {
   const [cfg, setCfg] = useState(null);
   useEffect(() => { api.get("/config").then((r) => setCfg(r.data)); }, []);
 
   const org = cfg?.organisation || {};
-  const organiser = org.organiser || "Events Organizations Committee of One10";
+  const organiser = org.organiser || "ONE 10 EVENT ORGANISING COMMITEE";
   const address = org.address || "One10 Residential Complex, Thakdari, Newtown, Action Area 1, Kolkata – 700102, West Bengal";
   const legalStatus = org.legal_status || "Unregistered voluntary non-profit community association.";
   const sub = cfg?.subscription;
   const camp = cfg?.campaign;
+
+  const signatories = useMemo(
+    () => (org.office_bearers || []).filter(isSignatory),
+    [org.office_bearers],
+  );
 
   const CONTENT = {
     privacy: {
@@ -38,90 +52,135 @@ export default function Legal({ type }) {
       ].filter(Boolean),
     },
     contact: {
-      title: "Contact the Committee",
+      title: "Contact",
       body: [
-        `For queries about subscriptions, receipts or participation, contact ${organiser}.`,
-        `Principal address: ${address}.`,
-        org.moa_reference ? `Governance reference: ${org.moa_reference}` : null,
-        "Please do not share payment screenshots as proof — always use the verified receipt on this portal.",
-      ].filter(Boolean),
+        `For subscriptions, receipts or participation, reach ${organiser}.`,
+        "Please do not treat payment screenshots as proof — always use the verified receipt on this portal.",
+      ],
     },
   };
 
   const c = CONTENT[type] || CONTENT.privacy;
-  const bearers = org.office_bearers || [];
 
-  return (
-    <PublicLayout>
-      <div className="mx-auto max-w-3xl px-5 py-16">
-        <h1 className="font-display text-5xl text-ivory-100">{c.title}</h1>
-        {type === "contact" && (
-          <div className="mt-8" data-testid="contact-tech-support">
-            <TechSupportBrand />
+  if (type === "contact") {
+    return (
+      <PublicLayout>
+        <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-20 pb-10">
+          <div className="mx-auto max-w-3xl px-4 sm:px-5">
+            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Committee</p>
+            <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl" data-testid="contact-title">
+              Contact
+            </h1>
+            <p className="mt-2 max-w-xl text-brown-800/70">
+              Authorised signatories for committee matters. Address and channels below.
+            </p>
           </div>
-        )}
-        <div className="mt-6 space-y-4 text-ivory-100/75 leading-relaxed">
-          {c.body.map((p, i) => <p key={i}>{p}</p>)}
-        </div>
+        </section>
 
-        {type === "contact" && (
-          <div className="mt-8 space-y-6">
-            <div className="rounded-xl border border-gold-500/25 bg-brown-700/50 p-5" data-testid="contact-org-card">
-              <div className="text-xs uppercase tracking-widest text-gold-400">Organiser</div>
-              <div className="mt-1 font-display text-2xl text-ivory-100">{organiser}</div>
-              {org.short_name && <div className="text-sm text-ivory-100/60">{org.short_name}</div>}
-              <div className="mt-3 text-sm text-ivory-100/70">{address}</div>
-              {org.legal_status && <div className="mt-2 text-xs text-ivory-100/50">{org.legal_status}</div>}
-              <div className="mt-4 grid gap-1 text-sm text-ivory-100/80 sm:grid-cols-2">
-                {(org.primary_contact_name || org.primary_contact_role) && (
-                  <div className="sm:col-span-2">
-                    {org.primary_contact_name}{org.primary_contact_role ? ` (${org.primary_contact_role})` : ""}
-                    {org.primary_contact_phone ? ` · ${org.primary_contact_phone}` : ""}
-                  </div>
+        <section className="mx-auto max-w-3xl space-y-6 px-4 py-10 sm:px-5">
+          <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6" data-testid="contact-org-card">
+            <div className="flex items-start gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-vermilion-500/10 text-vermilion-600">
+                <Building2 className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-[0.28em] text-vermilion-500">Organiser</p>
+                <h2 className="mt-1 font-display text-2xl text-brown-900 sm:text-3xl">{organiser}</h2>
+                {org.legal_status && (
+                  <p className="mt-2 text-sm text-brown-800/55">{org.legal_status}</p>
                 )}
-                {(org.secondary_contact_name || org.secondary_contact_phone) && (
-                  <div className="sm:col-span-2">
-                    {org.secondary_contact_name}{org.secondary_contact_role ? ` (${org.secondary_contact_role})` : ""}
-                    {org.secondary_contact_phone ? ` · ${org.secondary_contact_phone}` : ""}
-                  </div>
-                )}
-                <div>Email: {org.contact_email || "—"}</div>
-                <div>Phone: {org.contact_phone || "—"}</div>
-                {org.pan && <div>PAN: {org.pan}</div>}
-                {org.date_of_formation && <div>Formed: {org.date_of_formation}</div>}
               </div>
-              {org.bank_account?.account_number && (
-                <div className="mt-4 rounded-lg border border-gold-500/20 bg-brown-900/40 p-3 text-sm">
-                  <div className="text-xs uppercase tracking-wider text-gold-400">Bank</div>
-                  <div className="mt-1 font-semibold text-ivory-100">{org.bank_account.account_name}</div>
-                  <div>A/c {org.bank_account.account_number} · IFSC {org.bank_account.ifsc}</div>
-                  <div className="text-ivory-100/50">{org.bank_account.bank}</div>
-                </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 text-sm text-brown-800/80">
+              <div className="flex items-start gap-2.5">
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-vermilion-500" />
+                <span>{address}</span>
+              </div>
+              {org.contact_email && (
+                <a href={`mailto:${org.contact_email}`} className="flex items-center gap-2.5 hover:text-vermilion-600">
+                  <Mail className="h-4 w-4 shrink-0 text-vermilion-500" />
+                  {org.contact_email}
+                </a>
               )}
-              {org.bank_operating_mandate && (
-                <p className="mt-4 text-xs text-ivory-100/45">Bank mandate: {org.bank_operating_mandate}</p>
+              {org.contact_phone && (
+                <div className="flex items-start gap-2.5">
+                  <Phone className="mt-0.5 h-4 w-4 shrink-0 text-vermilion-500" />
+                  <span>{org.contact_phone}</span>
+                </div>
               )}
             </div>
 
-            {bearers.length > 0 && (
-              <div className="rounded-xl border border-gold-500/20 bg-brown-800/40 p-5" data-testid="office-bearers">
-                <div className="text-xs uppercase tracking-widest text-gold-400">Governing committee</div>
-                <p className="mt-1 text-sm text-ivory-100/55">
-                  {org.governing_body_size || 11} office bearers · term {org.committee_term_years || 1} year
-                </p>
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {bearers.map((b) => (
-                    <li key={`${b.designation}-${b.name}`} className="border-b border-gold-500/10 pb-2 text-sm">
-                      <div className="font-semibold text-ivory-100">{b.name}</div>
-                      <div className="text-xs text-gold-400/90">{b.designation}</div>
-                      {b.phone && <div className="text-xs text-ivory-100/55">{b.phone}</div>}
-                    </li>
-                  ))}
-                </ul>
+            {org.bank_account?.account_number && (
+              <div className="mt-5 rounded-xl border border-sun-400/30 bg-sun-50/60 p-4 text-sm">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-brown-800/45">Bank account</div>
+                <div className="mt-1 font-semibold text-brown-900">{org.bank_account.account_name}</div>
+                <div className="mt-1 text-brown-800/75">
+                  A/c {org.bank_account.account_number} · IFSC {org.bank_account.ifsc}
+                </div>
+                <div className="text-brown-800/50">{org.bank_account.bank}</div>
               </div>
             )}
+
+            {(org.bank_operating_mandate || org.authorised_signatories_note) && (
+              <p className="mt-4 text-xs leading-relaxed text-brown-800/50">
+                {org.authorised_signatories_note || `Bank mandate: ${org.bank_operating_mandate}`}
+              </p>
+            )}
           </div>
-        )}
+
+          <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6" data-testid="office-bearers">
+            <div className="flex items-start gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-vermilion-500/10 text-vermilion-600">
+                <PenLine className="h-5 w-5" />
+              </span>
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.28em] text-vermilion-500">Authorised signatories</p>
+                <h2 className="mt-1 font-display text-2xl text-brown-900">Who can sign</h2>
+                <p className="mt-1 text-sm text-brown-800/60">
+                  President, Joint Secretaries and Joint Treasurers as authorised under the MoA.
+                </p>
+              </div>
+            </div>
+
+            {signatories.length === 0 ? (
+              <p className="mt-5 text-sm text-brown-800/50">Signatory list will appear here once published.</p>
+            ) : (
+              <ul className="mt-5 grid gap-3 sm:grid-cols-2">
+                {signatories.map((b) => (
+                  <li
+                    key={`${b.designation}-${b.name}`}
+                    className="rounded-xl border border-sun-400/25 bg-sun-50/50 px-4 py-3"
+                    data-testid={`signatory-${(b.designation || "").toLowerCase().replace(/\s+/g, "-")}`}
+                  >
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-vermilion-500">{b.designation}</div>
+                    <div className="mt-1 font-semibold text-brown-900">{b.name}</div>
+                    {b.phone && (
+                      <a href={`tel:${b.phone.replace(/\s/g, "")}`} className="mt-1 inline-block text-sm text-brown-800/65 hover:text-vermilion-600">
+                        {b.phone}
+                      </a>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div data-testid="contact-tech-support">
+            <TechSupportBrand />
+          </div>
+        </section>
+      </PublicLayout>
+    );
+  }
+
+  return (
+    <PublicLayout>
+      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-5">
+        <h1 className="font-display text-4xl text-brown-900 sm:text-5xl">{c.title}</h1>
+        <div className="mt-6 space-y-4 leading-relaxed text-brown-800/75">
+          {c.body.map((p, i) => <p key={i}>{p}</p>)}
+        </div>
       </div>
     </PublicLayout>
   );

@@ -10,7 +10,7 @@ export function Button({ variant = "primary", size = "md", className, children, 
     primary: "bg-vermilion-500 text-white hover:bg-vermilion-600 rounded-full",
     gold: "bg-gold-500 text-brown-900 hover:bg-gold-400 rounded-full",
     outline:
-      "border border-gold-500/60 text-ivory-100 hover:bg-gold-500/10 rounded-full",
+      "border-2 border-vermilion-500/55 bg-white text-brown-900 hover:bg-sun-50 hover:border-vermilion-500 rounded-full",
     dark: "bg-brown-800 text-ivory-100 hover:bg-brown-700 rounded-md",
     ghost: "text-brown-800 hover:bg-ivory-300 rounded-md",
     admin: "bg-brown-800 text-ivory-100 hover:bg-brown-700 rounded-md",

@@ -8,39 +8,28 @@ function fmt(n) {
   return Number(n).toLocaleString("en-IN");
 }
 
-/** Catchy WhatsApp share for Digital Pandal Meter + prize race */
+function nextMilestoneLabel(stats) {
+  return stats?.next_milestone_label || (stats?.next_milestone != null ? fmt(stats.next_milestone) : null);
+}
+
+/** WhatsApp share — 2000th-visit prize push (no named prizes). */
 export function buildFootfallShareText(visitNumber, stats) {
   const entry = visitNumber ? fmt(visitNumber) : null;
   const total = stats?.total_label || (stats?.total != null ? fmt(stats.total) : null);
-  const next = stats?.next_prize;
-  const ladder = (stats?.prizes || [])
-    .filter((p) => !p.reached)
-    .slice(0, 4)
-    .map((p) => `• ${p.at_label} — ${p.title}: ${p.prize}`)
-    .join("\n");
+  const next = nextMilestoneLabel(stats);
 
   const lines = [
     "🪔 One 10 Digital Pandal Meter",
     "",
     entry
-      ? `I'm pandal entry #${entry} at One 10 Durgotsav 2026!`
-      : "I just visited One 10 Durgotsav 2026!",
+      ? `This is Digital Pandal visit #${entry} at One 10 Durgotsav 2026!`
+      : "I just joined the One 10 Digital Pandal!",
     total ? `Live meter: ${total} visits and climbing.` : null,
-    "",
-    "Hit milestones → unlock festive prizes:",
-    ladder ||
-      [
-        "• 2,000 — Mithai Magic",
-        "• 3,000 — Souvenir Surprise",
-        "• 4,000 — Bhog for Two",
-        "• 5,000 — Prasadam Hamper",
-      ].join("\n"),
     next
-      ? `\nNext unlock: ${next.at_label} — ${next.title}!`
-      : null,
+      ? `Whoever is the lucky ${next}th visitor — share your visit on WhatsApp and you'll receive a prize!`
+      : "Share your Digital Pandal visit on WhatsApp and you'll receive a prize!",
     "",
-    "Every visit counts. Join the digital pandal → https://one10events.in",
-    "Share & bring your neighbours!",
+    "Join the digital pandal → https://one10events.in",
   ].filter((x) => x != null);
 
   return lines.join("\n");
@@ -50,7 +39,7 @@ export function FootfallTopBar({ className = "" }) {
   const { stats, visitNumber } = useFootfall();
   const today = stats?.today_label || fmt(stats?.today);
   const total = stats?.total_label || fmt(stats?.total);
-  const next = stats?.next_prize;
+  const next = nextMilestoneLabel(stats);
 
   return (
     <Link
@@ -70,8 +59,8 @@ export function FootfallTopBar({ className = "" }) {
             </p>
             <p className="font-display text-sm text-white sm:text-base">
               {next
-                ? `Next prize at ${next.at_label} — ${next.title}`
-                : "Live visits to One 10 Durgotsav"}
+                ? `Achieve next milestone ${next} · Share on WhatsApp to get a prize`
+                : "Share on WhatsApp to get a prize"}
             </p>
           </div>
         </div>
@@ -90,7 +79,7 @@ export function FootfallTopBar({ className = "" }) {
           </span>
           {visitNumber ? (
             <span className="hidden text-xs font-medium tabular-nums text-white/90 sm:inline">
-              Pandal entry #{fmt(visitNumber)}
+              Visit #{fmt(visitNumber)}
             </span>
           ) : null}
         </div>
@@ -102,31 +91,29 @@ export function FootfallTopBar({ className = "" }) {
 export function FootfallHeroStrip({ className = "" }) {
   const { stats, visitNumber } = useFootfall();
   if (!stats?.total) return null;
-  const next = stats?.next_prize;
+  const next = nextMilestoneLabel(stats);
   return (
     <p
-      className={`mt-3 text-center text-xs text-ivory-100/55 sm:mt-4 sm:text-left sm:text-sm ${className}`}
+      className={`mt-3 text-center text-xs text-brown-800/55 sm:mt-4 sm:text-left sm:text-sm ${className}`}
       data-testid="footfall-hero-strip"
     >
-      <span className="font-semibold text-ivory-100">{stats.total_label || fmt(stats.total)} visits</span>
-      {" since launch · "}
+      <span className="font-semibold text-brown-900">{stats.total_label || fmt(stats.total)} visits</span>
       {next ? (
         <>
-          Next prize at <span className="font-semibold text-gold-400">{next.at_label}</span>
-          {" — "}
-          {next.title}
+          {" · Achieve next milestone "}
+          <span className="font-semibold text-vermilion-600">{next}</span>
+          {" · Share on WhatsApp to get a prize"}
         </>
       ) : (
-        "Join your neighbours"
+        " · Share on WhatsApp to get a prize"
       )}
       {visitNumber ? (
-        <span className="text-ivory-100/40"> · Pandal entry #{fmt(visitNumber)}</span>
+        <span className="text-brown-800/40"> · Digital Pandal visit #{fmt(visitNumber)}</span>
       ) : null}
     </p>
   );
 }
 
-/** @deprecated Prefer FootfallTopBar — kept for rare footer use */
 export function FootfallMeter({ variant = "footer", className = "" }) {
   const { stats } = useFootfall();
   if (!stats) return null;
@@ -147,7 +134,15 @@ export function FootfallMeter({ variant = "footer", className = "" }) {
   );
 
   if (variant === "floating") {
-    return null;
+    return (
+      <Link
+        to="/transparency"
+        data-testid="footfall-meter-floating"
+        className={`fixed bottom-4 left-4 z-40 hidden max-w-[min(100%-2rem,20rem)] items-center gap-1.5 rounded-full border border-sun-400/40 bg-white/95 px-3 py-2 text-[11px] text-brown-800/70 shadow-md backdrop-blur transition hover:border-vermilion-500/40 hover:text-brown-900 sm:inline-flex ${className}`}
+      >
+        {inner}
+      </Link>
+    );
   }
 
   return (
@@ -166,7 +161,7 @@ export function FootfallWelcomeCard() {
   if (!showWelcome || !visitNumber) return null;
 
   const shareText = encodeURIComponent(buildFootfallShareText(visitNumber, stats));
-  const next = stats?.next_prize;
+  const next = nextMilestoneLabel(stats);
 
   return (
     <div
@@ -183,20 +178,23 @@ export function FootfallWelcomeCard() {
           <X className="h-4 w-4" />
         </button>
         <p className="pr-8 text-[10px] font-semibold uppercase tracking-[0.22em] text-vermilion-500">
-          Digital pandal meter
+          Welcome
         </p>
         <p className="mt-1 font-display text-2xl leading-tight text-brown-900">
-          Pandal entry #{fmt(visitNumber)}
+          Digital Pandal visit #{fmt(visitNumber)}
         </p>
         <p className="mt-2 text-sm text-brown-800/70">
-          Welcome to One 10 Durgotsav — this is entry {fmt(visitNumber)} into our digital pandal.
+          Welcome to One 10 Durgotsav — you are Digital Pandal visit #{fmt(visitNumber)}.
           {next ? (
             <>
               {" "}
-              Help unlock <span className="font-semibold text-brown-900">{next.title}</span> at{" "}
-              <span className="font-semibold tabular-nums text-vermilion-600">{next.at_label}</span>.
+              Help us reach the{" "}
+              <span className="font-semibold tabular-nums text-vermilion-600">{next}</span>
+              {" "}milestone — share on WhatsApp and you'll receive a prize.
             </>
-          ) : null}
+          ) : (
+            <> Share on WhatsApp and you'll receive a prize.</>
+          )}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <a
@@ -225,28 +223,20 @@ export function FootfallMilestoneBanner() {
   const { milestoneBanner, dismissMilestone, stats } = useFootfall();
   if (!milestoneBanner) return null;
   const at = typeof milestoneBanner === "object" ? milestoneBanner.at : milestoneBanner;
-  const prize =
-    (typeof milestoneBanner === "object" && milestoneBanner.prize) ||
-    stats?.milestone_prize ||
-    null;
   const label = fmt(at);
   return (
     <div
-      className="fixed inset-x-0 top-16 z-[55] flex justify-center px-3 sm:top-20"
+      className="fixed inset-x-0 top-[6.5rem] z-[55] flex justify-center px-3 sm:top-28"
       data-testid="footfall-milestone-banner"
     >
       <div className="flex max-w-xl items-start gap-3 rounded-xl border border-gold-500/40 bg-gradient-to-r from-sun-50 via-white to-sky-50 px-4 py-3 shadow-lg">
         <Sparkles className="mt-0.5 h-5 w-5 shrink-0 text-gold-500" />
         <div className="min-w-0 flex-1">
           <p className="font-display text-lg leading-snug text-brown-900 sm:text-xl">
-            {prize
-              ? `${prize.title} unlocked at ${label} visits!`
-              : `We’ve crossed ${label} visits — thank you, One 10.`}
+            We’ve crossed {label} visits — thank you, One 10.
           </p>
           <p className="mt-0.5 text-xs text-brown-800/55">
-            {prize
-              ? `${prize.prize}. Lucky entry to be announced on WhatsApp.`
-              : `All-time digital pandal meter: ${stats?.total_label || fmt(stats?.total)}`}
+            Share on WhatsApp and you will get a prize. All-time: {stats?.total_label || fmt(stats?.total)}
           </p>
         </div>
         <button
@@ -262,54 +252,28 @@ export function FootfallMilestoneBanner() {
   );
 }
 
-export function FootfallPrizeLadder({ prizes, total, prizeNote, className = "" }) {
-  const rows = prizes || [];
-  if (!rows.length) return null;
-  const current = Number(total) || 0;
-
+export function FootfallPrizeLadder({ prizeNote, className = "" }) {
+  const { stats } = useFootfall();
+  const next = nextMilestoneLabel(stats);
   return (
     <div className={className} data-testid="footfall-prize-ladder">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-2">
         <Gift className="h-4 w-4 text-vermilion-500" />
-        <h3 className="font-display text-lg text-brown-900">Prize milestones</h3>
+        <h3 className="font-display text-lg text-brown-900">Share &amp; win</h3>
       </div>
-      <ul className="space-y-2">
-        {rows.map((p) => {
-          const reached = !!p.reached || current >= Number(p.at);
-          return (
-            <li
-              key={p.at}
-              className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 ${
-                reached
-                  ? "border-emerald-500/30 bg-emerald-50/80"
-                  : "border-brown-800/10 bg-white/70"
-              }`}
-            >
-              <span
-                className={`mt-0.5 shrink-0 font-body text-sm font-bold tabular-nums ${
-                  reached ? "text-emerald-700" : "text-vermilion-600"
-                }`}
-              >
-                {p.at_label || fmt(p.at)}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-brown-900">
-                  {p.title}
-                  {reached ? (
-                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
-                      Unlocked
-                    </span>
-                  ) : null}
-                </p>
-                <p className="text-xs text-brown-800/60">{p.prize}</p>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      {prizeNote ? (
-        <p className="mt-3 text-xs text-brown-800/50">{prizeNote}</p>
-      ) : null}
+      <p className="text-sm text-brown-800/70">
+        {next ? (
+          <>
+            Achieve next milestone{" "}
+            <span className="font-semibold tabular-nums text-vermilion-600">{next}</span>
+            {" · "}
+          </>
+        ) : null}
+        {prizeNote || "Share on WhatsApp to get a prize."}
+      </p>
+      <div className="mt-3">
+        <FootfallShareButton />
+      </div>
     </div>
   );
 }
@@ -334,7 +298,7 @@ export function FootfallDayChart({ series, className = "" }) {
   const rows = series || [];
   const max = Math.max(1, ...rows.map((r) => Number(r.count) || 0));
   if (!rows.length) {
-    return <p className="text-sm text-brown-800/50">Visit data will appear as guests arrive.</p>;
+    return <p className="text-sm text-brown-800/50">Visit data will appear as the meter climbs.</p>;
   }
   return (
     <div className={`space-y-2 ${className}`} data-testid="footfall-day-chart">

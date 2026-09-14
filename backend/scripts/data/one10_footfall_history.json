@@ -1,0 +1,15 @@
+{
+  "method": "pageviews_entry_paths_or_3min_activity_buckets_v2",
+  "note": "Counts each browser page load (entry routes + /api/config with one10 referer). Uses 3-minute activity buckets when higher so landings are not missed. Refresh/multi-visit included.",
+  "total": 1379,
+  "daily": {
+    "2026-09-08": 168,
+    "2026-09-09": 370,
+    "2026-09-10": 70,
+    "2026-09-11": 115,
+    "2026-09-12": 257,
+    "2026-09-13": 331,
+    "2026-09-14": 68
+  },
+  "seed_id": "pageviews_or_3min_buckets_v2"
+}

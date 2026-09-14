@@ -2,22 +2,25 @@ import React, { useState } from "react";
 import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
-  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode,
+  ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, Receipt,
+  UtensilsCrossed,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Spinner } from "./ui";
 
 const NAV = [
-  { to: "/admin", label: "Dashboards", icon: LayoutDashboard, end: true, perm: "reports:read" },
+  { to: "/admin", label: "Control Tower", icon: LayoutDashboard, end: true, perm: "reports:read" },
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
+  { to: "/admin/expenses", label: "Expenses", icon: Receipt, perm: "budget:read" },
+  { to: "/admin/food", label: "Food subscriptions", icon: UtensilsCrossed, perm: "households:read" },
   // Hidden for now — finance/ops modules not needed in current committee workflow
   { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read", hidden: true },
   { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read", hidden: true },
   { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read", hidden: true },
   { to: "/admin/operations", label: "Operations", icon: Users2, perm: "ops:read", hidden: true },
   { to: "/admin/reports", label: "Reports", icon: FileBarChart, perm: "reports:read", hidden: true },
-  { to: "/admin/audit", label: "Audit Trail", icon: ScrollText, perm: "audit:read", hidden: true },
-  { to: "/admin/periods", label: "Period Close", icon: Lock, perm: "reports:read", hidden: true },
+  { to: "/admin/audit", label: "Audit", icon: ScrollText, perm: "audit:read", hidden: true },
+  { to: "/admin/periods", label: "Period close", icon: Lock, perm: "reports:read", hidden: true },
   { to: "/upload-qr", label: "Payment QR", icon: QrCode, perm: "settings:manage" },
   { to: "/admin/settings", label: "Settings", icon: Settings2, perm: "settings:read" },
 ];
@@ -69,7 +72,7 @@ export default function AdminLayout() {
         <header className="sticky top-0 z-20 flex items-center justify-between border-b border-brown-800/10 bg-ivory-200/90 px-5 py-3 backdrop-blur">
           <button className="md:hidden" onClick={() => setOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
           <div className="hidden items-center gap-2 text-xs text-brown-800/50 md:flex">
-            <ShieldCheck className="h-4 w-4 text-emerald-600" /> Backend-enforced roles · Asia/Kolkata · INR
+            <ShieldCheck className="h-4 w-4 text-emerald-600" /> Committee portal
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">

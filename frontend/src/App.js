@@ -3,13 +3,15 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "./context/AuthContext";
+import { ConfigProvider } from "./context/ConfigContext";
 import { FootfallProvider } from "./context/FootfallContext";
 import AuthCallback from "./components/AuthCallback";
 import AdminLayout, { RequireAuth } from "./components/AdminLayout";
-import { FootfallWelcomeCard, FootfallMilestoneBanner } from "./components/Footfall";
 
 import Home from "./pages/public/Home";
 import Subscribe from "./pages/public/Subscribe";
+import Donate from "./pages/public/Donate";
+import Food from "./pages/public/Food";
 import PaymentStatus from "./pages/public/PaymentStatus";
 import ReceiptFind from "./pages/public/ReceiptFind";
 import ReceiptVerify from "./pages/public/ReceiptVerify";
@@ -20,12 +22,16 @@ import PublicReport from "./pages/public/PublicReport";
 import Legal from "./pages/public/Legal";
 import Sponsors from "./pages/public/Sponsors";
 import Faq from "./pages/public/Faq";
-import Donate from "./pages/public/Donate";
 import UploadPaymentQr from "./pages/public/UploadPaymentQr";
+import FoodPoll from "./pages/public/FoodPoll";
+import UploadPdf from "./pages/public/UploadPdf";
+import Invite from "./pages/public/Invite";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
 import Collection from "./pages/admin/Collection";
+import Expenses from "./pages/admin/Expenses";
+import FoodAdmin from "./pages/admin/FoodAdmin";
 import Reconciliation from "./pages/admin/Reconciliation";
 import Accounting from "./pages/admin/Accounting";
 import Procurement from "./pages/admin/Procurement";
@@ -45,24 +51,35 @@ function AppRoutes() {
       <Route path="/" element={<Home />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
+      <Route path="/food" element={<Food />} />
+      <Route path="/food-poll" element={<FoodPoll />} />
+      <Route path="/food/vote" element={<FoodPoll />} />
       <Route path="/payment/status" element={<PaymentStatus />} />
       <Route path="/receipt/find" element={<ReceiptFind />} />
       <Route path="/receipt/verify/:token" element={<ReceiptVerify />} />
       <Route path="/events" element={<Events />} />
       <Route path="/nirghanto" element={<Nirghanto />} />
+      <Route path="/faq" element={<Faq />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
-      <Route path="/faq" element={<Faq />} />
+      <Route path="/invite" element={<Invite />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
       <Route path="/terms" element={<Legal type="terms" />} />
+      <Route path="/terms-and-conditions" element={<Legal type="terms" />} />
+      <Route path="/refunds" element={<Legal type="refunds" />} />
+      <Route path="/refunds-and-cancellations" element={<Legal type="refunds" />} />
       <Route path="/contact" element={<Legal type="contact" />} />
+      <Route path="/contact-us" element={<Legal type="contact" />} />
       <Route path="/upload-qr" element={<UploadPaymentQr />} />
+      <Route path="/upload-pdf" element={<UploadPdf />} />
 
       <Route path="/admin/login" element={<Login />} />
       <Route path="/admin" element={<RequireAuth><AdminLayout /></RequireAuth>}>
         <Route index element={<Dashboard />} />
         <Route path="collection" element={<Collection />} />
+        <Route path="expenses" element={<Expenses />} />
+        <Route path="food" element={<FoodAdmin />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="procurement" element={<Procurement />} />
@@ -82,12 +99,12 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <FootfallProvider>
-          <Toaster position="top-center" richColors closeButton />
-          <FootfallMilestoneBanner />
-          <FootfallWelcomeCard />
-          <AppRoutes />
-        </FootfallProvider>
+        <ConfigProvider>
+          <FootfallProvider>
+            <Toaster position="top-center" richColors closeButton />
+            <AppRoutes />
+          </FootfallProvider>
+        </ConfigProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -31,7 +31,7 @@ export default function Accounting() {
 
   return (
     <div data-testid="accounting-page">
-      <h1 className="mb-1 font-display text-4xl">Accounting Ledger</h1>
+      <h1 className="mb-1 font-display text-4xl">Accounting</h1>
       <p className="mb-4 text-sm text-brown-800/50">Double-entry. Posted journals are immutable — corrections use reversals only.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "trial", label: "Trial Balance" },

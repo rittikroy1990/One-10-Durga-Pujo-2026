@@ -47,7 +47,7 @@ export default function Periods() {
 
   return (
     <div data-testid="periods-page">
-      <h1 className="mb-1 font-display text-4xl">Period Close & Transparency</h1>
+      <h1 className="mb-1 font-display text-4xl">Period close</h1>
       <p className="mb-4 text-sm text-brown-800/50">Close blocks until unresolved items are explained. Reopen needs a reason and two approvals.</p>
       {loading && <Spinner className="text-vermilion-500" />}
 

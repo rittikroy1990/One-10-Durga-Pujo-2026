@@ -1,5 +1,5 @@
-"""Phase 1 collection core: subscribe, Razorpay payment state machine, receipts, refunds,
-and manual (cash/bank-transfer/cheque) maker-checker modes."""
+"""Phase 1 collection core: subscribe, UPI QR payment, receipts, refunds,
+and manual (cash/bank-transfer/cheque) maker-checker modes. Payment gateways disabled."""
 from fastapi import APIRouter, Depends, Request, HTTPException, Body, Response
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -15,7 +15,6 @@ from ledger import post_journal, reverse_journal
 from tokens import receipt_token, status_token, read_status_token
 from docs import receipt_pdf
 from auth import require, get_current_user, require_reauth
-import payments as pay
 from notify import notify
 
 router = APIRouter(prefix="/api")
@@ -25,7 +24,7 @@ OCCUPANCY = {"owner_resident", "tenant_resident", "owner_non_resident", "other"}
 
 class SubscribeIn(BaseModel):
     primary_contact_name: str
-    mobile: str
+    mobile: Optional[str] = ""
     tower_id: str
     flat_id: str
     occupancy_type: str
@@ -50,7 +49,7 @@ class DonateIn(BaseModel):
     """Standalone voluntary donation — decoupled from family subscription."""
     donor_type: str  # "resident" | "other"
     donor_name: str
-    mobile: str
+    mobile: Optional[str] = ""
     email: Optional[str] = None
     donation_rupees: float
     accuracy_confirmed: bool
@@ -73,6 +72,75 @@ async def _components(settings, donation_paise):
     return comps
 
 
+def _intent_due_paise(intent: dict) -> int:
+    if intent.get("amount_due_paise") is not None:
+        return max(0, int(intent["amount_due_paise"]))
+    return max(0, int(intent.get("total_amount") or 0))
+
+
+def _payable_heads(intent: dict) -> list:
+    """Current unpaid heads (components + donation) for proportional allocation."""
+    heads = []
+    for c in intent.get("components") or []:
+        amt = int(c.get("amount_paise") or 0)
+        if amt > 0:
+            heads.append({
+                "code": c.get("code") or "",
+                "label": c.get("label") or c.get("code") or "Component",
+                "amount_paise": amt,
+                "account_code": c.get("account_code") or "4001",
+            })
+    don = int(intent.get("donation_amount") or 0)
+    if don > 0:
+        heads.append({
+            "code": "DONATION",
+            "label": "Voluntary Donation",
+            "amount_paise": don,
+            "account_code": "4100",
+        })
+    if not heads:
+        total = _intent_due_paise(intent)
+        if total > 0:
+            kind = intent.get("kind") or "subscription"
+            if kind == "donation":
+                label, acct, code = "Voluntary Donation", "4100", "DONATION"
+            elif kind == "food_subscription":
+                label, acct, code = "Food Subscription", "4100", "FOOD"
+            else:
+                label, acct, code = "Subscription", "4001", "SUB"
+            heads.append({"code": code, "label": label, "amount_paise": total, "account_code": acct})
+    return heads
+
+
+def _proportion_allocate(heads: list, paid_paise: int) -> list:
+    """Split paid_paise across heads in proportion to their amounts (paise-exact)."""
+    total = sum(int(h["amount_paise"]) for h in heads)
+    if paid_paise <= 0 or total <= 0:
+        return []
+    paid = min(int(paid_paise), total)
+    if paid >= total:
+        return [{**h, "amount_paise": int(h["amount_paise"])} for h in heads]
+    out, used = [], 0
+    for i, h in enumerate(heads):
+        if i == len(heads) - 1:
+            share = paid - used
+        else:
+            share = (paid * int(h["amount_paise"])) // total
+            used += share
+        out.append({**h, "amount_paise": int(share)})
+    return out
+
+
+def _subtract_heads(heads: list, allocated: list) -> list:
+    taken = {a.get("code"): int(a["amount_paise"]) for a in allocated}
+    rem = []
+    for h in heads:
+        left = int(h["amount_paise"]) - taken.get(h.get("code"), 0)
+        if left > 0:
+            rem.append({**h, "amount_paise": left})
+    return rem
+
+
 @router.post("/subscribe")
 async def subscribe(body: SubscribeIn, request: Request):
     settings = await get_settings()
@@ -81,8 +149,10 @@ async def subscribe(body: SubscribeIn, request: Request):
         raise HTTPException(status_code=423, detail="This campaign cycle is locked.")
     if not (body.accuracy_confirmed and body.privacy_consent and body.terms_consent):
         raise HTTPException(status_code=400, detail="All confirmations and consents are required.")
-    if not valid_indian_mobile(body.mobile):
+    mobile = (body.mobile or "").strip()
+    if not valid_indian_mobile(mobile):
         raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+    body.mobile = mobile
     if body.occupancy_type not in OCCUPANCY:
         raise HTTPException(status_code=400, detail="Invalid occupancy type.")
 
@@ -144,8 +214,9 @@ async def subscribe(body: SubscribeIn, request: Request):
     }
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
-                entity_id=intent["id"], after={"total": intent["total_amount"], "household": hid,
-                                               "method": intent["method"]},
+                entity_id=intent["id"], correlation_id=intent["id"],
+                after={"total": intent["total_amount"], "household": hid,
+                       "method": intent["method"]},
                 request=request)
 
     return {
@@ -170,8 +241,10 @@ async def donate(body: DonateIn, request: Request):
         raise HTTPException(status_code=403, detail="Donations are not open for this campaign.")
     if not (body.accuracy_confirmed and body.privacy_consent and body.terms_consent):
         raise HTTPException(status_code=400, detail="All confirmations and consents are required.")
-    if not valid_indian_mobile(body.mobile):
+    mobile = (body.mobile or "").strip()
+    if not valid_indian_mobile(mobile):
         raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+    body.mobile = mobile
     donor_type = (body.donor_type or "").strip().lower()
     if donor_type not in ("resident", "other"):
         raise HTTPException(status_code=400, detail="Choose whether you are a One 10 resident or other.")
@@ -180,12 +253,8 @@ async def donate(body: DonateIn, request: Request):
         raise HTTPException(status_code=400, detail="Enter the donor full name.")
 
     donation = rupees_to_paise(max(body.donation_rupees or 0, 0))
-    min_paise = int(sub.get("donation_min_paise") or 10000)  # default ₹100
-    if donation < min_paise:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Minimum donation is {fmt_inr(min_paise)}.",
-        )
+    if donation <= 0:
+        raise HTTPException(status_code=400, detail="Enter a donation amount greater than zero.")
 
     tower_name = ""
     flat_number = ""
@@ -274,6 +343,7 @@ async def donate(body: DonateIn, request: Request):
         "donation.intent.create",
         entity_type="subscription_intent",
         entity_id=intent["id"],
+        correlation_id=intent["id"],
         after={"total": donation, "donor_type": donor_type, "household": hid},
         request=request,
     )
@@ -289,56 +359,117 @@ async def donate(body: DonateIn, request: Request):
     }
 
 
-# --------------------------------------------------------------- Payment order + verify + webhook
+# --------------------------------------------------------------- Payment gateway (DISABLED — UPI QR only)
+_GATEWAY_GONE = (
+    "Online payment gateways are disabled. Please pay via the uploaded UPI QR "
+    "and submit your payment screenshot."
+)
+
+
 @router.post("/payments/order")
 async def create_order(body: dict = Body(...)):
-    intent_id = body.get("intent_id")
-    intent = await db.subscription_intents.find_one({"id": intent_id})
-    if not intent:
-        raise HTTPException(status_code=404, detail="Subscription intent not found.")
-    if intent["status"] == "paid":
-        raise HTTPException(status_code=409, detail="This subscription is already paid.")
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
 
-    # reuse a still-valid created order
-    existing = await db.payment_orders.find_one({"intent_id": intent_id, "status": "created"})
-    if existing:
-        return {"internal_order_id": existing["id"], "provider_order_id": existing["provider_order_id"],
-                "amount": existing["expected_amount"], "currency": "INR", "key_id": pay.KEY_ID,
-                "status_token": status_token(intent_id), "mode": existing.get("mode", "test")}
 
-    amount = int(intent["total_amount"])  # server-computed only
-    attempt_no = await db.payment_orders.count_documents({"intent_id": intent_id}) + 1
-    provider_order_id, mode = pay.create_order(amount, receipt=intent_id[:40],
-                                               notes={"household_id": intent["household_id"]})
-    order = {
-        "id": new_id("ord"), "intent_id": intent_id, "household_id": intent["household_id"],
-        "provider": pay.PROVIDER, "provider_order_id": provider_order_id,
-        "expected_amount": amount, "currency": "INR", "status": "created",
-        "attempt_no": attempt_no, "mode": mode,
-        "expires_at": iso(), "created_at": iso(),
+@router.post("/payments/verify")
+async def verify_checkout(body: dict = Body(...), request: Request = None):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/simulate")
+async def simulate_payment(body: dict = Body(...), request: Request = None):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/cashfree/session")
+async def cashfree_session_disabled(body: dict = Body(None)):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.post("/payments/cashfree/verify")
+async def cashfree_verify_disabled(body: dict = Body(None)):
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+@router.api_route("/webhooks/cashfree", methods=["GET", "POST"])
+async def cashfree_webhook_disabled():
+    raise HTTPException(status_code=410, detail=_GATEWAY_GONE)
+
+
+async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, debit_account, request=None,
+                         paid_amount_paise=None, bank_verified: bool = True,
+                         issuance_source: str = "collection"):
+    """Atomically settle (full or partial), allocate heads, post ledger and issue ONE receipt.
+
+    bank_verified=True for committee/cash/bank collection paths.
+    bank_verified=False for resident screenshot self-serve (issued, not bank verified).
+    """
+    due = _intent_due_paise(intent)
+    paid = int(paid_amount_paise if paid_amount_paise is not None else due)
+    if paid <= 0:
+        return None
+    if paid > due:
+        paid = due
+
+    heads = _payable_heads(intent)
+    allocated = _proportion_allocate(heads, paid)
+    if not allocated:
+        return None
+    is_full = paid >= due
+    remaining_heads = [] if is_full else _subtract_heads(heads, allocated)
+    remaining_total = 0 if is_full else sum(int(h["amount_paise"]) for h in remaining_heads)
+    rem_comps = [h for h in remaining_heads if h.get("code") != "DONATION"]
+    rem_don = sum(int(h["amount_paise"]) for h in remaining_heads if h.get("code") == "DONATION")
+    alloc_comps = [h for h in allocated if h.get("code") != "DONATION"]
+    alloc_don = sum(int(h["amount_paise"]) for h in allocated if h.get("code") == "DONATION")
+    # Heads that used synthetic SUB/FOOD codes still count as base components on the receipt
+    if not alloc_comps and not alloc_don:
+        alloc_comps = list(allocated)
+    already_paid = int(intent.get("amount_paid_paise") or 0) + paid
+    original_total = int(intent.get("original_total_amount") or (int(intent.get("amount_paid_paise") or 0) + due))
+    new_status = "paid" if is_full else "partially_paid"
+
+    update = {
+        "status": new_status,
+        "last_payment_at": iso(),
+        "amount_paid_paise": already_paid,
+        "amount_due_paise": remaining_total,
+        "original_total_amount": original_total,
+        "total_amount": original_total if is_full else remaining_total,
     }
-    await db.payment_orders.insert_one(dict(order))
-    await db.payment_attempts.insert_one({
-        "id": new_id("att"), "order_id": order["id"], "intent_id": intent_id,
-        "attempt_no": attempt_no, "status": "created", "created_at": iso()})
-    await audit("payment.order.create", entity_type="payment_order", entity_id=order["id"],
-                after={"provider_order_id": provider_order_id, "amount": amount})
-    return {"internal_order_id": order["id"], "provider_order_id": provider_order_id,
-            "amount": amount, "currency": "INR", "key_id": pay.KEY_ID,
-            "status_token": status_token(intent_id), "mode": mode}
+    if is_full:
+        update["paid_at"] = iso()
+        if intent.get("original_components") is not None:
+            update["components"] = intent.get("original_components")
+            update["donation_amount"] = int(intent.get("original_donation_amount") or 0)
+            update["base_amount"] = int(intent.get("original_base_amount") or 0)
+        else:
+            update["components"] = intent.get("components") or []
+            update["donation_amount"] = int(intent.get("donation_amount") or 0)
+            update["base_amount"] = int(intent.get("base_amount") or 0)
+    else:
+        update["partially_paid_at"] = iso()
+        update["components"] = rem_comps
+        update["donation_amount"] = rem_don
+        update["base_amount"] = sum(int(c["amount_paise"]) for c in rem_comps)
+        if not intent.get("original_components"):
+            update["original_components"] = intent.get("components") or []
+            update["original_donation_amount"] = int(intent.get("donation_amount") or 0)
+            update["original_base_amount"] = int(intent.get("base_amount") or 0)
 
-
-async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, debit_account, request=None):
-    """Atomically claim the intent, allocate components, post the ledger and issue ONE receipt."""
     claimed = await db.subscription_intents.find_one_and_update(
-        {"id": intent["id"], "status": {"$in": ["payment_pending", "pending", "authorised"]}},
-        {"$set": {"status": "paid", "paid_at": iso()}},
+        {"id": intent["id"], "status": {"$in": ["payment_pending", "pending", "authorised", "partially_paid"]}},
+        {"$set": update},
         return_document=True)
     if not claimed:
-        # Already paid — duplicate settlement for this intent.
         await db.duplicate_payments.insert_one({
             "id": new_id("dup"), "intent_id": intent["id"], "household_id": intent["household_id"],
-            "provider_payment_id": provider_payment_id, "amount": intent["total_amount"],
+            "provider_payment_id": provider_payment_id, "amount": paid,
             "method": method, "status": "refund_review", "created_at": iso()})
         await audit("payment.duplicate.detected", entity_type="subscription_intent",
                     entity_id=intent["id"], after={"payment_id": provider_payment_id})
@@ -350,19 +481,16 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     n, receipt_no = await next_formatted("receipt", settings["receipt"]["prefix"], 6)
     rid = new_id("rcpt")
     kind = intent.get("kind") or "subscription"
-    if kind == "donation":
-        lines = [
-            {"account_code": debit_account, "debit": intent["total_amount"], "credit": 0},
-            {"account_code": "4100", "debit": 0, "credit": intent["total_amount"]},
-        ]
-        narration = f"Donation receipt {receipt_no} ({method})"
-    else:
-        lines = [{"account_code": debit_account, "debit": intent["total_amount"], "credit": 0}]
-        for comp in intent.get("components") or []:
-            lines.append({"account_code": comp["account_code"], "debit": 0, "credit": comp["amount_paise"]})
-        if intent.get("donation_amount"):
-            lines.append({"account_code": "4100", "debit": 0, "credit": intent["donation_amount"]})
-        narration = f"Subscription receipt {receipt_no} ({method})"
+
+    lines = [{"account_code": debit_account, "debit": paid, "credit": 0}]
+    for h in allocated:
+        if int(h["amount_paise"]) > 0:
+            lines.append({"account_code": h["account_code"], "debit": 0, "credit": int(h["amount_paise"])})
+    kind_label = (
+        "Food subscription" if kind == "food_subscription"
+        else ("Donation" if kind == "donation" else "Subscription")
+    )
+    narration = f"{'Partial ' if not is_full else ''}{kind_label} receipt {receipt_no} ({method})"
     journal = await post_journal(source_type="receipt", source_id=rid,
                                  narration=narration,
                                  lines=lines, actor="system")
@@ -373,132 +501,51 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "payment_id": provider_payment_id, "kind": kind,
         "payer_name": intent.get("payer_name") or household.get("primary_name"),
         "payer_mobile": intent.get("payer_mobile") or household.get("primary_mobile") or "",
-        "tower_name": household.get("tower_name") or ("External donor" if kind == "donation" else ""),
-        "flat_number": household.get("flat_number") or ("—" if kind == "donation" else ""),
-        "base_amount": intent.get("base_amount") or 0,
-        "donation_amount": intent.get("donation_amount") or 0,
-        "total_amount": intent["total_amount"],
-        "components": intent.get("components") or [],
+        "tower_name": household.get("tower_name") or (
+            "External donor" if kind == "donation" else ("Food subscription" if kind == "food_subscription" else "")
+        ),
+        "flat_number": household.get("flat_number") or (
+            "—" if kind in ("donation", "food_subscription") else ""
+        ),
+        "base_amount": sum(int(c["amount_paise"]) for c in alloc_comps),
+        "donation_amount": alloc_don,
+        "total_amount": paid,
+        "components": alloc_comps,
         "method": method, "masked_ref": masked_ref, "status": "issued",
+        "bank_verified": bool(bank_verified),
+        "issuance_source": issuance_source or ("payment_screenshot" if not bank_verified else "collection"),
         "journal_id": journal["id"], "issued_at": iso(),
         "campaign_title": campaign_title,
         "donor_type": intent.get("donor_type") or "",
+        "food_subscription_id": intent.get("food_subscription_id") or "",
+        "is_partial": not is_full,
+        "amount_due_after": remaining_total,
+        "original_total_amount": original_total,
+        "amount_paid_to_date": already_paid,
     }
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
+    food_id = intent.get("food_subscription_id")
+    if kind == "food_subscription" and food_id and is_full:
+        await db.food_subscriptions.update_one(
+            {"id": food_id},
+            {"$set": {
+                "payment_status": "paid",
+                "status": "paid",
+                "receipt_id": rid,
+                "receipt_no": receipt_no,
+                "intent_id": intent["id"],
+                "updated_at": iso(),
+            }},
+        )
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
-                after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind}, request=request)
+                correlation_id=intent.get("id") or "",
+                after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind,
+                       "partial": not is_full, "due_after": remaining_total}, request=request)
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
                  subject=f"Your {campaign_title} receipt {receipt_no}",
                  data={"receipt_no": receipt_no})
     return clean(receipt)
-
-
-async def _finalize_online(order, provider_payment_id, request=None):
-    """Idempotent finalisation of a verified online payment."""
-    intent = await db.subscription_intents.find_one({"id": order["intent_id"]})
-    if not intent:
-        return {"status": "error", "detail": "intent missing"}
-    # idempotency: unique payment record
-    try:
-        await db.payments.insert_one({
-            "id": new_id("pay"), "provider": pay.PROVIDER, "provider_payment_id": provider_payment_id,
-            "order_id": order["id"], "intent_id": order["intent_id"],
-            "amount": order["expected_amount"], "currency": "INR", "status": "captured",
-            "created_at": iso()})
-    except Exception:
-        return {"status": "already_processed", "provider_payment_id": provider_payment_id}
-
-    # amount / currency confirmation
-    if int(order["expected_amount"]) != int(intent["total_amount"]):
-        await db.payment_orders.update_one({"id": order["id"]}, {"$set": {"status": "reconciliation_required"}})
-        await audit("payment.reconciliation_required", entity_type="payment_order",
-                    entity_id=order["id"], reason="amount mismatch")
-        return {"status": "reconciliation_required"}
-
-    receipt = await _issue_receipt(intent, method="razorpay",
-                                   masked_ref="xxxx" + provider_payment_id[-4:],
-                                   provider_payment_id=provider_payment_id,
-                                   debit_account="1003", request=request)
-    await db.payment_orders.update_one({"id": order["id"]}, {"$set": {"status": "paid"}})
-    if receipt is None:
-        return {"status": "duplicate_payment", "message": "Excess payment queued for refund review."}
-    return {"status": "paid", "receipt": receipt}
-
-
-@router.post("/payments/verify")
-async def verify_checkout(body: dict = Body(...), request: Request = None):
-    order_id = body.get("internal_order_id")
-    provider_order_id = body.get("razorpay_order_id")
-    payment_id = body.get("razorpay_payment_id")
-    signature = body.get("razorpay_signature")
-    order = await db.payment_orders.find_one({"id": order_id}) if order_id else \
-        await db.payment_orders.find_one({"provider_order_id": provider_order_id})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found.")
-    if not pay.verify_checkout_signature(order["provider_order_id"], payment_id, signature):
-        await db.payment_attempts.update_one({"order_id": order["id"]},
-                                             {"$set": {"status": "signature_invalid"}})
-        await audit("payment.signature.invalid", entity_type="payment_order", entity_id=order["id"])
-        raise HTTPException(status_code=400, detail="Invalid payment signature.")
-    result = await _finalize_online(order, payment_id, request)
-    return result
-
-
-@router.post("/payments/simulate")
-async def simulate_payment(body: dict = Body(...), request: Request = None):
-    """PREVIEW/TEST ONLY — demonstrates the verified path with a server-signed test payment.
-    Disabled when RAZORPAY_MODE=live."""
-    if pay.is_live():
-        raise HTTPException(status_code=403, detail="Simulation disabled in live mode.")
-    order = await db.payment_orders.find_one({"id": body.get("internal_order_id")})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found.")
-    payment_id, signature = pay.simulate_success_signature(order["provider_order_id"])
-    if not pay.verify_checkout_signature(order["provider_order_id"], payment_id, signature):
-        raise HTTPException(status_code=500, detail="Simulation signature failed.")
-    result = await _finalize_online(order, payment_id, request)
-    result["simulated"] = True
-    return result
-
-
-@router.post("/webhooks/razorpay")
-async def razorpay_webhook(request: Request):
-    raw = await request.body()
-    signature = request.headers.get("X-Razorpay-Signature", "")
-    verified = pay.verify_webhook_signature(raw, signature)
-    try:
-        payload = json.loads(raw.decode() or "{}")
-    except Exception:
-        payload = {}
-    event_id = request.headers.get("X-Razorpay-Event-Id") or payload.get("id") or new_id("evt")
-    event_type = payload.get("event", "")
-    # persist event (idempotent by unique provider+event_id)
-    try:
-        await db.webhook_events.insert_one({
-            "id": new_id("wh"), "provider": pay.PROVIDER, "event_id": event_id,
-            "event_type": event_type, "verified": verified, "processed": False,
-            "created_at": iso()})
-    except Exception:
-        return {"status": "duplicate", "event_id": event_id}
-
-    if not verified:
-        await audit("webhook.signature.invalid", entity_type="webhook_event", entity_id=event_id)
-        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
-
-    result = {"status": "ignored"}
-    try:
-        entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
-        provider_order_id = entity.get("order_id")
-        provider_payment_id = entity.get("id")
-        if event_type in ("payment.captured", "payment.authorized") and provider_order_id:
-            order = await db.payment_orders.find_one({"provider_order_id": provider_order_id})
-            if order:
-                result = await _finalize_online(order, provider_payment_id, request)
-    finally:
-        await db.webhook_events.update_one({"event_id": event_id},
-                                           {"$set": {"processed": True, "result": result}})
-    return {"status": "processed", "event_id": event_id, "result": result}
 
 
 @router.get("/payments/status/{token}")
@@ -509,11 +556,23 @@ async def payment_status(token: str):
     intent = await db.subscription_intents.find_one({"id": intent_id}, {"_id": 0})
     if not intent:
         raise HTTPException(status_code=404, detail="Not found.")
-    receipt = await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0})
+    receipt = await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0}, sort=[("issued_at", -1)])
     order = await db.payment_orders.find_one({"intent_id": intent_id}, sort=[("created_at", -1)])
     submission = await db.upi_submissions.find_one({"intent_id": intent_id}, {"_id": 0}, sort=[("created_at", -1)])
     warn = order and order.get("status") in ("authorised", "verification_pending")
-    if receipt or intent.get("status") == "paid":
+    settings = await get_settings()
+    due = _intent_due_paise(intent)
+    residual_payment = None
+
+    if intent.get("status") == "partially_paid" and due > 0:
+        status = "partially_paid"
+        residual_payment = _upi_payload(settings, due, note=intent["id"][:20])
+        paid_amt = int(intent.get("amount_paid_paise") or (receipt or {}).get("total_amount") or 0)
+        message = (
+            f"Partial receipt issued for {fmt_inr(paid_amt)}. "
+            f"Please pay the remaining {fmt_inr(due)} and upload the new payment screenshot."
+        )
+    elif receipt or intent.get("status") == "paid":
         status = "paid"
         message = "Payment recorded and receipt issued."
     elif submission and submission.get("status") == "needs_review":
@@ -532,17 +591,65 @@ async def payment_status(token: str):
     else:
         status = intent["status"]
         message = "Awaiting payment screenshot."
-    return {
+
+    payload = {
         "status": status,
         "intent_status": intent["status"],
-        "total_amount": intent["total_amount"],
+        "intent_id": intent_id,
+        "status_token": status_token(intent_id),
+        "total_amount": intent.get("original_total_amount") or intent.get("total_amount"),
+        "amount_due_paise": due if intent.get("status") == "partially_paid" else (
+            0 if intent.get("status") == "paid" else due
+        ),
+        "amount_paid_paise": int(intent.get("amount_paid_paise") or 0),
         "receipt_no": receipt["receipt_no"] if receipt else None,
         "verify_token": receipt["verify_token"] if receipt else None,
-        "bank_verified": False if receipt and receipt.get("method") in ("upi_qr", "bank_transfer") else None,
+        "receipt_amount": receipt.get("total_amount") if receipt else None,
+        "bank_verified": (_receipt_is_bank_verified(receipt) if receipt else None),
         "submission_status": submission.get("status") if submission else None,
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,
     }
+    donation_receipt = None
+    if receipt and receipt.get("linked_donation_receipt_id"):
+        donation_receipt = await db.receipts.find_one(
+            {"id": receipt["linked_donation_receipt_id"]}, {"_id": 0}
+        )
+    elif submission and submission.get("donation_receipt_id"):
+        donation_receipt = await db.receipts.find_one(
+            {"id": submission["donation_receipt_id"]}, {"_id": 0}
+        )
+    if donation_receipt:
+        payload["donation_receipt_no"] = donation_receipt.get("receipt_no")
+        payload["donation_verify_token"] = donation_receipt.get("verify_token")
+        payload["donation_receipt_amount"] = donation_receipt.get("total_amount")
+        payload["receipts"] = [
+            {
+                "kind": receipt.get("kind") if receipt else "subscription",
+                "receipt_no": receipt.get("receipt_no") if receipt else None,
+                "verify_token": receipt.get("verify_token") if receipt else None,
+                "amount": receipt.get("total_amount") if receipt else None,
+            },
+            {
+                "kind": "donation",
+                "receipt_no": donation_receipt.get("receipt_no"),
+                "verify_token": donation_receipt.get("verify_token"),
+                "amount": donation_receipt.get("total_amount"),
+            },
+        ]
+        if status == "paid" and receipt:
+            payload["message"] = (
+                f"Subscription receipt {receipt.get('receipt_no')} and donation receipt "
+                f"{donation_receipt.get('receipt_no')} issued."
+            )
+    if residual_payment:
+        payload["residual_amount"] = due
+        payload["residual_amount_fmt"] = fmt_inr(due)
+        payload["paid_amount_fmt"] = fmt_inr(int(intent.get("amount_paid_paise") or 0))
+        payload["payment"] = residual_payment
+        payload["qr_url"] = f"/api/payments/upi/qr.png?intent_id={intent_id}"
+        payload["components_due"] = intent.get("components") or []
+    return payload
 
 
 # --------------------------------------------------------------- UPI QR + screenshot proof
@@ -560,8 +667,8 @@ def _merchant_intent_url(upi: dict, amount_rupees: str) -> str:
         return ""
     parts = urlsplit(raw)
     q = dict(parse_qsl(parts.query, keep_blank_values=True))
-    # Keep merchant identity fields intact; fill amount for one-tap convenience.
-    if amount_rupees and not (q.get("am") or "").strip():
+    # Keep merchant identity fields intact; always set amount for the payable due.
+    if amount_rupees:
         q["am"] = amount_rupees
     # Ensure cu is present for UPI apps.
     if not (q.get("cu") or "").strip():
@@ -593,7 +700,7 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
     org = settings.get("organisation") or {}
     upi = org.get("upi") or {}
     bank = org.get("bank_account") or {}
-    payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "EOC One10"
+    payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "ONE 10 EVENT ORGANISING COMMITEE"
     vpa = (upi.get("vpa") or "").strip()
     amount_rupees = f"{amount_paise / 100:.2f}"
     merchant_uri = (upi.get("merchant_upi_uri") or "").strip()
@@ -634,12 +741,19 @@ async def upi_session(intent_id: str):
     if intent["status"] == "paid":
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
     settings = await get_settings()
-    payload = _upi_payload(settings, int(intent["total_amount"]), note=intent["id"][:20])
+    due = _intent_due_paise(intent)
+    payload = _upi_payload(settings, due, note=intent["id"][:20])
     return {
         "intent_id": intent_id,
         "status_token": status_token(intent_id),
-        "total_amount": intent["total_amount"],
+        "total_amount": due,
+        "original_total_amount": intent.get("original_total_amount") or intent.get("total_amount"),
+        "amount_paid_paise": int(intent.get("amount_paid_paise") or 0),
+        "amount_due_paise": due,
+        "partially_paid": intent.get("status") == "partially_paid",
         "payment": payload,
+        # Dynamic QR encodes the due amount; static committee PNG is subscription-era ₹3,500.
+        "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
         "campaign_notice": (settings.get("campaign") or {}).get("important_notice"),
     }
 
@@ -651,11 +765,77 @@ async def upi_qr_png(intent_id: str):
     if not intent:
         raise HTTPException(status_code=404, detail="Not found.")
     settings = await get_settings()
-    payload = _upi_payload(settings, int(intent["total_amount"]), note=intent["id"][:20])
-    if not payload["qr_data"]:
+    payload = _upi_payload(settings, _intent_due_paise(intent), note=intent["id"][:20])
+    qr_source = payload.get("qr_data") or payload.get("upi_intent_url") or ""
+    if not qr_source:
         raise HTTPException(status_code=404, detail="Dynamic UPI QR not configured.")
     from docs import qr_png
-    return Response(content=qr_png(payload["qr_data"], box=6), media_type="image/png")
+    return Response(content=qr_png(qr_source, box=6), media_type="image/png")
+
+
+
+async def _insert_upi_payment(*, intent_id: str, provider_payment_id: str, amount_paise: int,
+                              proof_doc_id: str | None, kind: str) -> None:
+    """Record a captured UPI payment row (unique on provider + provider_payment_id)."""
+    await db.payments.insert_one({
+        "id": new_id("pay"),
+        "provider": "upi_qr",
+        "provider_payment_id": provider_payment_id,
+        "intent_id": intent_id,
+        "amount": int(amount_paise),
+        "currency": "INR",
+        "status": "captured",
+        "bank_verified": False,
+        "kind": kind,
+        "proof_doc_id": proof_doc_id,
+        "created_at": iso(),
+    })
+
+
+async def _mark_screenshot_receipt(receipt: dict | None, *, proof_doc_id: str | None) -> dict | None:
+    if not receipt:
+        return receipt
+    await db.receipts.update_one(
+        {"id": receipt["id"]},
+        {"$set": {
+            "bank_verified": False,
+            "issuance_source": "payment_screenshot",
+            "verification_level": "committee_recorded",
+            "proof_doc_id": proof_doc_id,
+        }},
+    )
+    receipt = dict(receipt)
+    receipt["bank_verified"] = False
+    receipt["issuance_source"] = "payment_screenshot"
+    return receipt
+
+
+async def _create_linked_donation_intent(*, parent_intent: dict, donation_paise: int,
+                                         source_ref: str) -> dict:
+    """Sibling donation intent on the same household for subscribe overpayment."""
+    don_intent = {
+        "id": new_id("intent"),
+        "cycle_id": parent_intent.get("cycle_id"),
+        "household_id": parent_intent.get("household_id"),
+        "kind": "donation",
+        "donor_type": "resident",
+        "base_amount": 0,
+        "donation_amount": int(donation_paise),
+        "total_amount": int(donation_paise),
+        "components": [],
+        "payer_is_member": True,
+        "payer_name": parent_intent.get("payer_name") or "",
+        "payer_mobile": parent_intent.get("payer_mobile") or "",
+        "payer_relationship": "donor",
+        "status": "payment_pending",
+        "method": "upi_qr",
+        "notes": f"Auto-split from subscription overpayment (UTR {source_ref})",
+        "linked_subscription_intent_id": parent_intent.get("id"),
+        "source_upi_ref": source_ref,
+        "created_at": iso(),
+    }
+    await db.subscription_intents.insert_one(dict(don_intent))
+    return don_intent
 
 
 @router.post("/payments/upi/submit")
@@ -693,27 +873,101 @@ async def upi_submit(request: Request):
     filename = file.filename or "payment-screenshot.jpg"
     ref_norm = normalize_ref(reference)
 
-    # Duplicate UTR guard
+    # Duplicate UTR guard (captured payments)
     existing_pay = await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": ref_norm})
     if existing_pay and existing_pay.get("intent_id") != intent_id:
         raise HTTPException(status_code=409, detail="This payment reference was already used.")
 
-    sub_id = new_id("upi")
-    submission = {
-        "id": sub_id,
-        "intent_id": intent_id,
-        "household_id": intent["household_id"],
-        "cycle_id": intent.get("cycle_id"),
-        "amount_expected_paise": int(intent["total_amount"]),
-        "reference_entered": reference,
-        "reference_normalized": ref_norm,
-        "status": "processing",
-        "proof_doc_id": None,
-        "llm": {},
-        "validation": {},
-        "created_at": iso(),
-    }
-    await db.upi_submissions.insert_one(dict(submission))
+    expected = _intent_due_paise(intent)
+
+    # Reuse prior submission for same UTR (retry after review / network errors / new session)
+    existing_sub = await db.upi_submissions.find_one({"reference_normalized": ref_norm})
+    if existing_sub:
+        existing_intent_id = existing_sub.get("intent_id")
+        can_reclaim = False
+        if existing_intent_id == intent_id:
+            can_reclaim = True
+        elif existing_sub.get("receipt_id") or existing_sub.get("status") in ("issued", "partial"):
+            can_reclaim = False
+        else:
+            # Page refresh creates a new intent — reclaim unissued UTRs for same household/payer.
+            old_intent = await db.subscription_intents.find_one({"id": existing_intent_id}) or {}
+            same_hh = bool(old_intent.get("household_id") and old_intent.get("household_id") == intent.get("household_id"))
+            same_payer = (
+                (old_intent.get("payer_name") or "").strip().lower()
+                == (intent.get("payer_name") or "").strip().lower()
+                and (old_intent.get("payer_name") or "").strip() != ""
+            )
+            same_amount = abs(int(old_intent.get("total_amount") or 0) - int(intent.get("total_amount") or 0)) <= 100
+            unissued = existing_sub.get("status") in ("needs_review", "processing", "submitted", "llm_ok") and not existing_sub.get("receipt_id")
+            can_reclaim = unissued and same_amount and (same_hh or same_payer)
+
+        if existing_intent_id != intent_id and not can_reclaim:
+            raise HTTPException(
+                status_code=409,
+                detail="This UTR / UPI reference was already submitted for another payment.",
+            )
+
+        if existing_sub.get("receipt_id") or existing_sub.get("status") in ("issued", "partial"):
+            receipt = await db.receipts.find_one({"id": existing_sub.get("receipt_id")}, {"_id": 0}) if existing_sub.get("receipt_id") else None
+            if not receipt:
+                receipt = await db.receipts.find_one({"intent_id": existing_intent_id, "payment_id": ref_norm}, {"_id": 0})
+            if receipt:
+                return {
+                    "status": "paid" if not receipt.get("is_partial") else "partially_paid",
+                    "receipt": clean(receipt),
+                    "bank_verified": False,
+                    "message": "Receipt already issued for this payment reference.",
+                    "status_token": status_token(receipt.get("intent_id") or existing_intent_id),
+                }
+
+        sub_id = existing_sub["id"]
+        await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
+            "intent_id": intent_id,
+            "household_id": intent["household_id"],
+            "status": "processing",
+            "amount_expected_paise": expected,
+            "reference_entered": reference,
+            "llm": {},
+            "validation": {},
+            "review_message": None,
+            "reclaimed_from_intent": existing_intent_id if existing_intent_id != intent_id else None,
+            "retried_at": iso(),
+        }})
+    else:
+        sub_id = new_id("upi")
+        submission = {
+            "id": sub_id,
+            "intent_id": intent_id,
+            "household_id": intent["household_id"],
+            "cycle_id": intent.get("cycle_id"),
+            "amount_expected_paise": expected,
+            "reference_entered": reference,
+            "reference_normalized": ref_norm,
+            "status": "processing",
+            "proof_doc_id": None,
+            "llm": {},
+            "validation": {},
+            "created_at": iso(),
+        }
+        try:
+            await db.upi_submissions.insert_one(dict(submission))
+        except Exception as e:
+            # Race on unique reference — reload and continue if reclaimable
+            existing_sub = await db.upi_submissions.find_one({"reference_normalized": ref_norm})
+            if not existing_sub:
+                raise HTTPException(status_code=409, detail="This UTR / UPI reference was already submitted.") from e
+            if existing_sub.get("intent_id") != intent_id and existing_sub.get("receipt_id"):
+                raise HTTPException(status_code=409, detail="This UTR / UPI reference was already submitted.") from e
+            sub_id = existing_sub["id"]
+            await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
+                "intent_id": intent_id,
+                "household_id": intent["household_id"],
+                "status": "processing",
+                "amount_expected_paise": expected,
+                "reference_entered": reference,
+                "retried_at": iso(),
+            }})
 
     proof_doc_id = None
     try:
@@ -728,15 +982,39 @@ async def upi_submit(request: Request):
         await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
 
     llm = extract_payment_screenshot(data, content_type=content_type)
-    expected = int(intent["total_amount"])
-    llm_amount = llm.get("amount_paise")
-    llm_utr = normalize_ref(llm.get("utr") or "") if llm.get("utr") else ""
+    from vision_extract import coerce_amount_paise
 
-    amount_ok = llm_amount is None or abs(int(llm_amount) - expected) <= 100  # ± ₹1
-    # Prefer matching entered ref to LLM UTR when LLM found one
-    utr_ok = True
-    if llm_utr:
-        utr_ok = (llm_utr == ref_norm) or (ref_norm in llm_utr) or (llm_utr in ref_norm)
+    # Screenshot OCR rules:
+    # Amount rules (subscription):
+    #   Exact (±₹1 of due) → full settle
+    #   Partial (≥₹1 and clearly under due) → partial receipt + residual QR
+    #   Over due → settle subscription due + linked donation for excess (handled below)
+    # Donation: must meet pledged due (±₹1).
+    SUBSCRIPTION_FLOOR_PAISE = 100  # ₹1 minimum for a partial/full OCR settle
+    intent_kind = (intent.get("kind") or "subscription").strip().lower()
+
+    llm_amount = llm.get("amount_paise")
+    org_match = llm.get("org_match") or {}
+    org_ok = bool(org_match.get("ok"))
+
+    paid_amount = None
+    if llm.get("ok") and llm_amount is not None and int(llm_amount) > 0:
+        paid_amount = coerce_amount_paise(int(llm_amount), expected)
+
+    amount_exact = paid_amount is not None and abs(int(paid_amount) - int(expected)) <= 100
+    amount_partial = (
+        paid_amount is not None
+        and int(paid_amount) >= SUBSCRIPTION_FLOOR_PAISE
+        and int(paid_amount) < (int(expected) - 100)
+    )
+    amount_over = paid_amount is not None and int(paid_amount) > (int(expected) + 100)
+
+    if intent_kind == "donation":
+        amount_ok = paid_amount is not None and paid_amount >= max(expected - 100, 1)
+    else:
+        # Exact, partial under due, or overpay (excess becomes donation) can auto-issue
+        amount_ok = bool(amount_exact or amount_partial or amount_over)
+
     status_ok = (llm.get("status") or "unknown") in ("success", "unknown", None)
     confidence = float(llm.get("confidence") or 0)
     llm_usable = bool(llm.get("ok"))
@@ -746,108 +1024,274 @@ async def upi_submit(request: Request):
 
     validation = {
         "amount_ok": amount_ok,
-        "utr_ok": utr_ok,
+        "amount_exact": amount_exact,
+        "amount_partial": amount_partial,
+        "amount_over": amount_over,
+        "amount_floor_paise": 0 if intent_kind == "donation" else SUBSCRIPTION_FLOOR_PAISE,
+        "utr_ok": True,
+        "org_ok": org_ok,
+        "org_match": org_match,
         "status_ok": status_ok,
         "llm_usable": llm_usable,
         "confidence": confidence,
+        "paid_amount_paise": paid_amount,
+        "payee_name": llm.get("payee_name") or llm.get("org_name"),
+        "intent_kind": intent_kind,
     }
 
-    # Auto-issue when: LLM ok and amount+utr pass, OR LLM unavailable but user supplied ref
-    can_issue = auto_issue and amount_ok and utr_ok and status_ok and (
-        (llm_usable and confidence >= 0.35) or (not llm_usable and len(ref_norm) >= 8)
+    can_issue = (
+        auto_issue and org_ok and amount_ok and status_ok
+        and llm_usable and confidence >= 0.35
     )
-    # Hard block if LLM clearly saw wrong amount
-    if llm_usable and llm_amount is not None and abs(int(llm_amount) - expected) > 100:
-        can_issue = False
 
     review_message = None
     receipt = None
+    donation_receipt = None
     final_status = "needs_review"
+    residual = None
+    settings = await get_settings()
 
     if can_issue:
         try:
-            await db.payments.insert_one({
-                "id": new_id("pay"),
-                "provider": "upi_qr",
-                "provider_payment_id": ref_norm,
-                "intent_id": intent_id,
-                "amount": expected,
-                "currency": "INR",
-                "status": "captured",
-                "bank_verified": False,
-                "proof_doc_id": proof_doc_id,
-                "created_at": iso(),
-            })
-        except Exception:
-            # Unique conflict — already processed
-            existing = await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": ref_norm})
-            if existing and existing.get("intent_id") == intent_id:
-                receipt = await db.receipts.find_one({"intent_id": intent_id}, {"_id": 0})
+            if intent_kind == "donation":
+                settle = int(paid_amount)
+                if settle > expected:
+                    await db.subscription_intents.update_one(
+                        {"id": intent_id},
+                        {"$set": {
+                            "donation_amount": settle,
+                            "total_amount": settle,
+                            "amount_due_paise": settle,
+                        }},
+                    )
+                    intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
+                await _insert_upi_payment(
+                    intent_id=intent_id,
+                    provider_payment_id=ref_norm,
+                    amount_paise=settle,
+                    proof_doc_id=proof_doc_id,
+                    kind="donation",
+                )
+                receipt = await _issue_receipt(
+                    intent,
+                    method="upi_qr",
+                    masked_ref="UTR-" + ref_norm[-4:],
+                    provider_payment_id=ref_norm,
+                    debit_account="1001",
+                    request=request,
+                    paid_amount_paise=settle,
+                    bank_verified=False,
+                    issuance_source="payment_screenshot",
+                )
+                receipt = await _mark_screenshot_receipt(receipt, proof_doc_id=proof_doc_id)
                 final_status = "issued" if receipt else "needs_review"
             else:
-                raise HTTPException(status_code=409, detail="This payment reference was already used.")
-        else:
-            receipt = await _issue_receipt(
-                intent,
-                method="upi_qr",
-                masked_ref="UTR-" + ref_norm[-4:],
-                provider_payment_id=ref_norm,
-                debit_account="1001",
-                request=request,
-            )
-            if receipt:
-                # Mark receipt as not bank-verified
-                await db.receipts.update_one(
-                    {"id": receipt["id"]},
-                    {"$set": {
-                        "bank_verified": False,
-                        "verification_level": "committee_recorded",
-                        "proof_doc_id": proof_doc_id,
-                    }},
+                # Subscription due (typically ₹3,500); excess OCR amount → donation receipt.
+                sub_due = _intent_due_paise(intent)
+                sub_amt = min(int(sub_due), int(paid_amount))
+                don_amt = max(0, int(paid_amount) - sub_amt)
+
+                await _insert_upi_payment(
+                    intent_id=intent_id,
+                    provider_payment_id=ref_norm,
+                    amount_paise=sub_amt,
+                    proof_doc_id=proof_doc_id,
+                    kind="subscription",
                 )
-                receipt["bank_verified"] = False
-                final_status = "issued"
+                intent = await db.subscription_intents.find_one({"id": intent_id}) or intent
+                receipt = await _issue_receipt(
+                    intent,
+                    method="upi_qr",
+                    masked_ref="UTR-" + ref_norm[-4:],
+                    provider_payment_id=ref_norm,
+                    debit_account="1001",
+                    request=request,
+                    paid_amount_paise=sub_amt,
+                    bank_verified=False,
+                    issuance_source="payment_screenshot",
+                )
+                receipt = await _mark_screenshot_receipt(receipt, proof_doc_id=proof_doc_id)
+
+                if receipt and don_amt > 0:
+                    don_intent = await _create_linked_donation_intent(
+                        parent_intent=intent,
+                        donation_paise=don_amt,
+                        source_ref=ref_norm,
+                    )
+                    don_pay_id = f"{ref_norm}-DON"
+                    await _insert_upi_payment(
+                        intent_id=don_intent["id"],
+                        provider_payment_id=don_pay_id,
+                        amount_paise=don_amt,
+                        proof_doc_id=proof_doc_id,
+                        kind="donation",
+                    )
+                    donation_receipt = await _issue_receipt(
+                        don_intent,
+                        method="upi_qr",
+                        masked_ref="UTR-" + ref_norm[-4:],
+                        provider_payment_id=don_pay_id,
+                        debit_account="1001",
+                        request=request,
+                        paid_amount_paise=don_amt,
+                        bank_verified=False,
+                        issuance_source="payment_screenshot",
+                    )
+                    donation_receipt = await _mark_screenshot_receipt(
+                        donation_receipt, proof_doc_id=proof_doc_id,
+                    )
+                    if donation_receipt:
+                        await db.receipts.update_one(
+                            {"id": donation_receipt["id"]},
+                            {"$set": {
+                                "linked_subscription_receipt_id": receipt.get("id"),
+                                "split_from_upi_ref": ref_norm,
+                            }},
+                        )
+                        await db.receipts.update_one(
+                            {"id": receipt["id"]},
+                            {"$set": {
+                                "linked_donation_receipt_id": donation_receipt.get("id"),
+                                "split_donation_amount_paise": don_amt,
+                            }},
+                        )
+                        receipt["linked_donation_receipt_id"] = donation_receipt.get("id")
+                        receipt["split_donation_amount_paise"] = don_amt
+
+                if receipt:
+                    final_status = "partial" if receipt.get("is_partial") else "issued"
+                    if receipt.get("is_partial"):
+                        due_after = int(receipt.get("amount_due_after") or 0)
+                        residual = {
+                            "amount_paise": due_after,
+                            "amount_fmt": fmt_inr(due_after),
+                            "payment": _upi_payload(settings, due_after, note=intent_id[:20]),
+                            "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
+                        }
+                else:
+                    final_status = "duplicate_payment"
+                    review_message = "Excess / duplicate payment queued for refund review."
+        except HTTPException:
+            raise
+        except Exception:
+            existing = await db.payments.find_one(
+                {"provider": "upi_qr", "provider_payment_id": ref_norm}
+            )
+            if existing and existing.get("intent_id") == intent_id:
+                receipt = await db.receipts.find_one(
+                    {"intent_id": intent_id, "payment_id": ref_norm}, {"_id": 0}
+                ) or await db.receipts.find_one(
+                    {"intent_id": intent_id}, {"_id": 0}, sort=[("issued_at", -1)]
+                )
+                donation_receipt = await db.receipts.find_one(
+                    {"payment_id": f"{ref_norm}-DON"}, {"_id": 0}
+                )
+                final_status = "issued" if receipt else "needs_review"
             else:
-                final_status = "duplicate_payment"
-                review_message = "Excess / duplicate payment queued for refund review."
+                raise HTTPException(
+                    status_code=409, detail="This payment reference was already used."
+                )
     else:
         reasons = []
-        if not amount_ok:
-            reasons.append("amount on screenshot does not match payable total")
-        if not utr_ok:
-            reasons.append("UTR on screenshot does not match the reference entered")
+        if not org_ok:
+            reasons.append(
+                org_match.get("reason")
+                or "payee on screenshot is not M S ONE 10 EVENT ORGANISING COMMITEE"
+            )
+        if paid_amount is None:
+            reasons.append("could not read payment amount from screenshot")
+        elif not amount_ok:
+            if intent_kind == "donation":
+                reasons.append(
+                    f"amount on screenshot is less than the pledged donation ({fmt_inr(expected)})"
+                )
+            else:
+                reasons.append(
+                    f"amount on screenshot could not be matched to the amount due ({fmt_inr(expected)})"
+                )
         if llm_usable and not status_ok:
             reasons.append("payment status on screenshot is unclear")
-        review_message = "Could not auto-confirm: " + ("; ".join(reasons) or "needs committee review") + ". Please do not pay again."
+        if intent_kind == "donation":
+            review_message = (
+                "Could not auto-confirm: "
+                + ("; ".join(reasons) or "needs committee review")
+                + ". Donation screenshots must show payment to "
+                "M S ONE 10 EVENT ORGANISING COMMITEE. Please do not pay again."
+            )
+        else:
+            review_message = (
+                "Could not auto-confirm: "
+                + ("; ".join(reasons) or "needs committee review")
+                + ". Screenshot must show a successful payment to "
+                "M S ONE 10 EVENT ORGANISING COMMITEE. "
+                "Partial payments are accepted — please do not pay again until reviewed."
+            )
 
     await db.upi_submissions.update_one({"id": sub_id}, {"$set": {
-        "status": final_status if final_status != "issued" else "issued",
+        "status": (
+            "issued" if final_status == "issued"
+            else ("partial" if final_status == "partial" else final_status)
+        ),
         "proof_doc_id": proof_doc_id,
         "llm": {k: llm.get(k) for k in (
-            "ok", "error", "amount_paise", "utr", "txn_time", "payer_name", "payee_name",
-            "status", "confidence", "notes", "model",
+            "ok", "error", "amount_paise", "utr", "utr_candidates", "txn_time", "payer_name", "payee_name",
+            "org_name", "org_match", "status", "confidence", "notes", "model",
         )},
         "validation": validation,
         "review_message": review_message,
         "payment_id": ref_norm,
         "receipt_id": receipt.get("id") if receipt else None,
+        "donation_receipt_id": donation_receipt.get("id") if donation_receipt else None,
+        "ocr_paid_amount_paise": paid_amount,
         "processed_at": iso(),
     }})
     await audit(
         "upi.screenshot.submit",
         entity_type="upi_submission",
         entity_id=sub_id,
+        correlation_id=intent_id,
         after={"status": final_status, "intent_id": intent_id, "ref": ref_norm[-4:]},
         request=request,
     )
 
     if final_status == "issued" and receipt:
+        receipts = [clean(receipt)]
+        if donation_receipt:
+            receipts.append(clean(donation_receipt))
+        msg = "Receipt issued. Recorded against your payment reference (not a bank settlement confirmation)."
+        if donation_receipt:
+            msg = (
+                f"Subscription receipt {receipt.get('receipt_no')} for "
+                f"{fmt_inr(receipt.get('total_amount') or 0)} and donation receipt "
+                f"{donation_receipt.get('receipt_no')} for "
+                f"{fmt_inr(donation_receipt.get('total_amount') or 0)} issued."
+            )
         return {
             "status": "paid",
             "receipt": clean(receipt),
+            "donation_receipt": clean(donation_receipt) if donation_receipt else None,
+            "receipts": receipts,
             "bank_verified": False,
-            "message": "Receipt issued. Recorded against your payment reference (not a bank settlement confirmation).",
+            "message": msg,
             "status_token": status_token(intent_id),
+        }
+    if final_status == "partial" and receipt:
+        due_after = int(receipt.get("amount_due_after") or 0)
+        return {
+            "status": "partially_paid",
+            "receipt": clean(receipt),
+            "bank_verified": False,
+            "message": (
+                f"Partial receipt issued for {fmt_inr(receipt['total_amount'])}. "
+                f"Please pay the remaining {fmt_inr(due_after)}."
+            ),
+            "status_token": status_token(intent_id),
+            "intent_id": intent_id,
+            "residual_amount": due_after,
+            "residual_amount_fmt": fmt_inr(due_after),
+            "paid_amount_fmt": fmt_inr(receipt["total_amount"]),
+            "payment": (residual or {}).get("payment"),
+            "qr_url": (residual or {}).get("qr_url") or f"/api/payments/upi/qr.png?intent_id={intent_id}",
         }
     return {
         "status": "needs_review",
@@ -861,6 +1305,436 @@ async def upi_submit(request: Request):
 
 
 # --------------------------------------------------------------- Receipt retrieval (resident)
+async def _receipt_lookup_rate_limit(request: Request, *, kind: str, tower_id: str = "", flat_id: str = ""):
+    ip = request.client.host if request and request.client else "?"
+    since = now_utc().timestamp() - 60
+    recent = await db.receipt_lookups.count_documents({"ip": ip, "ts": {"$gt": since}, "kind": kind})
+    if recent >= 8:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute.")
+    await db.receipt_lookups.insert_one({
+        "ip": ip, "ts": now_utc().timestamp(), "kind": kind,
+        "tower_id": tower_id or "", "flat_id": flat_id or "",
+    })
+
+
+def _receipt_is_bank_verified(receipt: dict) -> bool:
+    """Screenshot self-serve receipts are not bank verified; collection/found receipts are."""
+    from docs import receipt_is_bank_verified
+    return receipt_is_bank_verified(receipt)
+
+
+def _receipt_public_card(receipt: dict) -> dict:
+    token = receipt.get("verify_token") or ""
+    bank_verified = _receipt_is_bank_verified(receipt)
+    return {
+        "receipt_no": receipt.get("receipt_no"),
+        "verify_token": token,
+        "amount": fmt_inr(receipt.get("total_amount") or 0),
+        "issued_at": receipt.get("issued_at"),
+        "kind": receipt.get("kind") or "subscription",
+        "payer_name": receipt.get("payer_name") or "",
+        "pdf_url": f"/api/receipt/pdf/{token}" if token else None,
+        "status": receipt.get("status") or "issued",
+        "bank_verified": bank_verified,
+    }
+
+
+def _normalize_txn_ref(raw) -> str:
+    from vision_extract import normalize_ref
+    return normalize_ref(str(raw or ""))
+
+
+def _receipt_matches_txn(receipt: dict, txn_norm: str) -> bool:
+    """True only when the receipt's payment/import UTR matches the supplied transaction id."""
+    if not txn_norm or len(txn_norm) < 6:
+        return False
+    pay_id = _normalize_txn_ref(receipt.get("payment_id") or "")
+    import_txn = _normalize_txn_ref(receipt.get("import_txn") or "")
+    if pay_id == txn_norm or import_txn == txn_norm:
+        return True
+    if pay_id and len(txn_norm) >= 8 and (txn_norm in pay_id or pay_id in txn_norm):
+        return True
+    return False
+
+
+async def _receipts_matching_txn_for_household(household_id: str, txn_norm: str) -> list[dict]:
+    """Return public receipt cards for this household that match the UTR (never all receipts)."""
+    cards = []
+    async for r in db.receipts.find(
+        {"household_id": household_id, "status": {"$in": ["issued", "partially_refunded"]}},
+        {"_id": 0},
+    ).sort("issued_at", -1):
+        if _receipt_matches_txn(r, txn_norm):
+            cards.append(_receipt_public_card(r))
+
+    if cards:
+        return cards
+
+    # Match via payments collection (UTR on payment row)
+    pay = await db.payments.find_one({
+        "provider": "upi_qr",
+        "provider_payment_id": txn_norm,
+    })
+    if pay and pay.get("intent_id"):
+        intent = await db.subscription_intents.find_one({"id": pay["intent_id"]})
+        if intent and intent.get("household_id") == household_id:
+            async for r in db.receipts.find(
+                {"intent_id": intent["id"], "status": {"$in": ["issued", "partially_refunded"]}},
+                {"_id": 0},
+            ):
+                cards.append(_receipt_public_card(r))
+    return cards
+
+
+def _require_txn_norm(body: dict) -> str:
+    txn_raw = (
+        body.get("transaction_id")
+        or body.get("reference")
+        or body.get("utr")
+        or body.get("txn")
+        or ""
+    )
+    txn_norm = _normalize_txn_ref(txn_raw)
+    if not txn_norm or len(txn_norm) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter the UPI / bank transaction ID (UTR) from your payment — at least 6 characters.",
+        )
+    return txn_norm
+
+
+@router.post("/receipt/by-flat")
+async def receipt_by_flat(body: dict = Body(...), request: Request = None):
+    """Step 1: look up issued receipts by tower + flat + UPI/UTR transaction id."""
+    tower_id = (body.get("tower_id") or "").strip()
+    flat_id = (body.get("flat_id") or "").strip()
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="Select tower and flat.")
+    txn_norm = _require_txn_norm(body)
+    await _receipt_lookup_rate_limit(request, kind="by_flat", tower_id=tower_id, flat_id=flat_id)
+
+    cycle_id = await get_active_cycle_id()
+    household = await db.households.find_one({
+        "cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id,
+        "is_deleted": {"$ne": True},
+    }, {"_id": 0})
+
+    receipts = []
+    if household:
+        receipts = await _receipts_matching_txn_for_household(household["id"], txn_norm)
+
+    await audit(
+        "receipt.by_flat",
+        entity_type="household",
+        entity_id=(household or {}).get("id") or "",
+        after={
+            "tower_id": tower_id,
+            "flat_id": flat_id,
+            "txn_suffix": txn_norm[-4:] if txn_norm else "",
+            "receipts": len(receipts),
+        },
+        request=request,
+    )
+
+    if receipts:
+        return {
+            "status": "found",
+            "household": {
+                "tower_name": household.get("tower_name") or "",
+                "flat_number": household.get("flat_number") or "",
+                "primary_name": household.get("primary_name") or "",
+            },
+            "receipts": receipts,
+            "pending": None,
+            "message": "Receipt found for this flat and transaction ID. You can download it below.",
+        }
+
+    return {
+        "status": "not_found",
+        "household": ({
+            "tower_name": household.get("tower_name") or "",
+            "flat_number": household.get("flat_number") or "",
+            "primary_name": household.get("primary_name") or "",
+        } if household else None),
+        "receipts": [],
+        "pending": None,
+        "message": (
+            "No receipt matches this flat and transaction ID. "
+            "Check the UTR / UPI reference, or upload payment proof to generate a receipt."
+        ),
+    }
+
+
+@router.post("/receipt/start-from-proof")
+async def receipt_start_from_proof(body: dict = Body(...), request: Request = None):
+    """Step 2 when no receipt: create/reuse a pending payment so UTR + screenshot can issue a receipt.
+
+    Requires the same UTR as Find Receipt. Never returns receipt tokens for a flat without a matching UTR.
+    """
+    tower_id = (body.get("tower_id") or "").strip()
+    flat_id = (body.get("flat_id") or "").strip()
+    name = (body.get("name") or "").strip()
+    mobile = (body.get("mobile") or "").strip()
+    txn_norm = _require_txn_norm(body)
+    await _receipt_lookup_rate_limit(request, kind="start_from_proof", tower_id=tower_id, flat_id=flat_id)
+
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="Select tower and flat.")
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter the payer / resident name.")
+    if not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+
+    tower = await db.towers.find_one({"id": tower_id})
+    flat = await db.flats.find_one({"id": flat_id, "tower_id": tower_id})
+    if not tower or not flat:
+        raise HTTPException(status_code=400, detail="Invalid tower/flat selection.")
+
+    settings = await get_settings()
+    cycle_id = await get_active_cycle_id()
+    if settings.get("cycle", {}).get("is_locked"):
+        raise HTTPException(status_code=423, detail="This campaign cycle is locked.")
+
+    household = await db.households.find_one({
+        "cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id,
+        "is_deleted": {"$ne": True},
+    })
+    if not household:
+        hid = new_id("hh")
+        household = {
+            "id": hid, "cycle_id": cycle_id, "tower_id": tower_id, "tower_name": tower["name"],
+            "flat_id": flat_id, "flat_number": flat["number"],
+            "occupancy_type": "other", "family_members": 1,
+            "family_display_name": name, "primary_name": name, "primary_mobile": mobile,
+            "email": "", "alternate_contact": "", "interests": [], "comments": "Created via receipt proof workflow",
+            "has_accessibility_request": False, "accessibility_request": "",
+            "created_at": iso(), "is_deleted": False,
+        }
+        await db.households.insert_one(dict(household))
+        await db.people.insert_one({
+            "id": new_id("person"), "household_id": hid, "name": name,
+            "mobile": mobile, "role": "primary", "created_at": iso(),
+        })
+        await audit(
+            "household.create",
+            entity_type="household",
+            entity_id=hid,
+            after={"tower": tower["name"], "flat": flat["number"], "via": "receipt_proof"},
+            request=request,
+        )
+    else:
+        hid = household["id"]
+        # Keep contact fresh for committee follow-up when resident self-serves a receipt.
+        patch = {}
+        if not (household.get("primary_name") or "").strip():
+            patch["primary_name"] = name
+        if not (household.get("primary_mobile") or "").strip():
+            patch["primary_mobile"] = mobile
+        if patch:
+            await db.households.update_one({"id": hid}, {"$set": patch})
+            household = {**household, **patch}
+
+    # Only return download tokens when this UTR matches a receipt — never dump all flat receipts.
+    matched = await _receipts_matching_txn_for_household(hid, txn_norm)
+    if matched:
+        return {
+            "status": "already_paid",
+            "receipts": matched,
+            "receipt_no": matched[0].get("receipt_no"),
+            "verify_token": matched[0].get("verify_token"),
+            "amount": matched[0].get("amount"),
+            "pdf_url": matched[0].get("pdf_url"),
+            "household": {
+                "tower_name": household.get("tower_name") or tower["name"],
+                "flat_number": household.get("flat_number") or flat["number"],
+                "primary_name": name,
+            },
+            "message": "A receipt already exists for this flat and transaction ID.",
+        }
+
+    # Flat has other receipts but none for this UTR — do not leak those tokens.
+    other_count = await db.receipts.count_documents({
+        "household_id": hid,
+        "status": {"$in": ["issued", "partially_refunded"]},
+    })
+    if other_count:
+        await audit(
+            "receipt.start_from_proof_utr_mismatch",
+            entity_type="household",
+            entity_id=hid,
+            after={"txn_suffix": txn_norm[-4:], "other_receipts": other_count},
+            request=request,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This flat already has a receipt, but none match this transaction ID. "
+                "Use Find Receipt with the correct UTR, or contact the committee."
+            ),
+        )
+
+    intent = await db.subscription_intents.find_one(
+        {
+            "household_id": hid,
+            "kind": "subscription",
+            "status": {"$in": ["payment_pending", "pending", "authorised", "partially_paid"]},
+        },
+        sort=[("created_at", -1)],
+    )
+    if not intent:
+        base = int(settings["subscription"]["base_amount_paise"])
+        donation = 0
+        intent = {
+            "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
+            "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
+            "components": await _components(settings, donation),
+            "payer_is_member": True,
+            "payer_name": name,
+            "payer_mobile": mobile,
+            "payer_relationship": "self",
+            "status": "payment_pending", "method": "upi_qr",
+            "created_at": iso(),
+            "source": "receipt_proof_workflow",
+            "expected_utr": txn_norm,
+        }
+        await db.subscription_intents.insert_one(dict(intent))
+        await audit(
+            "subscription.intent.create",
+            entity_type="subscription_intent",
+            entity_id=intent["id"],
+            correlation_id=intent["id"],
+            after={"total": intent["total_amount"], "household": hid, "via": "receipt_proof"},
+            request=request,
+        )
+    else:
+        await db.subscription_intents.update_one(
+            {"id": intent["id"]},
+            {"$set": {"payer_name": name, "payer_mobile": mobile, "expected_utr": txn_norm}},
+        )
+
+    await audit(
+        "receipt.start_from_proof",
+        entity_type="subscription_intent",
+        entity_id=intent["id"],
+        after={"txn_suffix": txn_norm[-4:]},
+        request=request,
+    )
+    due = _intent_due_paise(intent)
+    return {
+        "status": "payment_pending",
+        "intent_id": intent["id"],
+        "status_token": status_token(intent["id"]),
+        "total_amount": due,
+        "amount": fmt_inr(due),
+        "household": {
+            "tower_name": household.get("tower_name") or tower["name"],
+            "flat_number": household.get("flat_number") or flat["number"],
+            "primary_name": name,
+        },
+        "message": "Upload your UTR / UPI reference and payment screenshot to generate the receipt.",
+    }
+
+
+@router.post("/receipt/pending-payment")
+async def receipt_pending_payment(body: dict = Body(...), request: Request = None):
+    """Find a pending subscription payment for a flat so resident can upload UTR + screenshot."""
+    await _receipt_lookup_rate_limit(
+        request,
+        kind="pending_lookup",
+        tower_id=(body.get("tower_id") or ""),
+        flat_id=(body.get("flat_id") or ""),
+    )
+
+    name = (body.get("name") or "").strip()
+    tower_id = (body.get("tower_id") or "").strip()
+    flat_id = (body.get("flat_id") or "").strip()
+    mobile = (body.get("mobile") or "").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Enter the name used at subscription.")
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="Select tower and flat.")
+    if mobile and not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile, or leave it blank.")
+
+    cycle_id = await get_active_cycle_id()
+    household = await db.households.find_one({
+        "cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id,
+        "is_deleted": {"$ne": True},
+    })
+    if not household:
+        raise HTTPException(
+            status_code=404,
+            detail="No subscription found for this flat. Please Subscribe & Pay first.",
+        )
+
+    def _norm_name(s: str) -> str:
+        return " ".join((s or "").strip().lower().split())
+
+    hh_mobile = (household.get("primary_mobile") or "").strip()
+    if mobile and hh_mobile and mobile != hh_mobile:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
+    intent = await db.subscription_intents.find_one(
+        {
+            "household_id": household["id"],
+            "kind": "subscription",
+            "status": {"$in": ["payment_pending", "pending", "authorised"]},
+        },
+        sort=[("created_at", -1)],
+    )
+
+    stored_names = {
+        _norm_name(household.get("primary_name") or ""),
+        _norm_name(household.get("family_display_name") or ""),
+    }
+    if intent:
+        stored_names.add(_norm_name(intent.get("payer_name") or ""))
+    stored_names.discard("")
+    if stored_names and _norm_name(name) not in stored_names:
+        raise HTTPException(status_code=404, detail="No pending payment found with those details.")
+
+    if not intent:
+        paid = await db.subscription_intents.find_one(
+            {"household_id": household["id"], "kind": "subscription", "status": "paid"},
+            sort=[("created_at", -1)],
+        )
+        if paid:
+            receipt = await db.receipts.find_one({"intent_id": paid["id"]}, {"_id": 0})
+            if receipt:
+                return {
+                    "status": "already_paid",
+                    "receipt_no": receipt.get("receipt_no"),
+                    "verify_token": receipt.get("verify_token"),
+                    "amount": fmt_inr(receipt.get("total_amount") or paid.get("total_amount") or 0),
+                    "pdf_url": f"/api/receipt/pdf/{receipt['verify_token']}",
+                    "message": "This flat already has a receipt.",
+                }
+        raise HTTPException(
+            status_code=404,
+            detail="No pending subscription payment for this flat.",
+        )
+
+    await audit(
+        "receipt.pending_lookup",
+        entity_type="subscription_intent",
+        entity_id=intent["id"],
+        request=request,
+    )
+    return {
+        "status": "payment_pending",
+        "intent_id": intent["id"],
+        "status_token": status_token(intent["id"]),
+        "total_amount": intent.get("total_amount"),
+        "amount": fmt_inr(intent.get("total_amount") or 0),
+        "household": {
+            "tower_name": household.get("tower_name") or "",
+            "flat_number": household.get("flat_number") or "",
+            "primary_name": household.get("primary_name") or "",
+        },
+        "message": "Upload your UTR / UPI reference and payment screenshot to generate the receipt.",
+    }
+
+
 @router.post("/receipt/find")
 async def find_receipt(body: dict = Body(...), request: Request = None):
     ip = request.client.host if request and request.client else "?"
@@ -876,12 +1750,14 @@ async def find_receipt(body: dict = Body(...), request: Request = None):
     if not r:
         raise HTTPException(status_code=404, detail="No receipt found with those details.")
     household = await db.households.find_one({"id": r.get("household_id")}) if r.get("household_id") else None
-    mobile_ok = (
-        (household and household.get("primary_mobile") == mobile)
-        or (r.get("payer_mobile") == mobile)
-    )
-    if not mobile_ok:
-        raise HTTPException(status_code=404, detail="No receipt found with those details.")
+    if mobile:
+        stored = ""
+        if household:
+            stored = (household.get("primary_mobile") or "").strip()
+        receipt_mobile = (r.get("payer_mobile") or "").strip()
+        mobile_ok = (stored == mobile) or (receipt_mobile == mobile)
+        if not mobile_ok:
+            raise HTTPException(status_code=404, detail="No receipt found with those details.")
     await audit("receipt.lookup", entity_type="receipt", entity_id=r["id"], request=request)
     return {"receipt_no": r["receipt_no"], "verify_token": r["verify_token"],
             "amount": fmt_inr(r["total_amount"]), "issued_at": r["issued_at"],
@@ -925,11 +1801,13 @@ async def create_refund(body: dict = Body(...), request: Request = None,
     if amount <= 0 or (already + amount) > receipt["total_amount"]:
         raise HTTPException(status_code=400, detail="Refund exceeds eligible captured amount.")
     refund = {"id": new_id("rfnd"), "receipt_id": receipt["id"], "household_id": receipt["household_id"],
+              "intent_id": receipt.get("intent_id") or "",
               "amount_paise": amount, "reason": body.get("reason", ""), "status": "requested",
               "requested_by": user["user_id"], "provider_reference": body.get("provider_reference", ""),
               "created_at": iso()}
     await db.refunds.insert_one(dict(refund))
     await audit("refund.request", actor=user, entity_type="refund", entity_id=refund["id"],
+                correlation_id=receipt.get("intent_id") or "",
                 after={"amount": amount}, reason=refund["reason"], request=request)
     return clean(refund)
 

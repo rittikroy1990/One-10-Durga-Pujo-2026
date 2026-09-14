@@ -31,7 +31,7 @@ export default function AuditLog() {
 
   return (
     <div data-testid="audit-page">
-      <h1 className="mb-1 font-display text-4xl">Audit Trail</h1>
+      <h1 className="mb-1 font-display text-4xl">Audit</h1>
       <p className="mb-4 text-sm text-brown-800/50">Append-only, hash-chained events. Ordinary admins cannot edit or delete records.</p>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Input placeholder="Filter by action (e.g. receipt, refund)" value={action} onChange={(e) => setAction(e.target.value)} className="max-w-xs" data-testid="audit-filter" />

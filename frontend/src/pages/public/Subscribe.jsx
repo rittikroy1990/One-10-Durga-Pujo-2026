@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, ExternalLink, Copy,
+  ArrowRight, ArrowLeft, ShieldCheck, Loader2, Upload, QrCode, Copy,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -57,7 +57,6 @@ export default function Subscribe() {
   const total = base;
   const pay = upiSession?.payment;
   const bank = pay?.bank_account || cfg?.organisation?.bank_account;
-  const appLinks = pay?.upi_app_links || {};
 
   const toggleInterest = (v) =>
     set("interests", form.interests.includes(v) ? form.interests.filter((x) => x !== v) : [...form.interests, v]);
@@ -73,18 +72,9 @@ export default function Subscribe() {
     }
   };
 
-  const openUpiApp = (url) => {
-    const target = (url || pay?.upi_intent_url || "").trim();
-    if (!target) {
-      toast.error("Open GPay / PhonePe and scan the QR on this page.");
-      return;
-    }
-    window.location.href = target;
-  };
-
   const submit = async () => {
     if (!(form.accuracy_confirmed && form.privacy_consent && form.terms_consent)) {
-      toast.error("Please confirm accuracy and both consents.");
+      toast.error("Please confirm the declaration below to continue.");
       return;
     }
     setBusy(true);
@@ -126,8 +116,15 @@ export default function Subscribe() {
       const token = r.data.status_token || intent.status_token;
       if (r.data.status === "paid") {
         toast.success(`Receipt ${r.data.receipt?.receipt_no || ""} issued`);
+      } else if (r.data.status === "partially_paid") {
+        toast.success(
+          r.data.message
+            || `Partial receipt ${r.data.receipt?.receipt_no || ""} — balance ${r.data.residual_amount_fmt || ""} due`
+        );
+      } else if (r.data.status === "needs_review") {
+        toast.message(r.data.message || "Screenshot submitted for review — please do not pay again");
       } else {
-        toast.message("Screenshot submitted for review");
+        toast.message(r.data.message || "Screenshot submitted for review");
       }
       navigate(`/payment/status?token=${encodeURIComponent(token)}`);
     } catch (e) {
@@ -139,28 +136,55 @@ export default function Subscribe() {
   };
 
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
+  const qrSrc =
+    upiSession?.qr_url
+    || (upiSession?.intent_id ? `/api/payments/upi/qr.png?intent_id=${encodeURIComponent(upiSession.intent_id)}` : null)
+    || staticQr;
+
+  const towerName = towers.find((t) => t.id === form.tower_id)?.name || form.tower_id;
+  const flatNumber = flats.find((f) => f.id === form.flat_id)?.number || form.flat_id;
+  const occupancyLabel = OCCUPANCY.find((o) => o.v === form.occupancy_type)?.l || form.occupancy_type;
+  const consented = !!(form.accuracy_confirmed && form.privacy_consent && form.terms_consent);
 
   return (
     <PublicLayout>
-      <div className="mx-auto max-w-3xl px-5 py-12">
-        <h1 className="font-display text-5xl text-ivory-100">Subscribe & Pay</h1>
-        <p className="mt-2 text-ivory-100/70">
-          {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
-          {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Pay via UPI QR, then upload your screenshot.
-        </p>
+      <div className="mx-auto max-w-xl px-4 pb-16 pt-24 sm:max-w-2xl sm:px-5 sm:pt-28">
+        <header className="mb-6 sm:mb-8">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-vermilion-600">One 10 Durgotsav 2026</p>
+          <h1 className="mt-1 font-display text-4xl leading-tight text-brown-900 sm:text-5xl">Subscribe &amp; Pay</h1>
+          <p className="mt-2 text-sm leading-relaxed text-brown-800/70 sm:text-base">
+            {cfg?.subscription ? formatPaise(cfg.subscription.base_amount_paise) : "₹3,500.00"} per family
+            {cfg?.campaign?.title ? ` for ${cfg.campaign.title}` : ""}. Pay via UPI QR, then upload your screenshot.
+          </p>
+        </header>
 
-        <div className="mt-6 flex items-center gap-2 text-xs">
-          {["Household", "Confirm", "Pay"].map((s, i) => (
-            <div key={s} className={`flex items-center gap-2 ${step >= i + 1 ? "text-gold-400" : "text-ivory-100/40"}`}>
-              <span className={`grid h-6 w-6 place-items-center rounded-full border ${step >= i + 1 ? "border-gold-400 bg-gold-500/20" : "border-ivory-100/30"}`}>{i + 1}</span>
-              {s}{i < 2 && <span className="mx-1 h-px w-8 bg-ivory-100/20" />}
-            </div>
-          ))}
-        </div>
+        <ol className="mb-5 flex items-center gap-2 overflow-x-auto pb-1 text-xs sm:mb-6">
+          {["Household", "Confirm", "Pay"].map((label, i) => {
+            const active = step >= i + 1;
+            return (
+              <li key={label} className={`flex shrink-0 items-center gap-2 ${active ? "text-vermilion-600" : "text-brown-800/35"}`}>
+                <span className={`grid h-7 w-7 place-items-center rounded-full border text-[12px] font-semibold ${active ? "border-vermilion-500 bg-vermilion-500/10" : "border-brown-800/20"}`}>
+                  {i + 1}
+                </span>
+                <span className="font-medium">{label}</span>
+                {i < 2 && <span className="mx-1 hidden h-px w-6 bg-brown-800/15 sm:block" aria-hidden />}
+              </li>
+            );
+          })}
+        </ol>
 
-        <motion.div key={step} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mt-8 rounded-2xl border border-gold-500/25 bg-ivory-200 p-6 text-brown-900">
+        <motion.div
+          key={step}
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl border border-sun-400/35 bg-[#FFF8F0] p-4 text-brown-900 shadow-sm sm:p-6"
+        >
           {step === 1 && (
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <h2 className="font-display text-2xl text-brown-900">Household details</h2>
+                <p className="mt-1 text-sm text-brown-800/60">Tell us who is subscribing for this flat.</p>
+              </div>
               <div className="sm:col-span-2">
                 <Label required htmlFor="name">Primary contact full name</Label>
                 <Input id="name" data-testid="sub-name" value={form.primary_contact_name} onChange={(e) => set("primary_contact_name", e.target.value)} placeholder="e.g. Rahul Sen" />
@@ -199,7 +223,7 @@ export default function Subscribe() {
               </div>
               <div className="sm:col-span-2">
                 <Label>Participation interests (optional)</Label>
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-1.5 flex flex-wrap gap-2">
                   {INTERESTS.map((it) => (
                     <button key={it.v} type="button" onClick={() => toggleInterest(it.v)}
                       className={`rounded-full border px-3 py-1.5 text-sm ${form.interests.includes(it.v) ? "border-vermilion-500 bg-vermilion-500/10 text-vermilion-600" : "border-brown-800/20 text-brown-800/70"}`}>
@@ -208,8 +232,8 @@ export default function Subscribe() {
                   ))}
                 </div>
               </div>
-              <div className="sm:col-span-2 flex justify-end">
-                <Button variant="admin" data-testid="sub-next-btn" disabled={!validStep1} onClick={() => setStep(2)}>
+              <div className="sm:col-span-2 pt-1">
+                <Button variant="primary" className="w-full sm:ml-auto sm:flex sm:w-auto" data-testid="sub-next-btn" disabled={!validStep1} onClick={() => setStep(2)}>
                   Continue <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
@@ -217,41 +241,100 @@ export default function Subscribe() {
           )}
 
           {step === 2 && (
-            <div className="space-y-5">
-              <div className="rounded-xl border border-gold-500/30 bg-white p-4">
-                <div className="text-sm text-brown-800/60">Family subscription</div>
-                <div className="flex items-center justify-between">
-                  <span className="font-display text-2xl">{formatPaise(base)}</span>
-                  <span className="text-xs text-brown-800/50">Fixed for 2026 · ₹2,500 + ₹300 + ₹700</span>
-                </div>
-                <p className="mt-3 text-sm text-brown-800/65">
-                  Want to give an extra voluntary gift? Use the separate{" "}
-                  <a href="/donate" className="font-semibold text-vermilion-600 underline">Donate</a> page
-                  (One 10 residents and other donors).
-                </p>
-                <div className="mt-4 flex items-center justify-between border-t border-brown-800/10 pt-3">
-                  <span className="font-semibold">Total payable</span>
-                  <span data-testid="sub-total" className="font-display text-3xl text-vermilion-600">{formatPaise(total)}</span>
-                </div>
+            <div className="space-y-5" data-testid="sub-confirm-step">
+              <div>
+                <h2 className="font-display text-2xl text-brown-900">Confirm &amp; pay</h2>
+                <p className="mt-1 text-sm text-brown-800/60">Review the amount, then continue to the UPI QR.</p>
               </div>
 
-              <label className="flex items-start gap-2.5 text-sm">
-                <input type="checkbox" data-testid="sub-accuracy" checked={form.accuracy_confirmed} onChange={(e) => set("accuracy_confirmed", e.target.checked)} className="mt-1 h-4 w-4" />
-                I confirm the information entered is accurate.
-              </label>
-              <label className="flex items-start gap-2.5 text-sm">
-                <input type="checkbox" data-testid="sub-privacy" checked={form.privacy_consent} onChange={(e) => set("privacy_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I consent to the <a href="/privacy" className="text-vermilion-600 underline">Privacy Policy</a>.
-              </label>
-              <label className="flex items-start gap-2.5 text-sm">
-                <input type="checkbox" data-testid="sub-terms" checked={form.terms_consent} onChange={(e) => set("terms_consent", e.target.checked)} className="mt-1 h-4 w-4" />
-                I agree to the <a href="/terms" className="text-vermilion-600 underline">payment terms</a>.
+              <section className="overflow-hidden rounded-2xl border border-sun-400/40 bg-white">
+                <div className="space-y-1 border-b border-brown-800/10 px-4 py-4 sm:px-5">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Family subscription</div>
+                  <div className="font-display text-4xl leading-none text-brown-900 sm:text-5xl">{formatPaise(base)}</div>
+                  <p className="pt-1 text-sm text-brown-800/55">Fixed for 2026</p>
+                </div>
+                <ul className="divide-y divide-brown-800/10 px-4 text-sm sm:px-5">
+                  <li className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="text-brown-800/70">Base contribution</span>
+                    <span className="font-medium tabular-nums text-brown-900">₹2,500</span>
+                  </li>
+                  <li className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="text-brown-800/70">Festival fund</span>
+                    <span className="font-medium tabular-nums text-brown-900">₹300</span>
+                  </li>
+                  <li className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="text-brown-800/70">Community programmes</span>
+                    <span className="font-medium tabular-nums text-brown-900">₹700</span>
+                  </li>
+                </ul>
+                <div className="flex items-end justify-between gap-3 border-t border-brown-800/10 bg-[#FFF1E6] px-4 py-4 sm:px-5">
+                  <span className="text-sm font-semibold text-brown-900">Total payable</span>
+                  <span data-testid="sub-total" className="font-display text-3xl leading-none text-vermilion-600 sm:text-4xl">{formatPaise(total)}</span>
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-brown-800/10 bg-white/90 px-4 py-3.5 text-sm sm:px-5">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Household</div>
+                <dl className="grid gap-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-brown-800/55">Contact</dt>
+                    <dd className="max-w-[65%] text-right font-medium text-brown-900 break-words">{form.primary_contact_name}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-brown-800/55">Mobile</dt>
+                    <dd className="font-medium tabular-nums text-brown-900">{form.mobile}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-brown-800/55">Flat</dt>
+                    <dd className="max-w-[65%] text-right font-medium text-brown-900">{towerName} / {flatNumber}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-brown-800/55">Occupancy</dt>
+                    <dd className="max-w-[65%] text-right font-medium text-brown-900">{occupancyLabel}</dd>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <dt className="text-brown-800/55">Family size</dt>
+                    <dd className="font-medium text-brown-900">{form.family_members}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <p className="text-sm leading-relaxed text-brown-800/65">
+                Want to give an extra voluntary gift? Use the separate{" "}
+                <a href="/donate" className="font-semibold text-vermilion-600 underline underline-offset-2">Donate</a>{" "}
+                page (One 10 residents and other donors).
+              </p>
+
+              <label className="flex items-start gap-3 rounded-2xl border border-brown-800/10 bg-white px-4 py-3.5 text-sm leading-relaxed text-brown-900">
+                <input
+                  type="checkbox"
+                  data-testid="sub-consent"
+                  checked={consented}
+                  onChange={(e) => {
+                    const v = e.target.checked;
+                    setForm((f) => ({
+                      ...f,
+                      accuracy_confirmed: v,
+                      privacy_consent: v,
+                      terms_consent: v,
+                    }));
+                  }}
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-vermilion-600"
+                />
+                <span>
+                  I confirm my details are accurate and I agree to the{" "}
+                  <a href="/privacy" className="font-semibold text-vermilion-600 underline underline-offset-2">Privacy Policy</a>
+                  {" "}and{" "}
+                  <a href="/terms" className="font-semibold text-vermilion-600 underline underline-offset-2">payment terms</a>.
+                </span>
               </label>
 
-              <div className="flex justify-between">
-                <Button variant="subtle" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4" /> Back</Button>
-                <Button variant="primary" data-testid="sub-submit-btn" onClick={submit} disabled={busy}>
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Proceed to payment"} <ArrowRight className="h-4 w-4" />
+              <div className="flex flex-col-reverse gap-2.5 pt-1 sm:flex-row sm:justify-between">
+                <Button variant="subtle" className="w-full sm:w-auto" onClick={() => setStep(1)}>
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </Button>
+                <Button variant="primary" className="w-full sm:w-auto" data-testid="sub-submit-btn" onClick={submit} disabled={busy || !consented}>
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Proceed to payment <ArrowRight className="h-4 w-4" /></>}
                 </Button>
               </div>
             </div>
@@ -259,17 +342,18 @@ export default function Subscribe() {
 
           {step === 3 && upiSession && (
             <div className="space-y-5" data-testid="upi-pay-step">
-              <div className="text-center">
-                <div className="font-display text-3xl">Pay via UPI / bank</div>
-                <div className="mt-1 text-brown-800/70">
-                  Amount: <span className="font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
+              <div className="text-center sm:text-left">
+                <h2 className="font-display text-2xl text-brown-900 sm:text-3xl">Pay via UPI / bank</h2>
+                <div className="mt-2 inline-flex items-baseline gap-2 rounded-full bg-vermilion-500/10 px-3 py-1 text-sm text-brown-800">
+                  Amount
+                  <span className="font-display text-xl font-semibold text-vermilion-600">{formatPaise(upiSession.total_amount)}</span>
                 </div>
               </div>
 
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-2 sm:gap-5">
                 <div className="flex flex-col items-center rounded-xl border border-gold-500/30 bg-white p-4">
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-brown-800">
-                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan or open UPI app
+                    <QrCode className="h-4 w-4 text-vermilion-500" /> Scan UPI QR
                   </div>
                   {pay?.upi_intent_url ? (
                     <a
@@ -279,7 +363,7 @@ export default function Subscribe() {
                       aria-label="Open UPI payment in your app"
                     >
                       <img
-                        src={staticQr}
+                        src={qrSrc}
                         alt="Committee UPI payment QR — tap to open UPI app"
                         className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
                         data-testid="payment-qr-img"
@@ -287,34 +371,16 @@ export default function Subscribe() {
                     </a>
                   ) : (
                     <img
-                      src={staticQr}
+                      src={qrSrc}
                       alt="Committee UPI payment QR"
                       className="h-48 w-48 rounded-lg border border-brown-800/10 bg-white object-contain p-1"
                       data-testid="payment-qr-img"
                     />
                   )}
                   <p className="mt-2 text-center text-xs text-brown-800/55">
-                    Prefer scanning with the UPI app camera if a deep link fails on your phone.
+                    Open any UPI app and scan this QR to pay{" "}
+                    <span className="font-semibold text-brown-800">{formatPaise(upiSession.total_amount)}</span>.
                   </p>
-                  <div className="mt-3 grid w-full grid-cols-2 gap-2">
-                    {[
-                      ["GPay", appLinks.gpay || appLinks.tez || pay?.upi_intent_url],
-                      ["PhonePe", appLinks.phonepe || pay?.upi_intent_url],
-                      ["Paytm", appLinks.paytm || pay?.upi_intent_url],
-                      ["BHIM / any UPI", appLinks.upi || pay?.upi_intent_url],
-                    ].filter(([, href]) => href).map(([label, href]) => (
-                      <Button
-                        key={label}
-                        type="button"
-                        variant="admin"
-                        className="w-full text-xs"
-                        data-testid={`open-upi-${label.split(" ")[0].toLowerCase()}`}
-                        onClick={() => openUpiApp(href)}
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" /> {label}
-                      </Button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="rounded-xl border border-gold-500/30 bg-white p-4 text-sm">
@@ -383,7 +449,9 @@ export default function Subscribe() {
                     <span className="mt-2 text-sm font-medium">
                       {screenshot ? screenshot.name : "Tap to upload PNG / JPG"}
                     </span>
-                    <span className="mt-1 text-xs text-brown-800/50">We read the screenshot to match amount & reference</span>
+                    <span className="mt-1 text-xs text-brown-800/50">
+                      We read the screenshot with AI to match amount, UTR, and whether it was paid to the committee
+                    </span>
                     <input
                       id="shot"
                       data-testid="upi-screenshot"

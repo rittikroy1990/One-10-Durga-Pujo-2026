@@ -9,7 +9,7 @@ export default function Settings() {
   const [tab, setTab] = useState("general");
   return (
     <div data-testid="settings-page">
-      <h1 className="mb-1 font-display text-4xl">Settings & Campaigns</h1>
+      <h1 className="mb-1 font-display text-4xl">Settings</h1>
       <p className="mb-4 text-sm text-brown-800/50">
         One 10 Events platform configuration. Items marked NOT APPROVED FOR PRODUCTION require EOC confirmation.
       </p>

@@ -30,7 +30,7 @@ export function FootfallProvider({ children }) {
     return v ? Number(v) : null;
   });
   const [showWelcome, setShowWelcome] = useState(false);
-  const [milestoneBanner, setMilestoneBanner] = useState(null); // { at, prize? }
+  const [milestoneBanner, setMilestoneBanner] = useState(null); // { at, prize? } | number
   const [ready, setReady] = useState(false);
 
   const applyStats = useCallback((s) => {
@@ -67,13 +67,6 @@ export function FootfallProvider({ children }) {
             prize: r.data.milestone_crossed_prize || r.data.stats?.milestone_prize || null,
           });
           writeSession(SESSION_MILESTONE, String(crossed));
-        } else if (r.data.stats?.milestone && !readSession(SESSION_MILESTONE)) {
-          const m = r.data.stats.milestone;
-          setMilestoneBanner({
-            at: m,
-            prize: r.data.stats.milestone_prize || null,
-          });
-          writeSession(SESSION_MILESTONE, String(m));
         }
       } catch {
         try {
@@ -89,7 +82,7 @@ export function FootfallProvider({ children }) {
 
     const t = setInterval(() => {
       api.get("/footfall").then((r) => applyStats(r.data)).catch(() => {});
-    }, 30000);
+    }, 45000);
 
     return () => {
       cancelled = true;

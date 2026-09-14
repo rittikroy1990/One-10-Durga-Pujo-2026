@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+
+# Keep committee / private flows out of search
+Disallow: /admin
+Disallow: /admin/
+Disallow: /payment/
+Disallow: /upload-qr
+Disallow: /upload-pdf
+Disallow: /api/
+
+Sitemap: https://one10events.in/sitemap.xml

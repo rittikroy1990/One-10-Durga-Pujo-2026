@@ -3,18 +3,19 @@ import { toast } from "sonner";
 import { FileText, Check, Plus, RefreshCw, Undo2 } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
-import { formatPaise, formatDateIST } from "../../lib/utils";
+import { formatPaise } from "../../lib/utils";
+import ExportCsvButton from "../../components/ExportCsvButton";
 
 export default function Collection() {
-  const [tab, setTab] = useState("households");
+  const [tab, setTab] = useState("receipts");
   return (
     <div data-testid="collection-page">
-      <h1 className="mb-1 font-display text-4xl">Collection Control</h1>
-      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, manual maker-checker modes and refunds.</p>
+      <h1 className="mb-1 font-display text-4xl">Collection</h1>
+      <p className="mb-4 text-sm text-brown-800/50">Households, receipts, cash/manual entry and refunds.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
-        { value: "manual", label: "Cash & Manual" },
+        { value: "manual", label: "Cash & manual" },
         { value: "refunds", label: "Refunds" },
       ]} />
       {tab === "households" && <Households />}
@@ -50,9 +51,20 @@ function Households() {
       toast.error(e?.response?.data?.detail || "Could not clear household.");
     }
   };
+  const exportCols = [
+    { key: "tower_name", label: "Tower" },
+    { key: "flat_number", label: "Flat" },
+    { key: "primary_name", label: "Primary contact" },
+    { key: "occupancy_type", label: "Occupancy", exportValue: (h) => (h.occupancy_type || "").replace(/_/g, " ") },
+    { key: "family_members", label: "Members" },
+    { key: "paid", label: "Status", exportValue: (h) => (h.paid ? "paid" : "pending") },
+  ];
   return (
     <Card><CardBody>
-      <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
+      <div className="mb-3 flex justify-end gap-2">
+        <ExportCsvButton filename="households.csv" columns={exportCols} items={items} data-testid="households-export-csv" />
+        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+      </div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
         <Table><THead><TR><TH>Tower</TH><TH>Flat</TH><TH>Primary Contact</TH><TH>Occupancy</TH><TH right>Members</TH><TH>Status</TH><TH>Actions</TH></TR></THead>
           <tbody>{items.map((h) => (
@@ -72,9 +84,22 @@ function Households() {
 
 function Receipts() {
   const { items, loading, load } = useList("/admin/receipts");
+  const exportCols = [
+    { key: "receipt_no", label: "Receipt no" },
+    { key: "payer_name", label: "Payer" },
+    { key: "tower_name", label: "Tower" },
+    { key: "flat_number", label: "Flat" },
+    { key: "total_amount", label: "Total (₹)", exportValue: (r) => (Number(r.total_amount || 0) / 100).toFixed(2) },
+    { key: "method", label: "Method", exportValue: (r) => (r.method || "").replace(/_/g, " ") },
+    { key: "status", label: "Status", exportValue: (r) => r.refund_status || r.status },
+    { key: "issued_at", label: "Issued at", exportValue: (r) => r.issued_at || r.created_at || "" },
+  ];
   return (
     <Card><CardBody>
-      <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
+      <div className="mb-3 flex justify-end gap-2">
+        <ExportCsvButton filename="receipts.csv" columns={exportCols} items={items} data-testid="receipts-export-csv" />
+        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+      </div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
         <Table><THead><TR><TH>Receipt No</TH><TH>Payer</TH><TH>Household</TH><TH right>Total</TH><TH>Method</TH><TH>Status</TH><TH>PDF</TH></TR></THead>
           <tbody>{items.map((r) => (
@@ -121,11 +146,35 @@ function Manual() {
   return (
     <div className="space-y-5">
       <Card><CardBody>
-        <div className="flex items-center justify-between">
-          <h3 className="font-display text-xl">Record a manual collection</h3>
-          <Button variant="admin" size="sm" onClick={() => setOpen(true)} data-testid="manual-new-btn"><Plus className="h-4 w-4" /> New</Button>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-display text-xl">Record a manual collection</h3>
+            <p className="mt-1 text-sm text-brown-800/50">Cash, bank transfer and cheque require a different person to approve (maker-checker). Receipts are issued only on approval.</p>
+          </div>
+          <div className="flex gap-2">
+            <ExportCsvButton
+              filename="manual-queues.csv"
+              columns={[
+                { key: "queue", label: "Queue" },
+                { key: "amount_paise", label: "Amount (₹)", exportValue: (r) => (Number(r.amount_paise || 0) / 100).toFixed(2) },
+                { key: "collector_name", label: "Collector / payer", exportValue: (r) => r.collector_name || r.name || "" },
+                { key: "utr", label: "UTR" },
+                { key: "cheque_no", label: "Cheque no" },
+                { key: "tower_name", label: "Tower" },
+                { key: "flat_number", label: "Flat" },
+                { key: "status", label: "Status" },
+                { key: "created_at", label: "Created", exportValue: (r) => r.created_at || "" },
+              ]}
+              items={[
+                ...((queues?.cash_pending || []).map((r) => ({ ...r, queue: "cash_pending" }))),
+                ...((queues?.bank_transfer_pending || []).map((r) => ({ ...r, queue: "bank_transfer_pending" }))),
+                ...((queues?.cheque_pending || []).map((r) => ({ ...r, queue: "cheque_pending" }))),
+              ]}
+              data-testid="manual-export-csv"
+            />
+            <Button variant="admin" size="sm" onClick={() => setOpen(true)} data-testid="manual-new-btn"><Plus className="h-4 w-4" /> New</Button>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-brown-800/50">Cash, bank transfer and cheque require a different person to approve (maker-checker). Receipts are issued only on approval.</p>
       </CardBody></Card>
 
       {queues && (
@@ -203,7 +252,39 @@ function Refunds() {
   return (
     <div className="space-y-5">
       <Card><CardBody>
-        <h3 className="mb-2 font-display text-xl">Request a refund</h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-display text-xl">Request a refund</h3>
+          <div className="flex gap-2">
+            <ExportCsvButton
+              filename="refund-candidates.csv"
+              columns={[
+                { key: "receipt_no", label: "Receipt no" },
+                { key: "payer_name", label: "Payer" },
+                { key: "tower_name", label: "Tower" },
+                { key: "flat_number", label: "Flat" },
+                { key: "total_amount", label: "Total (₹)", exportValue: (r) => (Number(r.total_amount || 0) / 100).toFixed(2) },
+                { key: "status", label: "Status", exportValue: (r) => r.refund_status || r.status },
+              ]}
+              items={items}
+              data-testid="refunds-export-csv"
+            />
+            <ExportCsvButton
+              filename="refund-register.csv"
+              columns={[
+                { key: "credit_note_no", label: "Credit note", exportValue: (r) => r.credit_note_no || r.id || "" },
+                { key: "receipt_no", label: "Receipt no" },
+                { key: "amount_paise", label: "Amount (₹)", exportValue: (r) => (Number(r.amount_paise || r.amount || 0) / 100).toFixed(2) },
+                { key: "status", label: "Status" },
+                { key: "reason", label: "Reason" },
+                { key: "created_at", label: "Created", exportValue: (r) => r.created_at || "" },
+              ]}
+              items={refunds}
+              label="Export register"
+              data-testid="refund-register-export-csv"
+            />
+            <Button variant="subtle" size="sm" onClick={() => { load(); loadRefunds(); }}><RefreshCw className="h-4 w-4" /></Button>
+          </div>
+        </div>
         {loading ? <Spinner className="text-vermilion-500" /> : (
           <Table><THead><TR><TH>Receipt</TH><TH right>Total</TH><TH>Action</TH></TR></THead>
             <tbody>{items.slice(0, 25).map((r) => (

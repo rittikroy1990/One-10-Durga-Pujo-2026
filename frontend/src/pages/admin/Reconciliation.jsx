@@ -44,7 +44,7 @@ export default function Reconciliation() {
 
   return (
     <div data-testid="reconciliation-page">
-      <h1 className="mb-1 font-display text-4xl">Bank & Gateway Reconciliation</h1>
+      <h1 className="mb-1 font-display text-4xl">Reconciliation</h1>
       <p className="mb-4 text-sm text-brown-800/50">Opening + receipts − payments = closing. Nothing is guessed — suggested matches need human approval.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "overview", label: "Overview" },

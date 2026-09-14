@@ -6,7 +6,7 @@ export default function Operations() {
   const [tab, setTab] = useState("volunteers");
   return (
     <div data-testid="operations-page">
-      <h1 className="mb-1 font-display text-4xl">Participation & Operations</h1>
+      <h1 className="mb-1 font-display text-4xl">Operations</h1>
       <p className="mb-4 text-sm text-brown-800/50">Volunteers, performers, sponsors, inventory, incidents and announcements.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "volunteers", label: "Volunteers" }, { value: "performers", label: "Performers" },

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { MapPin, CalendarDays, Sparkles } from "lucide-react";
+import { MapPin, CalendarDays, Sparkles, Download } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import { Button } from "../../components/ui";
 
 export default function Events() {
   const [events, setEvents] = useState([]);
@@ -48,7 +49,7 @@ export default function Events() {
               <div>
                 <h2 className="font-display text-3xl text-brown-900">Ritual calendar</h2>
                 <p className="mt-1 text-sm text-brown-800/60">
-                  Sasthi through Dashami — day-by-day as confirmed for One10.
+                  Sasthi through Dashami — day-by-day timings confirmed for One10.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -57,43 +58,64 @@ export default function Events() {
                     <Sparkles className="h-3.5 w-3.5 text-vermilion-500" /> {programmeSource}
                   </span>
                 )}
-                <Link
-                  to="/nirghanto"
-                  className="rounded-full border border-vermilion-500/40 bg-vermilion-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-vermilion-600 hover:bg-vermilion-500/20"
-                  data-testid="link-nirghanto-cards"
-                >
-                  Download PDF cards
+                <Link to="/nirghanto" data-testid="link-nirghonto-cards">
+                  <Button variant="outline" size="sm">
+                    <Download className="h-4 w-4" /> Download PDF cards
+                  </Button>
                 </Link>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {programme.map((day, i) => (
-                <motion.div
-                  key={day.id}
-                  initial={{ opacity: 0, y: 16 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: i * 0.05, duration: 0.45 }}
-                  className="rounded-2xl border border-sun-400/35 bg-white p-5 shadow-sm"
-                  data-testid={`programme-${day.id}`}
-                >
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-display text-4xl leading-none text-vermilion-500">{day.day}</span>
-                    <span className="text-sm uppercase tracking-wider text-brown-800/55">{day.month_label}</span>
-                  </div>
-                  <div className="mt-1 text-xs uppercase tracking-[0.2em] text-brown-800/45">{day.weekday}</div>
-                  <h3 className="mt-3 font-display text-2xl text-brown-900">{day.title_bn || day.title || day.tithi}</h3>
-                  <div className="mt-1 text-sm text-brown-800/60">{day.tithi}{day.bengali_date ? ` · ${day.bengali_date}` : ""}</div>
-                  {day.nirghanto?.highlights?.[0] && (
-                    <div className="mt-2 text-xs text-brown-800/70">{day.nirghanto.highlights[0]}</div>
-                  )}
-                  {day.nirghanto?.sandhi_start && (
-                    <div className="mt-1 text-xs font-semibold text-vermilion-600">
-                      Sandhi {day.nirghanto.sandhi_start}–{day.nirghanto.sandhi_end}
+              {programme.map((day, i) => {
+                const highlights =
+                  (day.nirghanto?.highlights_en?.length
+                    ? day.nirghanto.highlights_en
+                    : day.nirghanto?.highlights) || [];
+                return (
+                  <motion.div
+                    key={day.id}
+                    initial={{ opacity: 0, y: 16 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ delay: i * 0.05, duration: 0.45 }}
+                    className="rounded-2xl border border-sun-400/35 bg-white p-5 shadow-sm"
+                    data-testid={`programme-${day.id}`}
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-display text-4xl leading-none text-vermilion-500">{day.day}</span>
+                      <span className="text-sm uppercase tracking-wider text-brown-800/55">{day.month_label}</span>
                     </div>
-                  )}
-                </motion.div>
-              ))}
+                    <div className="mt-1 text-xs uppercase tracking-[0.2em] text-brown-800/45">{day.weekday}</div>
+                    <h3 className="mt-3 font-display text-2xl text-brown-900">{day.title || day.tithi}</h3>
+                    {(day.title_bn || day.tithi || day.bengali_date) && (
+                      <div className="mt-1 text-sm text-brown-800/60">
+                        {[day.title_bn, day.tithi, day.bengali_date].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                    {day.nirghanto?.tithi_start && (
+                      <div className="mt-2 text-[11px] text-brown-800/50">
+                        Tithi {day.nirghanto.tithi_start}
+                        {day.nirghanto.tithi_end ? ` → ${day.nirghanto.tithi_end}` : ""}
+                      </div>
+                    )}
+                    {day.nirghanto?.sandhi_start && (
+                      <div className="mt-1 text-xs font-semibold text-vermilion-600">
+                        Sandhi Puja {day.nirghanto.sandhi_start}–{day.nirghanto.sandhi_end}
+                      </div>
+                    )}
+                    {highlights.length > 0 && (
+                      <ul className="mt-3 space-y-1 border-t border-sun-400/25 pt-3 text-xs text-brown-800/75">
+                        {highlights.slice(0, 4).map((h) => (
+                          <li key={h} className="flex gap-2">
+                            <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-vermilion-500" />
+                            <span>{h}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </motion.div>
+                );
+              })}
             </div>
           </section>
         ) : (

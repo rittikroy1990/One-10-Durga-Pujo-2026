@@ -25,25 +25,10 @@ const STEPS = [
   { id: "pay", label: "3. Pay" },
 ];
 
-const PUBLIC_FOOD_DAY_CODES = new Set(["sasthi", "shashthi", "day_sasthi", "day_shashthi"]);
-
-function isPublicFoodDay(day) {
-  const code = String(day?.code || "").trim().toLowerCase();
-  if (PUBLIC_FOOD_DAY_CODES.has(code)) return true;
-  const date = String(day?.date || day?.date_label || "").trim();
-  if (date.startsWith("2026-10-16") || date.includes("16 Oct 2026")) return true;
-  const label = String(day?.label || day?.short_label || "").trim().toLowerCase();
-  return ["sasthi", "shashthi", "maha sasthi", "maha shashthi"].includes(label);
-}
-
 function filterDays(days) {
   return (days || [])
-    .filter(isPublicFoodDay)
     .map((day) => ({
       ...day,
-      date: day.date || "2026-10-16",
-      date_label: day.date_label || "16 Oct 2026 · Friday",
-      label: day.label || "Sasthi",
       meals: (day.meals || []).filter((m) => ALLOWED_MEALS.has(m.code)),
     }))
     .filter((day) => (day.meals || []).length > 0);
@@ -266,11 +251,7 @@ export default function Food() {
       }
       return next;
     });
-    toast.success(
-      days.length <= 1
-        ? `Added 1 ${mealCode} for Sasthi (16 Oct)`
-        : `Added 1 ${mealCode} for each day`
-    );
+    toast.success(`Added 1 ${mealCode} for each day`);
   };
 
   const copyText = async (text, label) => {
@@ -465,8 +446,7 @@ export default function Food() {
           <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">Puja meals</p>
           <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">Order meals</h1>
           <p className="mt-2 max-w-xl text-brown-800/70">
-            Ordering is open for <span className="font-semibold text-brown-900">Maha Sasthi — 16 Oct 2026</span> only.
-            Pick breakfast, lunch and dinner; your total updates as you add.
+            Pick how many breakfasts, lunches and dinners you need. Your total updates as you add.
           </p>
 
           <div className="mt-4 flex flex-wrap gap-2">
@@ -686,9 +666,7 @@ export default function Food() {
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <span className="self-center text-xs text-brown-800/45">
-                    {days.length <= 1 ? "Quick add 1 for Sasthi (16 Oct):" : "Quick add 1 for every day:"}
-                  </span>
+                  <span className="self-center text-xs text-brown-800/45">Quick add 1 for every day:</span>
                   {[
                     ["breakfast", "Breakfast"],
                     ["lunch", "Lunch"],

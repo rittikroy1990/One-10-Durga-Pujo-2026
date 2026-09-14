@@ -20,10 +20,12 @@ const fade = {
 export default function Home() {
   const [cfg, setCfg] = useState(null);
   const [anns, setAnns] = useState([]);
+  const [localAds, setLocalAds] = useState([]);
 
   useEffect(() => {
     api.get("/config").then((r) => setCfg(r.data)).catch(() => {});
     api.get("/announcements").then((r) => setAnns(r.data.items || [])).catch(() => {});
+    api.get("/ads/placements/home").then((r) => setLocalAds(r.data.items || [])).catch(() => setLocalAds([]));
   }, []);
 
   const platform = cfg?.platform;
@@ -243,6 +245,30 @@ export default function Home() {
           </Link>
         </div>
       </section>
+
+      {!!localAds.length && (
+        <section className="border-t border-brown-800/10 bg-ivory-50 py-14" data-testid="home-local-ads">
+          <div className="mx-auto max-w-6xl px-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-vermilion-600">Neighbourhood</p>
+                <h2 className="mt-2 font-display text-3xl text-brown-900">Local businesses</h2>
+              </div>
+              <Link to="/local-businesses" className="text-sm font-semibold text-vermilion-600 hover:underline">See all</Link>
+            </div>
+            <div className="mt-6 flex gap-4 overflow-x-auto pb-2">
+              {localAds.slice(0, 8).map((ad) => (
+                <Link key={ad.id} to={`/local-businesses/${ad.slug}`} className="min-w-[220px] max-w-[220px] rounded-2xl border border-brown-800/10 bg-white p-4 shadow-sm">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-gold-700">{ad.category || "Local"}</div>
+                  <div className="mt-1 font-display text-xl text-brown-900 line-clamp-2">{ad.business_name}</div>
+                  <p className="mt-1 line-clamp-2 text-xs text-brown-800/65">{ad.headline}</p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
     </PublicLayout>
   );
 }

@@ -44,6 +44,7 @@ async def public_config():
         "campaigns": [c["public"] for c in campaigns],
         "active_cycle_id": await get_active_cycle_id(),
         "sponsorship": s.get("sponsorship") or {},
+        "local_business_ads": s.get("local_business_ads") or {},
     }
 
 

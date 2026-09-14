@@ -28,6 +28,49 @@ const ATMOSPHERE = [
   "/images/campaign/full-13.jpg",
 ];
 
+/** Fallback when /config has not yet seeded the digital rate-card cut */
+const FALLBACK_DIGITAL = [
+  {
+    code: "website_presence",
+    name: "Website Presence Partner",
+    amount_paise: 5000000,
+    benefits: [
+      "Logo on one10events.in homepage sponsor strip (Pujo season)",
+      "Featured placement on the public Sponsors page with brand blurb",
+      "Logo acknowledgement on Subscribe / Donate / campaign pages",
+      "One dedicated sponsor spotlight on the announcements strip",
+      "Hyperlink to your website or campaign landing page",
+      "Placement proof pack (screenshots + live URLs) after go-live",
+    ],
+  },
+  {
+    code: "social_presence",
+    name: "Social Media Presence Partner",
+    amount_paise: 4000000,
+    benefits: [
+      "3 feed posts across Facebook / Instagram (pre-Pujo + during Pujo)",
+      "5 Stories / short updates tagging your brand during celebration days",
+      "1 Reel or short video mention (logo end-card + brand name in caption)",
+      "WhatsApp community broadcast shout-out to One10 resident groups",
+      "Tagged in live-update creatives where relevant",
+      "Analytics snapshot (reach / impressions) shared after the campaign",
+    ],
+  },
+  {
+    code: "digital_bundle",
+    name: "Digital Presence Bundle",
+    amount_paise: 7500000,
+    amount_label: "₹75,000 · save ₹15,000",
+    benefits: [
+      "All Website Presence Partner deliverables",
+      "All Social Media Presence Partner deliverables",
+      "Priority logo size on homepage strip vs. standard digital partners",
+      "Co-branded thank-you creatives for website + social after Pujo",
+      "Ideal for brands that want measurable online recall without on-ground booths",
+    ],
+  },
+];
+
 function inquireMailto(email, pkg) {
   const to = email || "one10eventgroup@gmail.com";
   const subject = encodeURIComponent(`Sponsorship inquiry — ${pkg.name} (One10 Durga Puja 2026)`);
@@ -101,7 +144,7 @@ export default function Sponsors() {
   const bank = org.bank_account || {};
   const gallery = (sp.gallery || []).length ? sp.gallery : ATMOSPHERE;
   const email = org.contact_email || "one10eventgroup@gmail.com";
-  const digital = sp.digital || [];
+  const digital = (sp.digital || []).length ? sp.digital : FALLBACK_DIGITAL;
   const audience = sp.audience || {};
 
   return (

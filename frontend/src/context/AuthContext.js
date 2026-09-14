@@ -3,9 +3,14 @@ import api from "../lib/api";
 
 const AuthContext = createContext(null);
 
+function isAdminPath() {
+  const path = window.location.pathname || "";
+  return path.startsWith("/admin");
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => isAdminPath());
 
   const checkAuth = useCallback(async () => {
     try {
@@ -21,6 +26,11 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // CRITICAL: if returning from OAuth callback, skip the /me check.
     if (window.location.hash?.includes("session_id=")) {
+      setLoading(false);
+      return;
+    }
+    // Public pages don't need a session round-trip on first paint.
+    if (!isAdminPath()) {
       setLoading(false);
       return;
     }

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Handshake, Building2, Users, Megaphone, Mail, Phone, Landmark } from "lucide-react";
+import { ArrowRight, Handshake, Building2, Users, Megaphone, Mail, Phone, Landmark, Store } from "lucide-react";
 import api from "../../lib/api";
+import { trackAdClick } from "../../lib/adClicks";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -29,8 +30,10 @@ function PackageCard({ pkg }) {
 
 export default function Sponsors() {
   const [cfg, setCfg] = useState(null);
+  const [localAds, setLocalAds] = useState([]);
   useEffect(() => {
     api.get("/config").then((r) => setCfg(r.data)).catch(() => {});
+    api.get("/ads/placements/sponsors").then((r) => setLocalAds(r.data.items || [])).catch(() => setLocalAds([]));
   }, []);
 
   const sp = cfg?.sponsorship || {};
@@ -128,6 +131,48 @@ export default function Sponsors() {
             ))}
           </div>
           <p className="mt-8 text-sm text-ivory-100/55">Custom sponsorship options can be curated to suit your brand objectives.</p>
+        </section>
+      )}
+
+      {!!localAds.length && (
+        <section className="border-y border-gold-500/15 bg-brown-900/50 py-14" data-testid="sponsors-local-ads-rail">
+          <div className="mx-auto max-w-7xl px-5">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-gold-400">Spotlight</p>
+                <h2 className="mt-2 font-display text-4xl text-ivory-100">Local business partners</h2>
+                <p className="mt-2 max-w-xl text-sm text-ivory-100/65">
+                  Neighbourhood businesses featured on this sponsorship page through approved advertising packages.
+                </p>
+              </div>
+              <Link to="/local-businesses" className="text-sm font-semibold text-gold-400 hover:underline">
+                See directory
+              </Link>
+            </div>
+            <div className="mt-8 flex gap-4 overflow-x-auto pb-2">
+              {localAds.slice(0, 10).map((ad) => (
+                <Link
+                  key={ad.id}
+                  to={`/local-businesses/${ad.slug}`}
+                  onClick={() => trackAdClick(ad.id, "sponsors_rail")}
+                  className="min-w-[240px] max-w-[240px] rounded-2xl border border-gold-500/25 bg-brown-800/60 p-4 transition hover:border-gold-400/50"
+                  data-testid={`sponsors-ad-${ad.slug}`}
+                >
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-gold-400">
+                    <Store className="h-3.5 w-3.5" />
+                    {ad.category || "Local"}
+                  </div>
+                  <div className="mt-2 font-display text-2xl text-ivory-100 line-clamp-2">{ad.business_name}</div>
+                  <p className="mt-1 line-clamp-2 text-xs text-ivory-100/65">{ad.headline}</p>
+                </Link>
+              ))}
+            </div>
+            <div className="mt-6">
+              <Link to="/advertise">
+                <Button variant="outline" size="sm">Advertise your business</Button>
+              </Link>
+            </div>
+          </div>
         </section>
       )}
 

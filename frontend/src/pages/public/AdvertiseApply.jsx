@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, ArrowRight, Loader2, Upload } from "lucide-react";
 import api from "../../lib/api";
@@ -26,13 +26,20 @@ const EMPTY = {
 
 export default function AdvertiseApply() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const resubmitToken = (searchParams.get("resubmit") || "").trim();
   const [catalog, setCatalog] = useState(null);
   const [payCfg, setPayCfg] = useState(null);
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
+  const [loadingResubmit, setLoadingResubmit] = useState(!!resubmitToken);
   const [adId, setAdId] = useState("");
   const [token, setToken] = useState("");
+  const [isResubmit, setIsResubmit] = useState(false);
+  const [existingMediaCount, setExistingMediaCount] = useState(0);
+  const [hasExistingPayment, setHasExistingPayment] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState("");
   const [mediaFiles, setMediaFiles] = useState([]);
   const [utr, setUtr] = useState("");
   const [proof, setProof] = useState(null);
@@ -42,6 +49,57 @@ export default function AdvertiseApply() {
     api.get("/config").then((r) => setPayCfg(r.data?.payment || r.data)).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!resubmitToken) return;
+    let cancelled = false;
+    setLoadingResubmit(true);
+    api.get(`/ads/status/${resubmitToken}`)
+      .then((r) => {
+        if (cancelled) return;
+        const d = r.data;
+        if (!d?.can_resubmit) {
+          toast.error("This application cannot be resubmitted.");
+          navigate(`/advertise/status/${resubmitToken}`, { replace: true });
+          return;
+        }
+        setForm({
+          package_code: d.package_code || "",
+          business_name: d.business_name || "",
+          contact_name: d.contact_name || "",
+          mobile: d.mobile || "",
+          email: d.email || "",
+          location_scope: d.location_scope || "inside_one_ten",
+          tower_or_area: d.tower_or_area || "",
+          category: d.category || "",
+          headline: d.headline || "",
+          writeup: d.writeup || "",
+          link_type: d.link_type || "none",
+          link_url: d.link_url || "",
+          link_label: d.link_label || "Visit",
+          terms_accepted: true,
+        });
+        setAdId(d.id);
+        setToken(d.status_token || resubmitToken);
+        setIsResubmit(true);
+        setExistingMediaCount((d.media || []).length);
+        setHasExistingPayment(!!(d.payment_utr && d.payment_proof_doc_id));
+        setUtr(d.payment_utr || "");
+        setReviewNotes(d.review_notes || "");
+        setStep(0);
+        toast.message("Resubmit mode — update details, then re-upload if needed.");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          toast.error("Could not load application for resubmit.");
+          navigate("/advertise", { replace: true });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingResubmit(false);
+      });
+    return () => { cancelled = true; };
+  }, [resubmitToken, navigate]);
+
   const packages = catalog?.packages || [];
   const categories = catalog?.categories || [];
   const selected = useMemo(
@@ -50,28 +108,42 @@ export default function AdvertiseApply() {
   );
   const set = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
 
-  const createApplication = async () => {
+  const saveApplication = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/ads/applications", form);
-      setAdId(data.id);
-      setToken(data.status_token);
-      setStep(2);
-      toast.success("Application created. Upload creative and payment proof.");
+      if (isResubmit && adId && token) {
+        const { data } = await api.put(`/ads/applications/${adId}`, { ...form, status_token: token });
+        setAdId(data.id);
+        setToken(data.status_token);
+        setStep(2);
+        toast.success("Details saved. Confirm creative and payment, then submit.");
+      } else {
+        const { data } = await api.post("/ads/applications", form);
+        setAdId(data.id);
+        setToken(data.status_token);
+        setStep(2);
+        toast.success("Application created. Upload creative and payment proof.");
+      }
     } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not create application.");
+      toast.error(err?.response?.data?.detail || "Could not save application.");
     } finally {
       setBusy(false);
     }
   };
 
   const uploadAll = async () => {
-    if (!mediaFiles.length) {
+    const needNewMedia = !existingMediaCount && !mediaFiles.length;
+    if (needNewMedia) {
       toast.error("Add at least one image or video.");
       return;
     }
-    if (!utr.trim() || !proof) {
+    const needPayment = !hasExistingPayment;
+    if (needPayment && (!utr.trim() || !proof)) {
       toast.error("Enter UTR and upload payment screenshot.");
+      return;
+    }
+    if (!needPayment && utr.trim() && !proof && !hasExistingPayment) {
+      toast.error("Upload payment screenshot with the UTR.");
       return;
     }
     setBusy(true);
@@ -83,13 +155,20 @@ export default function AdvertiseApply() {
         fd.append("file", file);
         await api.post(`/ads/applications/${adId}/media`, fd);
       }
-      const payFd = new FormData();
-      payFd.append("status_token", token);
-      payFd.append("utr", utr.trim());
-      payFd.append("screenshot", proof);
-      await api.post(`/ads/applications/${adId}/payment-proof`, payFd);
+      if (proof || (utr.trim() && !hasExistingPayment)) {
+        if (!utr.trim() || !proof) {
+          toast.error("Enter UTR and upload payment screenshot.");
+          setBusy(false);
+          return;
+        }
+        const payFd = new FormData();
+        payFd.append("status_token", token);
+        payFd.append("utr", utr.trim());
+        payFd.append("screenshot", proof);
+        await api.post(`/ads/applications/${adId}/payment-proof`, payFd);
+      }
       await api.post(`/ads/applications/${adId}/submit`, { status_token: token });
-      toast.success("Submitted for committee review.");
+      toast.success(isResubmit ? "Resubmitted for committee review." : "Submitted for committee review.");
       navigate(`/advertise/status/${token}`);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Upload / submit failed.");
@@ -100,14 +179,35 @@ export default function AdvertiseApply() {
 
   const upiId = payCfg?.upi?.vpa || payCfg?.upi?.upi_id || payCfg?.upi?.id || "";
 
+  if (loadingResubmit) {
+    return (
+      <PublicLayout>
+        <div className="grid min-h-[50vh] place-items-center text-brown-800/50">
+          <Loader2 className="h-8 w-8 animate-spin text-vermilion-500" />
+        </div>
+      </PublicLayout>
+    );
+  }
+
   return (
     <PublicLayout>
       <div className="mx-auto max-w-3xl px-5 py-12">
         <Link to="/advertise" className="inline-flex items-center gap-2 text-sm text-brown-800/70 hover:text-vermilion-600">
           <ArrowLeft className="h-4 w-4" /> Back to packages
         </Link>
-        <h1 className="mt-4 font-display text-4xl text-brown-900">Advertise with One Ten</h1>
-        <p className="mt-2 text-brown-800/70">Paid application · committee review · one resubmit if changes are needed.</p>
+        <h1 className="mt-4 font-display text-4xl text-brown-900">
+          {isResubmit ? "Update & resubmit" : "Advertise with One Ten"}
+        </h1>
+        <p className="mt-2 text-brown-800/70">
+          {isResubmit
+            ? "Same application record — one resubmit only. Fix the notes below, then submit again."
+            : "Paid application · committee review · one resubmit if changes are needed."}
+        </p>
+        {isResubmit && reviewNotes && (
+          <div className="mt-4 rounded-xl border border-gold-500/40 bg-gold-50 px-4 py-3 text-sm text-brown-900" data-testid="ad-resubmit-notes">
+            <span className="font-semibold">Committee notes: </span>{reviewNotes}
+          </div>
+        )}
 
         <div className="mt-6 flex gap-2 text-xs font-semibold uppercase tracking-wider text-brown-800/50">
           {["Package & details", "Confirm", "Pay & upload"].map((label, i) => (
@@ -182,10 +282,12 @@ export default function AdvertiseApply() {
                 <Input value={form.link_url} onChange={(e) => set("link_url", e.target.value)} placeholder="/donate or https://..." />
               </div>
             </div>
-            <label className="flex items-start gap-2 text-sm text-brown-800/80">
-              <input type="checkbox" checked={form.terms_accepted} onChange={(e) => set("terms_accepted", e.target.checked)} data-testid="ad-terms" />
-              I confirm this is a paid advertisement, content is accurate, and One Ten EOC may approve or reject it.
-            </label>
+            {!isResubmit && (
+              <label className="flex items-start gap-2 text-sm text-brown-800/80">
+                <input type="checkbox" checked={form.terms_accepted} onChange={(e) => set("terms_accepted", e.target.checked)} data-testid="ad-terms" />
+                I confirm this is a paid advertisement, content is accurate, and One Ten EOC may approve or reject it.
+              </label>
+            )}
             <Button
               variant="primary"
               data-testid="ad-details-next"
@@ -210,9 +312,9 @@ export default function AdvertiseApply() {
             </dl>
             <div className="flex flex-wrap gap-3">
               <Button variant="subtle" onClick={() => setStep(0)}><ArrowLeft className="h-4 w-4" /> Edit</Button>
-              <Button variant="primary" data-testid="ad-create-btn" disabled={busy} onClick={createApplication}>
+              <Button variant="primary" data-testid="ad-create-btn" disabled={busy} onClick={saveApplication}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Create application & continue
+                {isResubmit ? "Save updates & continue" : "Create application & continue"}
               </Button>
             </div>
           </div>
@@ -220,28 +322,40 @@ export default function AdvertiseApply() {
 
         {step === 2 && (
           <div className="mt-8 space-y-5 rounded-2xl border border-brown-800/10 bg-white p-6">
-            <h2 className="font-display text-2xl text-brown-900">Pay {formatPaise(selected?.amount_paise)} and upload creative</h2>
+            <h2 className="font-display text-2xl text-brown-900">
+              {isResubmit ? "Refresh creative & confirm payment" : `Pay ${formatPaise(selected?.amount_paise)} and upload creative`}
+            </h2>
             <p className="text-sm text-brown-800/70">
-              Pay via the committee UPI{upiId ? ` (${upiId})` : ""}, then upload the payment screenshot with UTR plus your ad images/video.
+              {isResubmit
+                ? "You do not need to pay again unless the package fee changed. Re-upload creative if requested; existing files stay unless replaced."
+                : `Pay via the committee UPI${upiId ? ` (${upiId})` : ""}, then upload the payment screenshot with UTR plus your ad images/video.`}
             </p>
+            {existingMediaCount > 0 && (
+              <p className="text-xs text-brown-800/60" data-testid="ad-existing-media">
+                {existingMediaCount} creative file(s) already on file. Optional: upload replacements below.
+              </p>
+            )}
             <div>
-              <Label required>Creative files (images and/or one video)</Label>
+              <Label required={!existingMediaCount}>Creative files (images and/or one video)</Label>
               <Input data-testid="ad-media" type="file" multiple accept="image/*,video/mp4,video/webm,video/quicktime" onChange={(e) => setMediaFiles(Array.from(e.target.files || []))} />
-              {!!mediaFiles.length && <p className="mt-1 text-xs text-brown-800/60">{mediaFiles.length} file(s) selected</p>}
+              {!!mediaFiles.length && <p className="mt-1 text-xs text-brown-800/60">{mediaFiles.length} new file(s) selected</p>}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label required>UTR / UPI reference</Label>
+                <Label required={!hasExistingPayment}>UTR / UPI reference</Label>
                 <Input data-testid="ad-utr" value={utr} onChange={(e) => setUtr(e.target.value)} />
               </div>
               <div>
-                <Label required>Payment screenshot</Label>
+                <Label required={!hasExistingPayment}>Payment screenshot</Label>
                 <Input data-testid="ad-payment-proof" type="file" accept="image/*,application/pdf" onChange={(e) => setProof(e.target.files?.[0] || null)} />
+                {hasExistingPayment && !proof && (
+                  <p className="mt-1 text-xs text-brown-800/60">Existing payment proof on file — re-upload only if you need to replace it.</p>
+                )}
               </div>
             </div>
             <Button variant="primary" data-testid="ad-submit-btn" disabled={busy} onClick={uploadAll}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              Upload & submit for review
+              {isResubmit ? "Resubmit for review" : "Upload & submit for review"}
             </Button>
           </div>
         )}

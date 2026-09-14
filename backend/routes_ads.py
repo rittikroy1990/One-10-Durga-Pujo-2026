@@ -91,6 +91,9 @@ def _status_view(doc: dict) -> dict:
         "status": st,
         "status_token": doc.get("status_token"),
         "business_name": doc.get("business_name"),
+        "contact_name": doc.get("contact_name"),
+        "mobile": doc.get("mobile"),
+        "email": doc.get("email") or "",
         "package_code": doc.get("package_code"),
         "package_name": doc.get("package_name"),
         "amount_paise": doc.get("amount_paise"),
@@ -111,6 +114,7 @@ def _status_view(doc: dict) -> dict:
         "can_resubmit": st in ("rejected", "changes_requested") and used < 1,
         "slug": doc.get("slug"),
         "published": st == "published",
+        "click_count": int(doc.get("click_count") or 0),
         "created_at": doc.get("created_at"),
         "updated_at": doc.get("updated_at"),
         "submitted_at": doc.get("submitted_at"),
@@ -161,6 +165,32 @@ async def ads_home_placement():
         {"_id": 0},
     ).sort("published_at", -1).to_list(24)
     return {"items": [_public_card(i) for i in items]}
+
+
+@router.get("/ads/placements/sponsors")
+async def ads_sponsors_placement():
+    items = await db.business_ads.find(
+        {"status": "published", "is_deleted": {"$ne": True}, "placements": "sponsors_rail"},
+        {"_id": 0},
+    ).sort("published_at", -1).to_list(24)
+    return {"items": [_public_card(i) for i in items]}
+
+
+@router.post("/ads/{ad_id}/click")
+async def track_ad_click(ad_id: str, body: dict = Body(default={})):
+    """Fire-and-forget style click counter for published ads (surfaces: home_strip, sponsors_rail, directory, detail, cta)."""
+    surface = ((body or {}).get("surface") or "unknown").strip().lower()[:40] or "unknown"
+    doc = await db.business_ads.find_one({"id": ad_id, "status": "published", "is_deleted": {"$ne": True}})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Ad not found.")
+    await db.business_ads.update_one(
+        {"id": ad_id},
+        {
+            "$inc": {"click_count": 1, f"clicks_by_surface.{surface}": 1},
+            "$set": {"updated_at": iso()},
+        },
+    )
+    return {"ok": True}
 
 
 @router.post("/ads/applications")
@@ -227,6 +257,8 @@ async def create_ad_application(body: dict = Body(...), request: Request = None)
         "review_notes": "",
         "reviewed_by": None,
         "resubmit_used": 0,
+        "click_count": 0,
+        "clicks_by_surface": {},
         "created_at": iso(),
         "updated_at": iso(),
         "submitted_at": None,
@@ -249,6 +281,86 @@ async def create_ad_application(body: dict = Body(...), request: Request = None)
         "package_name": doc["package_name"],
         "slug": slug,
         "message": "Application created. Upload creative + payment proof, then submit.",
+    }
+
+
+@router.put("/ads/applications/{ad_id}")
+async def update_ad_application(ad_id: str, body: dict = Body(...), request: Request = None):
+    """Update draft / resubmit-eligible application fields before re-upload & submit."""
+    token = (body.get("status_token") or "").strip()
+    doc = await db.business_ads.find_one({"id": ad_id, "status_token": token, "is_deleted": {"$ne": True}})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Application not found.")
+    if doc.get("status") not in ("draft", "changes_requested", "rejected"):
+        raise HTTPException(status_code=409, detail="Details can only be edited before submit or during the one allowed resubmit.")
+    if doc.get("status") in ("changes_requested", "rejected") and int(doc.get("resubmit_used") or 0) >= 1:
+        raise HTTPException(status_code=409, detail="Only one resubmit is allowed on this application.")
+
+    catalog = await _catalog()
+    package_code = (body.get("package_code") or doc.get("package_code") or "").strip()
+    pkg = _pkg(catalog, package_code)
+    if not pkg:
+        raise HTTPException(status_code=400, detail="Choose a valid advertising package.")
+
+    business_name = (body.get("business_name") or "").strip()
+    contact_name = (body.get("contact_name") or "").strip()
+    mobile = (body.get("mobile") or "").strip()
+    if not business_name or not contact_name:
+        raise HTTPException(status_code=400, detail="Business name and contact name are required.")
+    if not valid_indian_mobile(mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit Indian mobile number.")
+
+    location_scope = (body.get("location_scope") or "").strip()
+    if location_scope not in ("inside_one_ten", "outside_one_ten"):
+        raise HTTPException(status_code=400, detail="Say whether the business is inside or outside One Ten.")
+
+    link_type, link_url = _validate_link(body.get("link_type") or "none", body.get("link_url") or "")
+    headline = (body.get("headline") or "").strip()[:120]
+    writeup = (body.get("writeup") or "").strip()[:2000]
+    if not headline or not writeup:
+        raise HTTPException(status_code=400, detail="Headline and write-up are required.")
+
+    categories = catalog.get("categories") or []
+    category = (body.get("category") or "").strip()
+    if categories and category not in categories:
+        raise HTTPException(status_code=400, detail="Choose a valid business category.")
+
+    update = {
+        "package_code": pkg["code"],
+        "package_name": pkg["name"],
+        "amount_paise": int(pkg["amount_paise"]),
+        "placements": list(pkg.get("placements") or []),
+        "business_name": business_name,
+        "contact_name": contact_name,
+        "mobile": mobile,
+        "email": (body.get("email") or "").strip().lower(),
+        "location_scope": location_scope,
+        "tower_or_area": (body.get("tower_or_area") or "").strip()[:120],
+        "category": category,
+        "headline": headline,
+        "writeup": writeup,
+        "link_type": link_type,
+        "link_url": link_url,
+        "link_label": (body.get("link_label") or "Visit").strip()[:40] or "Visit",
+        "updated_at": iso(),
+    }
+    await db.business_ads.update_one({"id": ad_id}, {"$set": update})
+    await audit(
+        "ads.application.update",
+        entity_type="business_ad",
+        entity_id=ad_id,
+        after={"package": pkg["code"], "business": business_name},
+        request=request,
+    )
+    fresh = await db.business_ads.find_one({"id": ad_id, "is_deleted": {"$ne": True}})
+    return {
+        "id": ad_id,
+        "status_token": token,
+        "status": fresh.get("status"),
+        "amount_paise": fresh.get("amount_paise"),
+        "package_name": fresh.get("package_name"),
+        "slug": fresh.get("slug"),
+        "message": "Details updated. Upload creative + payment proof if needed, then submit.",
     }
 
 

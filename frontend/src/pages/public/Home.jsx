@@ -6,6 +6,7 @@ import {
   CheckCircle2, BookOpenCheck, Receipt, Wallet,
 } from "lucide-react";
 import api from "../../lib/api";
+import { trackAdClick } from "../../lib/adClicks";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -264,7 +265,12 @@ export default function Home() {
             </div>
             <div className="mt-6 flex gap-4 overflow-x-auto pb-2">
               {localAds.slice(0, 8).map((ad) => (
-                <Link key={ad.id} to={`/local-businesses/${ad.slug}`} className="min-w-[220px] max-w-[220px] rounded-2xl border border-brown-800/10 bg-white p-4 shadow-sm">
+                <Link
+                  key={ad.id}
+                  to={`/local-businesses/${ad.slug}`}
+                  onClick={() => trackAdClick(ad.id, "home_strip")}
+                  className="min-w-[220px] max-w-[220px] rounded-2xl border border-brown-800/10 bg-white p-4 shadow-sm"
+                >
                   <div className="text-[11px] font-semibold uppercase tracking-wide text-gold-700">{ad.category || "Local"}</div>
                   <div className="mt-1 font-display text-xl text-brown-900 line-clamp-2">{ad.business_name}</div>
                   <p className="mt-1 line-clamp-2 text-xs text-brown-800/65">{ad.headline}</p>

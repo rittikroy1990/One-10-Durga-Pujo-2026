@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Store } from "lucide-react";
 import api, { API } from "../../lib/api";
+import { trackAdClick } from "../../lib/adClicks";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Input, Select } from "../../components/ui";
 
@@ -14,6 +15,7 @@ function AdCard({ ad }) {
   return (
     <Link
       to={`/local-businesses/${ad.slug}`}
+      onClick={() => trackAdClick(ad.id, "directory")}
       className="group overflow-hidden rounded-2xl border border-brown-800/10 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
       data-testid={`local-ad-card-${ad.slug}`}
     >

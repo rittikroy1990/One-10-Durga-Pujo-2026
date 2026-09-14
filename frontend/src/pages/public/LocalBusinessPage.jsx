@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ExternalLink, MapPin, Store } from "lucide-react";
 import api, { API } from "../../lib/api";
+import { trackAdClick } from "../../lib/adClicks";
 import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 
@@ -16,7 +17,10 @@ export default function LocalBusinessPage() {
 
   useEffect(() => {
     api.get(`/ads/directory/${slug}`)
-      .then((r) => setAd(r.data))
+      .then((r) => {
+        setAd(r.data);
+        if (r.data?.id) trackAdClick(r.data.id, "detail");
+      })
       .catch(() => setError("This advertisement is not available."));
   }, [slug]);
 
@@ -39,12 +43,13 @@ export default function LocalBusinessPage() {
   const hero = (ad.media || []).find((m) => m.kind === "image") || (ad.media || [])[0];
   const video = (ad.media || []).find((m) => m.kind === "video");
   const isTakeover = (ad.placements || []).includes("takeover") || (ad.placements || []).includes("story_layout");
+  const onCta = () => trackAdClick(ad.id, "cta");
   const cta = ad.link_type === "external" ? (
-    <a href={ad.link_url} target="_blank" rel="noopener noreferrer">
+    <a href={ad.link_url} target="_blank" rel="noopener noreferrer" onClick={onCta}>
       <Button variant="primary" size="lg">{ad.link_label || "Visit"} <ExternalLink className="h-4 w-4" /></Button>
     </a>
   ) : ad.link_type === "internal" ? (
-    <Link to={ad.link_url || "/"}><Button variant="primary" size="lg">{ad.link_label || "Visit"}</Button></Link>
+    <Link to={ad.link_url || "/"} onClick={onCta}><Button variant="primary" size="lg">{ad.link_label || "Visit"}</Button></Link>
   ) : null;
 
   return (

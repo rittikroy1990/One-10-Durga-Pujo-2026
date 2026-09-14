@@ -77,7 +77,10 @@ export default function AdsAdmin() {
                 <span className="text-[11px] uppercase tracking-wide text-brown-800/50">{item.status}</span>
               </div>
               <div className="mt-1 text-sm text-brown-800/65">{item.package_name} · {formatPaise(item.amount_paise)}</div>
-              <div className="mt-1 text-xs text-brown-800/45">{formatDateIST(item.submitted_at || item.updated_at)}</div>
+              <div className="mt-1 text-xs text-brown-800/45">
+                {formatDateIST(item.submitted_at || item.updated_at)}
+                {item.status === "published" ? ` · ${item.click_count || 0} clicks` : ""}
+              </div>
             </button>
           ))}
           {!items.length && (
@@ -102,6 +105,12 @@ export default function AdsAdmin() {
                 <div><dt className="text-brown-800/45">Location</dt><dd>{selected.location_scope} {selected.tower_or_area ? `· ${selected.tower_or_area}` : ""}</dd></div>
                 <div><dt className="text-brown-800/45">Package</dt><dd>{selected.package_name} · {formatPaise(selected.amount_paise)}</dd></div>
                 <div><dt className="text-brown-800/45">Payment UTR</dt><dd>{selected.payment_utr || "—"}</dd></div>
+                <div><dt className="text-brown-800/45">Clicks</dt><dd data-testid="ads-click-count">{selected.click_count || 0}</dd></div>
+                <div><dt className="text-brown-800/45">By surface</dt><dd className="text-xs text-brown-800/70">
+                  {Object.keys(selected.clicks_by_surface || {}).length
+                    ? Object.entries(selected.clicks_by_surface).map(([k, v]) => `${k}: ${v}`).join(" · ")
+                    : "—"}
+                </dd></div>
                 <div className="sm:col-span-2"><dt className="text-brown-800/45">Write-up</dt><dd className="whitespace-pre-wrap">{selected.writeup}</dd></div>
                 <div className="sm:col-span-2"><dt className="text-brown-800/45">Link</dt><dd>{selected.link_type}: {selected.link_url || "—"}</dd></div>
               </dl>

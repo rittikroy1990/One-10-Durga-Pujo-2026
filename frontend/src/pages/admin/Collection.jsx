@@ -1,26 +1,35 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
-import { FileText, Check, Plus, RefreshCw, Undo2 } from "lucide-react";
+import { FileText, Check, Plus, RefreshCw, Undo2, FileDown, Download, Upload } from "lucide-react";
 import api, { API } from "../../lib/api";
 import { Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs, Dialog, Label, Input, Select, Spinner } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
+import ExportCsvButton from "../../components/ExportCsvButton";
+
+function formatMethod(method) {
+  const m = (method || "").toLowerCase();
+  if (m === "upi_qr" || m === "upi") return "UPI";
+  if (m === "bank_transfer") return "Bank transfer";
+  if (!m) return "—";
+  return m.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default function Collection() {
   const [tab, setTab] = useState("households");
   return (
     <div data-testid="collection-page">
       <h1 className="mb-1 font-display text-4xl">Collection Control</h1>
-      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, manual maker-checker modes and refunds.</p>
+      <p className="mb-4 text-sm text-brown-800/50">Households, verified receipts, and manual maker-checker modes.</p>
       <Tabs value={tab} onChange={setTab} tabs={[
         { value: "households", label: "Households" },
         { value: "receipts", label: "Receipts" },
         { value: "manual", label: "Cash & Manual" },
-        { value: "refunds", label: "Refunds" },
+        { value: "excel", label: "Excel import" },
       ]} />
       {tab === "households" && <Households />}
       {tab === "receipts" && <Receipts />}
       {tab === "manual" && <Manual />}
-      {tab === "refunds" && <Refunds />}
+      {tab === "excel" && <ExcelImport />}
     </div>
   );
 }
@@ -72,17 +81,93 @@ function Households() {
 
 function Receipts() {
   const { items, loading, load } = useList("/admin/receipts");
+
+  const downloadTrail = async (receiptNo) => {
+    try {
+      const r = await api.get(`/audit/transaction/${encodeURIComponent(receiptNo)}/export`, { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `transaction_audit_${String(receiptNo).replace(/[^\w.-]+/g, "_")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Transaction audit downloaded");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not download audit trail");
+    }
+  };
+
+  const exportCols = [
+    { key: "receipt_no", label: "Receipt No" },
+    { key: "issued_at", label: "Timestamp (IST)", exportValue: (r) => formatDateIST(r.issued_at) },
+    { key: "payer_name", label: "Payer" },
+    { key: "tower_name", label: "Tower" },
+    { key: "flat_number", label: "Flat" },
+    { key: "total_amount", label: "Total (₹)", exportValue: (r) => (Number(r.total_amount || 0) / 100).toFixed(2) },
+    { key: "method", label: "Method" },
+    { key: "status", label: "Status", exportValue: (r) => r.refund_status || r.status || "" },
+  ];
+
   return (
     <Card><CardBody>
-      <div className="mb-3 flex justify-end"><Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button></div>
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <ExportCsvButton
+          filename="receipts.csv"
+          columns={exportCols}
+          items={items}
+          data-testid="receipts-export-csv"
+        />
+        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
+      </div>
       {loading ? <Spinner className="text-vermilion-500" /> : (
-        <Table><THead><TR><TH>Receipt No</TH><TH>Payer</TH><TH>Household</TH><TH right>Total</TH><TH>Method</TH><TH>Status</TH><TH>PDF</TH></TR></THead>
-          <tbody>{items.map((r) => (
-            <TR key={r.id}><TD>{r.receipt_no}</TD><TD>{r.payer_name}</TD><TD>{r.tower_name}, {r.flat_number}</TD>
-              <TD right>{formatPaise(r.total_amount)}</TD><TD className="capitalize">{(r.method || "").replace(/_/g, " ")}</TD>
-              <TD><StatusBadge status={r.refund_status || r.status} /></TD>
-              <TD><a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600"><FileText className="h-4 w-4" /></a></TD></TR>
-          ))}</tbody></Table>
+        <div className="overflow-x-auto">
+          <Table>
+            <THead>
+              <TR>
+                <TH>Receipt No</TH>
+                <TH>Timestamp</TH>
+                <TH>Payer</TH>
+                <TH>Household</TH>
+                <TH right>Total</TH>
+                <TH>Method</TH>
+                <TH>Status</TH>
+                <TH>PDF</TH>
+                <TH>Audit</TH>
+              </TR>
+            </THead>
+            <tbody>
+              {items.map((r) => (
+                <TR key={r.id}>
+                  <TD className="font-medium">{r.receipt_no}</TD>
+                  <TD className="whitespace-nowrap text-xs tabular-nums" data-testid={`receipt-ts-${r.receipt_no}`}>
+                    {formatDateIST(r.issued_at)}
+                  </TD>
+                  <TD>{r.payer_name}</TD>
+                  <TD>{r.tower_name}, {r.flat_number}</TD>
+                  <TD right>{formatPaise(r.total_amount)}</TD>
+                  <TD>{formatMethod(r.method)}</TD>
+                  <TD><StatusBadge status={r.refund_status || r.status} /></TD>
+                  <TD>
+                    <a href={`${API}/receipt/pdf/${r.verify_token}`} target="_blank" rel="noreferrer" className="text-vermilion-600">
+                      <FileText className="h-4 w-4" />
+                    </a>
+                  </TD>
+                  <TD>
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      data-testid={`receipt-audit-${r.receipt_no}`}
+                      onClick={() => downloadTrail(r.receipt_no)}
+                      title="Download timestamped audit trail"
+                    >
+                      <FileDown className="h-4 w-4" />
+                    </Button>
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       )}
     </CardBody></Card>
   );
@@ -181,44 +266,233 @@ function QueueRow({ label, onAct, actLabel }) {
   );
 }
 
-function Refunds() {
-  const { items, loading, load } = useList("/admin/receipts");
-  const { items: refunds, load: loadRefunds } = useList("/reports/refund_register", "rows");
-  const [open, setOpen] = useState(false);
-  const [sel, setSel] = useState(null);
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
+function ExcelImport() {
+  const fileRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [result, setResult] = useState(null);
 
-  const request = async () => {
+  const downloadTemplate = async () => {
+    setDownloading(true);
     try {
-      await api.post("/refunds", { receipt_id: sel.id, amount_paise: Math.round(Number(amount) * 100), reason });
-      toast.success("Refund requested (awaiting convenor approval)"); setOpen(false); loadRefunds();
-    } catch (e) { toast.error(e?.response?.data?.detail || "Could not request refund"); }
+      const r = await api.get("/admin/subscription-imports/template", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "one10_subscription_payment_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Template downloaded");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not download template");
+    } finally {
+      setDownloading(false);
+    }
   };
-  const approve = async (rid) => {
-    try { await api.post(`/refunds/${rid}/approve`, {}, { headers: { "X-Reauth": "true" } }); toast.success("Refund approved — credit note issued"); loadRefunds(); }
-    catch (e) { toast.error(e?.response?.data?.detail || "Could not approve"); }
+
+  const uploadFile = async (file, dryRun) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await api.post(`/admin/subscription-imports/import?dry_run=${dryRun ? "true" : "false"}`, fd);
+    setResult(r.data);
+    return r.data;
+  };
+
+  const onUpload = async (e, dryRun) => {
+    const file = e?.target?.files?.[0];
+    if (e?.target) e.target.value = "";
+    if (!file) return;
+    if (dryRun) setPreviewing(true);
+    else setUploading(true);
+    setResult(null);
+    try {
+      const data = await uploadFile(file, dryRun);
+      toast.success(data.message || (dryRun ? "Preview complete" : "Import complete"));
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Upload failed");
+    } finally {
+      setUploading(false);
+      setPreviewing(false);
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!window.confirm("Issue receipts for all valid rows in the selected file? Duplicate UTRs will be skipped.")) {
+      return;
+    }
+    fileRef.current?.click();
   };
 
   return (
-    <div className="space-y-5">
-      <Card><CardBody>
-        <h3 className="mb-2 font-display text-xl">Request a refund</h3>
-        {loading ? <Spinner className="text-vermilion-500" /> : (
-          <Table><THead><TR><TH>Receipt</TH><TH right>Total</TH><TH>Action</TH></TR></THead>
-            <tbody>{items.slice(0, 25).map((r) => (
-              <TR key={r.id}><TD>{r.receipt_no}</TD><TD right>{formatPaise(r.total_amount)}</TD>
-                <TD><Button variant="subtle" size="sm" data-testid={`refund-${r.receipt_no}`} onClick={() => { setSel(r); setAmount((r.total_amount / 100).toString()); setOpen(true); }}><Undo2 className="h-3.5 w-3.5" /> Refund</Button></TD></TR>
-            ))}</tbody></Table>
-        )}
-      </CardBody></Card>
+    <div className="space-y-5" data-testid="excel-import-panel">
+      <Card>
+        <CardBody>
+          <div className="mb-2 font-display text-xl text-brown-900">UPI payment Excel import</div>
+          <p className="mb-3 text-sm text-brown-800/60">
+            Download the template, fill one successful UPI payment per row, then upload.
+            Each valid row creates/updates the household and automatically issues a receipt.
+            Re-uploading the same UTR / UPI Transaction ID is skipped.
+          </p>
+          <ul className="mb-4 list-disc space-y-1 pl-5 text-sm text-brown-800/65">
+            <li><b>Kind</b>: <code>subscription</code> (base flat fee) or <code>donation</code></li>
+            <li><b>Tower</b> number only (e.g. 6) and <b>Flat</b> (e.g. 11B)</li>
+            <li><b>UTR / UPI Transaction ID</b> required and unique</li>
+            <li>Delete the example rows before uploading real data</li>
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="admin"
+              size="sm"
+              disabled={downloading}
+              onClick={downloadTemplate}
+              data-testid="subscription-template-download-btn"
+            >
+              <Download className="h-4 w-4" /> {downloading ? "Preparing…" : "Download template"}
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={previewing || uploading}
+              onClick={() => {
+                const input = document.getElementById("subscription-import-preview-input");
+                input?.click();
+              }}
+              data-testid="subscription-template-preview-btn"
+            >
+              <FileText className="h-4 w-4" /> {previewing ? "Checking…" : "Preview (no receipts)"}
+            </Button>
+            <Button
+              variant="admin"
+              size="sm"
+              disabled={uploading || previewing}
+              onClick={confirmImport}
+              data-testid="subscription-template-upload-btn"
+            >
+              <Upload className="h-4 w-4" /> {uploading ? "Importing…" : "Upload & issue receipts"}
+            </Button>
+            <input
+              id="subscription-import-preview-input"
+              type="file"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => onUpload(e, true)}
+              data-testid="subscription-template-preview-input"
+            />
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => onUpload(e, false)}
+              data-testid="subscription-template-file-input"
+            />
+          </div>
+        </CardBody>
+      </Card>
 
-      <Dialog open={open} onClose={() => setOpen(false)} title={`Refund ${sel?.receipt_no || ""}`}
-        footer={<><Button variant="subtle" onClick={() => setOpen(false)}>Cancel</Button><Button variant="danger" onClick={request} data-testid="refund-request-submit">Request refund</Button></>}>
-        <Label>Amount (₹)</Label><Input type="number" data-testid="refund-amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        <div className="mt-3"><Label>Reason</Label><Input data-testid="refund-reason" value={reason} onChange={(e) => setReason(e.target.value)} /></div>
-        <p className="mt-2 text-xs text-brown-800/50">A linked credit note and reversal ledger entries are generated on approval. Refund is tracked until the provider confirms completion.</p>
-      </Dialog>
+      {result && (
+        <Card data-testid="subscription-import-result">
+          <CardBody>
+            <div className="mb-2 font-display text-xl text-brown-900">Import result</div>
+            <p className="mb-3 text-sm text-brown-800/70">{result.message}</p>
+            <div className="mb-4 grid gap-3 sm:grid-cols-4">
+              <StatMini label={result.dry_run ? "Would issue" : "Issued"} value={(result.issued || result.would_issue || []).length} />
+              <StatMini label="Skipped" value={(result.skipped || []).length} />
+              <StatMini label="Errors" value={(result.errors || []).length} />
+              <StatMini label="Rows read" value={result.row_count || 0} />
+            </div>
+
+            {!!(result.issued || []).length && (
+              <ResultTable
+                title="Receipts issued"
+                rows={result.issued}
+                cols={[
+                  ["receipt_no", "Receipt"],
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["kind", "Kind"],
+                  ["txn", "UTR"],
+                ]}
+              />
+            )}
+            {!!(result.would_issue || []).length && (
+              <ResultTable
+                title="Would issue (dry run)"
+                rows={result.would_issue}
+                cols={[
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["kind", "Kind"],
+                  ["txn", "UTR"],
+                ]}
+              />
+            )}
+            {!!(result.skipped || []).length && (
+              <ResultTable
+                title="Skipped"
+                rows={result.skipped}
+                cols={[
+                  ["excel_row", "Row"],
+                  ["name", "Name"],
+                  ["txn", "UTR"],
+                  ["reason", "Reason"],
+                ]}
+              />
+            )}
+            {!!(result.errors || []).length && (
+              <ResultTable
+                title="Errors"
+                rows={result.errors}
+                cols={[
+                  ["excel_row", "Row"],
+                  ["name", "Name"],
+                  ["tower", "Tower"],
+                  ["flat", "Flat"],
+                  ["reason", "Reason"],
+                ]}
+              />
+            )}
+          </CardBody>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function StatMini({ label, value }) {
+  return (
+    <div className="rounded-lg border border-brown-800/10 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-brown-800/45">{label}</div>
+      <div className="mt-0.5 font-display text-2xl text-brown-900">{value}</div>
+    </div>
+  );
+}
+
+function ResultTable({ title, rows, cols }) {
+  return (
+    <div className="mb-4">
+      <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-brown-800/55">{title}</h4>
+      <div className="overflow-x-auto">
+        <Table>
+          <THead>
+            <TR>{cols.map(([k, label]) => <TH key={k}>{label}</TH>)}</TR>
+          </THead>
+          <tbody>
+            {rows.slice(0, 50).map((row, idx) => (
+              <TR key={`${title}-${idx}-${row.txn || row.receipt_no || idx}`}>
+                {cols.map(([k]) => <TD key={k}>{row[k] ?? ""}</TD>)}
+              </TR>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+      {rows.length > 50 && (
+        <div className="mt-1 text-xs text-brown-800/45">Showing first 50 of {rows.length}</div>
+      )}
     </div>
   );
 }

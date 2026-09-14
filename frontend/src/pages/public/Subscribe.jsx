@@ -225,9 +225,9 @@ export default function Subscribe() {
                   <span className="text-xs text-brown-800/50">Fixed for 2026 · ₹2,500 + ₹300 + ₹700</span>
                 </div>
                 <p className="mt-3 text-sm text-brown-800/65">
-                  Want to give an extra voluntary gift? Use the separate{" "}
-                  <a href="/donate" className="font-semibold text-vermilion-600 underline">Donate</a> page
-                  (One 10 residents and other donors).
+                  Want to give an extra voluntary gift? Use{" "}
+                  <a href="/sponsors#donate" className="font-semibold text-vermilion-600 underline">Donate / Sponsorship</a>
+                  {" "}(One 10 residents and other donors).
                 </p>
                 <div className="mt-4 flex items-center justify-between border-t border-brown-800/10 pt-3">
                   <span className="font-semibold">Total payable</span>

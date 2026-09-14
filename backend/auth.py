@@ -231,6 +231,8 @@ COMMITTEE_LOGINS = [
      "roles": ["committee_member", "treasurer", "collector", "convenor"]},
     {"login_id": "suman", "name": "Suman", "designation": "Asst. Secretary",
      "roles": ["committee_member", "treasurer", "collector", "convenor"]},
+    {"login_id": "rittik", "name": "Rittik", "designation": "Committee Admin",
+     "roles": ["committee_member", "treasurer", "collector", "convenor"]},
 ]
 
 

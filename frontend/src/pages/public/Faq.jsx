@@ -291,8 +291,9 @@ export default function Faq() {
 
           <FaqItem q="Where are sponsorship packages?" id="faq-sponsors">
             <p>
-              See <PageLink to="/sponsors">Sponsors</PageLink> for partnership options and committee contact for
-              brands.
+              See <PageLink to="/sponsors">Sponsors</PageLink> for on-ground packages plus a dedicated{" "}
+              <strong>Website &amp; Social Media Presence</strong> cut you can inquire about online. Digital partners
+              receive logo placement on one10events.in and One10 social channels, with proof of placement after go-live.
             </p>
           </FaqItem>
         </section>

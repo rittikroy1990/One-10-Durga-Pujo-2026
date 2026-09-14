@@ -439,6 +439,65 @@ SPONSORSHIP_PACKAGES = {
     ],
 }
 
+
+# Paid local-business advertising packages (One Ten + nearby).
+LOCAL_BUSINESS_AD_PACKAGES = {
+    "campaign": "One10 Durga Puja 2026 — Local Business Ads",
+    "tagline": "Put your neighbourhood business in front of One Ten families — with committee review before anything goes live.",
+    "rules": {
+        "one_active_submission": True,
+        "resubmits_allowed": 1,
+        "inside_and_outside_one_ten": True,
+        "media": "Images (JPG/PNG/WebP up to 15 MB) and short videos (MP4/WebM/MOV up to 50 MB).",
+        "payment": "Pay the package fee by UPI, then upload UTR + payment screenshot with your creative.",
+        "workflow": [
+            "submitted",
+            "in_review",
+            "approved | rejected | changes_requested",
+            "published | archived",
+        ],
+    },
+    "packages": [
+        {
+            "code": "neighbourhood_card",
+            "name": "Neighbourhood Card",
+            "amount_paise": 150000,
+            "placements": ["home_strip", "directory"],
+            "includes_full_page": False,
+            "blurb": "Logo/image + short write-up on the Local Businesses directory and rotating Home strip.",
+        },
+        {
+            "code": "spotlight_feature",
+            "name": "Spotlight Feature",
+            "amount_paise": 350000,
+            "placements": ["home_strip", "directory", "sponsors_rail", "full_page"],
+            "includes_full_page": True,
+            "blurb": "Larger Home spotlight, Sponsors page rail, directory feature badge, and a dedicated business page.",
+        },
+        {
+            "code": "story_page",
+            "name": "Story Page",
+            "amount_paise": 550000,
+            "placements": ["home_strip", "directory", "sponsors_rail", "full_page", "story_layout"],
+            "includes_full_page": True,
+            "blurb": "Cinematic full-page layout with video/hero, write-up, and click-through to your site or WhatsApp.",
+        },
+        {
+            "code": "festival_takeover",
+            "name": "Festival Takeover",
+            "amount_paise": 990000,
+            "placements": ["home_strip", "directory", "sponsors_rail", "full_page", "story_layout", "takeover"],
+            "includes_full_page": True,
+            "blurb": "Premium takeover page + priority placement across Home, directory, and Sponsors during the campaign window.",
+        },
+    ],
+    "categories": [
+        "Food & cloud kitchen", "Tuition & coaching", "Salon & wellness", "Clinic & pharmacy",
+        "Grocery & daily needs", "Home services", "Fashion & boutique", "Professional services",
+        "Other",
+    ],
+}
+
 DEFAULT_SETTINGS = {
     "id": "app_settings",
     "platform": {
@@ -492,6 +551,7 @@ DEFAULT_SETTINGS = {
         "Domain and email sender verification",
     ],
     "sponsorship": dict(SPONSORSHIP_PACKAGES),
+    "local_business_ads": dict(LOCAL_BUSINESS_AD_PACKAGES),
     "updated_at": iso(),
 }
 
@@ -678,6 +738,9 @@ async def ensure_settings():
         ):
             # Refresh sponsorship catalog from proposal; never touches organisation contacts/bank
             patch["sponsorship"] = SPONSORSHIP_PACKAGES
+
+        # Always refresh local-business ad catalog (prices/placements are code-owned).
+        patch["local_business_ads"] = LOCAL_BUSINESS_AD_PACKAGES
 
         # Receipt letterhead defaults on settings + active cycle
         rc = existing.get("receipt") or {}

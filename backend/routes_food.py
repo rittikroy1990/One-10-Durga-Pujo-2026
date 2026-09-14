@@ -24,6 +24,47 @@ _MAX_PER_MEAL = int(POLL_META.get("max_dishes_per_meal") or 8)
 _ALLOWED_MEALS = {"breakfast", "lunch", "dinner"}
 
 
+# Public food ordering is currently open for Maha Sasthi only.
+PUBLIC_FOOD_DATE = "2026-10-16"
+PUBLIC_FOOD_DAY_CODES = {"sasthi", "shashthi", "day_sasthi", "day_shashthi"}
+
+
+def _is_public_food_day(day: dict) -> bool:
+    """Keep only 16 Oct 2026 (Sasthi / Shashthi) on the public order page."""
+    if not day:
+        return False
+    code = str(day.get("code") or "").strip().lower()
+    if code in PUBLIC_FOOD_DAY_CODES:
+        return True
+    date = str(day.get("date") or day.get("date_label") or "").strip()
+    if date.startswith(PUBLIC_FOOD_DATE) or date == "16 Oct 2026":
+        return True
+    label = str(day.get("label") or day.get("short_label") or "").strip().lower()
+    return label in {"sasthi", "shashthi", "maha sasthi", "maha shashthi"}
+
+
+def _limit_to_public_food_day(food: dict) -> dict:
+    """Filter menu days down to the single public ordering date."""
+    out = deepcopy(food) if food else {}
+    kept = []
+    for day in out.get("days") or []:
+        if not _is_public_food_day(day):
+            continue
+        d = dict(day)
+        # Ensure the UI can show the calendar date even if Mongo only has a tithi label.
+        if not d.get("date"):
+            d["date"] = PUBLIC_FOOD_DATE
+        if not d.get("date_label"):
+            d["date_label"] = "16 Oct 2026 · Friday"
+        if not d.get("label"):
+            d["label"] = "Sasthi"
+        kept.append(d)
+    out["days"] = kept
+    out["public_ordering_date"] = PUBLIC_FOOD_DATE
+    out["public_ordering_note"] = "Ordering is open for Maha Sasthi (16 Oct 2026) only."
+    return out
+
+
 def _strip_evening_menu(food: dict) -> dict:
     """Public subscription menu: breakfast / lunch / dinner only."""
     out = deepcopy(food) if food else {}
@@ -166,7 +207,7 @@ def _meal_price_map(food: dict) -> dict:
 @router.get("/food/menu")
 async def food_menu():
     s = await get_settings()
-    food = _apply_default_prices(s.get("food_subscription") or {})
+    food = _limit_to_public_food_day(_apply_default_prices(s.get("food_subscription") or {}))
     return {
         "menu": food,
         "payment_enabled": bool(food.get("payment_enabled")),
@@ -179,9 +220,11 @@ async def food_menu():
 async def food_register(body: dict = Body(...), request: Request = None):
     """Public food subscription — optional mobile; UPI QR payment when enabled."""
     s = await get_settings()
-    food = _apply_default_prices(s.get("food_subscription") or {})
+    food = _limit_to_public_food_day(_apply_default_prices(s.get("food_subscription") or {}))
     if not food:
         raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
+    if not (food.get("days") or []):
+        raise HTTPException(status_code=503, detail="Food ordering is not open for this date yet.")
 
     name = (body.get("name") or "").strip()
     mobile_raw = "".join(c for c in str(body.get("mobile") or "") if c.isdigit())

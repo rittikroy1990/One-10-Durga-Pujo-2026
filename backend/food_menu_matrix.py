@@ -13,19 +13,37 @@ from typing import Any
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from food_poll_catalog import DAYS, MEALS
+from food_poll_catalog import DAYS, MEALS as POLL_MEALS
 from util import iso
+
+# Sellable menu slots: poll meals plus the pure-veg breakfast packet.
+MEALS = [
+    *[m for m in POLL_MEALS if m["code"] == "breakfast"],
+    {"code": "breakfast_packet", "label": "Breakfast packet", "order": 1.5, "icon": "package"},
+    *[m for m in POLL_MEALS if m["code"] != "breakfast"],
+]
 
 MATRIX_DIETS = [
     {"code": "veg", "label": "Veg"},
     {"code": "non_veg", "label": "Non-veg"},
 ]
 
+# Meals sold in only some diets (packet is pure veg).
+MEAL_DIETS = {
+    "breakfast_packet": {"veg"},
+}
+
 DEFAULT_CELL_PRICE_RUPEES = {
-    "breakfast": 60,
+    "breakfast": 70,
+    "breakfast_packet": 70,
     "lunch": 300,
     "dinner": 300,
 }
+
+
+def meal_allows_diet(meal: str, diet: str) -> bool:
+    allowed = MEAL_DIETS.get(meal)
+    return allowed is None or diet in allowed
 
 TEMPLATE_HEADERS = [
     "Day Code",
@@ -93,11 +111,13 @@ def default_cell_name(day_label: str, meal_label: str, diet_label: str) -> str:
 
 
 def build_skeleton() -> list[dict[str, Any]]:
-    """36 cells: 6 days × 3 meals × 2 diets."""
+    """6 days × meals × diets (veg-only meals skip non-veg)."""
     cells = []
     for day in DAYS:
         for meal in MEALS:
             for diet in MATRIX_DIETS:
+                if not meal_allows_diet(meal["code"], diet["code"]):
+                    continue
                 price = DEFAULT_CELL_PRICE_RUPEES.get(meal["code"], 300)
                 cells.append({
                     "matrix_key": matrix_key(day["code"], meal["code"], diet["code"]),
@@ -182,6 +202,7 @@ def matrix_payload(db_items: list[dict]) -> dict:
              "key": f"{m['code']}|{d['code']}"}
             for m in MEALS
             for d in MATRIX_DIETS
+            if meal_allows_diet(m["code"], d["code"])
         ],
     }
 
@@ -222,7 +243,7 @@ def build_matrix_template_xlsx(db_items: list[dict] | None = None) -> bytes:
     tip["A1"].font = Font(bold=True, size=14)
     tips = [
         "Each row is one sellable cell: Day × Meal × Veg/Non-veg.",
-        "Meal must be: breakfast | lunch | dinner",
+        "Meal must be: breakfast | breakfast_packet | lunch | dinner (packet is veg only)",
         "Diet must be: veg | non_veg",
         "Price is in rupees (whole numbers preferred).",
         "Active Y = shown on public Food page; N = hidden.",
@@ -284,11 +305,15 @@ def parse_matrix_upload(data: bytes, filename: str = "") -> list[dict]:
             rows.append(mapped)
             continue
         if meal not in meal_codes:
-            mapped["error"] = f"Meal must be breakfast/lunch/dinner (got {meal})"
+            mapped["error"] = f"Meal must be breakfast/breakfast_packet/lunch/dinner (got {meal})"
             rows.append(mapped)
             continue
         if diet not in diet_codes:
             mapped["error"] = f"Diet must be veg or non_veg (got {diet})"
+            rows.append(mapped)
+            continue
+        if not meal_allows_diet(meal, diet):
+            mapped["error"] = f"{meal} is veg only"
             rows.append(mapped)
             continue
 
@@ -355,6 +380,8 @@ _DAY_ALIASES = {
 }
 
 _MEAL_ALIASES = {
+    "breakfast packet": "breakfast_packet",
+    "packet": "breakfast_packet",
     "breakfast": "breakfast",
     "bf": "breakfast",
     "morning": "breakfast",
@@ -474,6 +501,8 @@ def parse_overall_menu_text(lines: list[str]) -> list[dict]:
     for day in DAYS:
         for meal in MEALS:
             for diet in MATRIX_DIETS:
+                if not meal_allows_diet(meal["code"], diet["code"]):
+                    continue
                 key = matrix_key(day["code"], meal["code"], diet["code"])
                 dishes = buckets.get(key) or []
                 desc = "; ".join(dishes)[:800] if dishes else ""

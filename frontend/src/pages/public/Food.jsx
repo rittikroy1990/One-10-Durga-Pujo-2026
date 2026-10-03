@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   UtensilsCrossed, Info, Clock, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
-  Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon,
+  Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon, Package,
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
@@ -23,6 +23,7 @@ function parseMenuDishes(text) {
 
 const MEAL_ICON = {
   breakfast: Coffee,
+  breakfast_packet: Package,
   lunch: Sun,
   dinner: Moon,
 };
@@ -160,6 +161,7 @@ export default function Food() {
   const [screenshot, setScreenshot] = useState(null);
   const [cart, setCart] = useState({});
   const [menuDetail, setMenuDetail] = useState(null);
+  const [dayFilter, setDayFilter] = useState("");
   const [form, setForm] = useState({
     name: "",
     mobile: "",
@@ -271,18 +273,16 @@ export default function Food() {
     return map;
   }, [cartLines]);
 
-  const breakfastPrice = priceByMeal.breakfast ?? 6000;
+  const breakfastPrice = priceByMeal.breakfast ?? 7000;
   const lunchPrice = priceByMeal.lunch ?? 30000;
   const dinnerPrice = priceByMeal.dinner ?? 30000;
   const unitLabel = catalogMode ? "item" : "meal";
 
   const pay = upiSession?.payment;
-  const bank = pay?.bank_account;
   const staticQr = pay?.static_qr_url || "/images/payment-qr.png";
-  const qrSrc =
-    upiSession?.qr_url
-    || (upiSession?.intent_id ? `/api/payments/upi/qr.png?intent_id=${encodeURIComponent(upiSession.intent_id)}` : null)
-    || staticQr;
+  const qrSrc = staticQr
+    || upiSession?.qr_url
+    || (upiSession?.intent_id ? `/api/payments/upi/qr.png?intent_id=${encodeURIComponent(upiSession.intent_id)}` : null);
 
   const setQty = (key, qty) => {
     const next = Math.max(0, Math.min(MAX_QTY, Number(qty) || 0));
@@ -313,6 +313,39 @@ export default function Food() {
       return next;
     });
     toast.success(`Added 1 ${mealCode} for each day`);
+  };
+
+  const catalogDayOptions = useMemo(() => {
+    const seen = new Map();
+    for (const item of catalogItems) {
+      const key = item.menu_date || item.day_code || "";
+      if (!key || seen.has(key)) continue;
+      seen.set(key, item.day_label || formatMenuDate(item.menu_date) || key);
+    }
+    return [...seen.entries()].map(([value, label]) => ({ value, label }));
+  }, [catalogItems]);
+
+  const filteredCatalogItems = useMemo(() => {
+    if (!dayFilter) return catalogItems;
+    return catalogItems.filter((item) => (item.menu_date || item.day_code || "") === dayFilter);
+  }, [catalogItems, dayFilter]);
+
+  const quickAddFilteredCatalog = () => {
+    if (!filteredCatalogItems.length) {
+      toast.message("No menu items match this filter");
+      return;
+    }
+    setCart((prev) => {
+      const next = { ...prev };
+      for (const item of filteredCatalogItems) {
+        next[item.id] = Math.min(MAX_QTY, (next[item.id] || 0) + 1);
+      }
+      return next;
+    });
+    const label = dayFilter
+      ? (catalogDayOptions.find((d) => d.value === dayFilter)?.label || "selected day")
+      : "all days";
+    toast.success(`Quick add: +1 for each item (${label})`);
   };
 
   const copyText = async (text, label) => {
@@ -605,6 +638,16 @@ export default function Food() {
               {menu?.kids_note ? (
                 <p className="text-amber-900/80">{menu.kids_note}</p>
               ) : null}
+              {(menu?.menu_meta?.notes || []).length ? (
+                <ul className="mt-2 space-y-1 rounded-lg border border-sun-400/30 bg-white/80 px-3 py-2.5 text-[13px] text-brown-800/75" data-testid="food-menu-notes">
+                  {menu.menu_meta.notes.map((note) => (
+                    <li key={note} className="flex gap-2">
+                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                      <span>{note}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -640,22 +683,30 @@ export default function Food() {
                 ) : (
                   <img src={qrSrc} alt="Food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="food-qr-img" />
                 )}
+                {pay?.upi_intent_url ? (
+                  <a
+                    href={pay.upi_intent_url}
+                    className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-vermilion-500 px-5 text-sm font-semibold text-white shadow-sm hover:bg-vermilion-600 sm:hidden"
+                    data-testid="food-open-upi"
+                  >
+                    <ExternalLink className="h-4 w-4" /> Open UPI app · {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
+                  </a>
+                ) : null}
               </div>
 
-              <div className="mt-5 rounded-xl border border-sun-400/25 bg-sun-50/50 p-4 text-sm">
-                <div className="font-semibold text-brown-900">Or pay by bank transfer</div>
-                <div className="mt-2 space-y-2 text-brown-800/80">
-                  <div>{bank?.account_name || "ONE 10 EVENT ORGANISING COMMITTEE"}</div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span>A/C {bank?.account_number || "572205000037"}</span>
-                    <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.account_number || "572205000037", "Account number")} aria-label="Copy account"><Copy className="h-4 w-4" /></button>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <span>IFSC {bank?.ifsc || "ICIC0005722"}</span>
-                    <button type="button" className="text-vermilion-600" onClick={() => copyText(bank?.ifsc || "ICIC0005722", "IFSC")} aria-label="Copy IFSC"><Copy className="h-4 w-4" /></button>
+              {pay?.vpa ? (
+                <div className="mt-5 rounded-xl border border-sun-400/25 bg-sun-50/50 p-4 text-sm">
+                  <div className="font-semibold text-brown-900">Food payments go to</div>
+                  <div className="mt-2 space-y-2 text-brown-800/80">
+                    {pay.payee_name ? <div>{pay.payee_name}</div> : null}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="break-all">UPI ID {pay.vpa}</span>
+                      <button type="button" className="text-vermilion-600" onClick={() => copyText(pay.vpa, "UPI ID")} aria-label="Copy UPI ID"><Copy className="h-4 w-4" /></button>
+                    </div>
+                    <p className="text-xs text-brown-800/50">Pay the exact amount shown above. Please use only this food QR / UPI ID for meal orders.</p>
                   </div>
                 </div>
-              </div>
+              ) : null}
             </div>
 
             <div className="space-y-4 rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
@@ -778,7 +829,7 @@ export default function Food() {
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Menu
                         </h2>
                         <p className="mt-1 text-sm text-brown-800/60">
-                          Browse the photo for each meal, then add quantities. Your cart total updates instantly.
+                          Filter by day, or Quick add +1 to every visible item. Adjust quantities on each card anytime.
                         </p>
                       </div>
                       {cartCount > 0 && (
@@ -787,23 +838,55 @@ export default function Food() {
                         </Button>
                       )}
                     </div>
+                    {catalogItems.length > 0 && (
+                      <div className="mt-4 flex flex-wrap items-end gap-3">
+                        <div className="min-w-[12rem] flex-1 sm:flex-none sm:w-56">
+                          <Label htmlFor="food-day-filter">Day</Label>
+                          <Select
+                            id="food-day-filter"
+                            value={dayFilter}
+                            onChange={(e) => setDayFilter(e.target.value)}
+                            data-testid="food-day-filter"
+                          >
+                            <option value="">All days</option>
+                            {catalogDayOptions.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          className="min-h-11"
+                          onClick={quickAddFilteredCatalog}
+                          data-testid="food-quick-add"
+                        >
+                          <Plus className="h-4 w-4" /> Quick add
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {catalogItems.length === 0 ? (
                     <div className="rounded-2xl border border-sun-400/30 bg-white p-8 text-center text-sm text-brown-800/55">
                       No menu items published yet. Check back soon.
                     </div>
+                  ) : filteredCatalogItems.length === 0 ? (
+                    <div className="rounded-2xl border border-sun-400/30 bg-white p-8 text-center text-sm text-brown-800/55">
+                      No items for this day. Choose another day from the filter.
+                    </div>
                   ) : (
                     <div className="space-y-6" data-testid="food-catalog-grid">
                       {Object.entries(
-                        catalogItems.reduce((acc, item) => {
+                        filteredCatalogItems.reduce((acc, item) => {
                           const key = item.menu_date || item.day_code || "menu";
                           if (!acc[key]) acc[key] = [];
                           acc[key].push(item);
                           return acc;
                         }, {})
                       ).map(([dayKey, items]) => {
-                        const mealOrder = { breakfast: 1, lunch: 2, dinner: 3 };
+                        const mealOrder = { breakfast: 1, breakfast_packet: 2, lunch: 3, dinner: 4 };
                         const dietOrder = { veg: 1, non_veg: 2 };
                         const sorted = [...items].sort((a, b) => {
                           const ma = mealOrder[a.category] || 9;
@@ -874,18 +957,6 @@ export default function Food() {
                                           </span>
                                         ) : null}
                                       </div>
-                                      {item.description ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => setMenuDetail(item)}
-                                          className="absolute right-3 top-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white text-vermilion-600 shadow-md ring-1 ring-brown-900/10 transition hover:bg-vermilion-500 hover:text-white"
-                                          aria-label={`View full menu for ${item.name}`}
-                                          data-testid={`food-menu-info-${item.id}`}
-                                          title="View full menu"
-                                        >
-                                          <Info className="h-5 w-5" strokeWidth={2.5} />
-                                        </button>
-                                      ) : null}
                                     </div>
                                     <div className="p-4 sm:p-5">
                                       <div className="flex items-start justify-between gap-2">
@@ -911,7 +982,9 @@ export default function Food() {
                                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-sun-400/20 pt-3">
                                         <div>
                                           <div className="text-[10px] uppercase tracking-wide text-brown-800/45">
-                                            {item.is_complimentary ? "Extra head" : "Price"}
+                                            {item.is_complimentary
+                                              ? (item.category === "lunch" ? "Extra head" : "Extra plate")
+                                              : "Price"}
                                           </div>
                                           <div className="font-display text-2xl text-vermilion-600">
                                             {item.amount_label || formatPaise(unit)}

@@ -18,3 +18,13 @@ _uploads/
 
 _uploads/
 frontend/public/sponsorship/pages/
+
+# Local backups / scratch — never commit
+.env.bak*
+*.bak
+*.bak.*
+*.tmp/
+
+# Resident payment proofs, receipts and import data (personal info)
+frontend/public/uploads/
+backend/scripts/*import*.json

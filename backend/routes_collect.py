@@ -545,6 +545,43 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     await notify(channel="email", to=household.get("email", ""), template="receipt_issued",
                  subject=f"Your {campaign_title} receipt {receipt_no}",
                  data={"receipt_no": receipt_no})
+
+    # Keep Find/Generate clean: drop sibling pending intents for the same household+kind.
+    if is_full and intent.get("household_id") and kind == "subscription":
+        await db.subscription_intents.update_many(
+            {
+                "household_id": intent["household_id"],
+                "kind": "subscription",
+                "id": {"$ne": intent["id"]},
+                "status": {"$in": ["payment_pending", "pending", "authorised"]},
+            },
+            {"$set": {
+                "status": "superseded",
+                "superseded_by": intent["id"],
+                "superseded_at": iso(),
+                "supersede_reason": "another_intent_paid",
+            }},
+        )
+
+    # Refresh household contact when still a placeholder from seed/import.
+    hh_patch = {}
+    payer_name = (intent.get("payer_name") or "").strip()
+    payer_mobile = (intent.get("payer_mobile") or "").strip()
+    cur_name = (household.get("primary_name") or "").strip()
+    cur_mobile = (household.get("primary_mobile") or "").strip()
+    placeholder_names = {"", "check", "test", "example", "n/a", "na"}
+    if payer_name and cur_name.lower() in placeholder_names:
+        hh_patch["primary_name"] = payer_name
+        hh_patch["family_display_name"] = payer_name
+    if payer_mobile and (
+        not cur_mobile
+        or cur_mobile in {"9876543210", "0000000000"}
+        or cur_mobile.startswith("000")
+    ):
+        hh_patch["primary_mobile"] = payer_mobile
+    if hh_patch and intent.get("household_id"):
+        await db.households.update_one({"id": intent["household_id"]}, {"$set": hh_patch})
+
     return clean(receipt)
 
 
@@ -566,7 +603,9 @@ async def payment_status(token: str):
 
     if intent.get("status") == "partially_paid" and due > 0:
         status = "partially_paid"
-        residual_payment = _upi_payload(settings, due, note=intent["id"][:20])
+        residual_payment = _upi_payload(
+            settings, due, note=intent["id"][:20], kind=intent.get("kind"),
+        )
         paid_amt = int(intent.get("amount_paid_paise") or (receipt or {}).get("total_amount") or 0)
         message = (
             f"Partial receipt issued for {fmt_inr(paid_amt)}. "
@@ -696,22 +735,35 @@ def _upi_app_links(intent_url: str) -> dict:
     }
 
 
-def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
+def _upi_block_for_kind(settings: dict, kind: str | None = None) -> dict:
     org = settings.get("organisation") or {}
-    upi = org.get("upi") or {}
+    if kind == "food_subscription":
+        food_upi = org.get("food_upi") or {}
+        if (
+            food_upi.get("qr_locked")
+            or food_upi.get("static_qr_url")
+            or (food_upi.get("vpa") or "").strip()
+            or (food_upi.get("merchant_upi_uri") or "").strip()
+        ):
+            return food_upi
+    return org.get("upi") or {}
+
+
+def _upi_payload(settings: dict, amount_paise: int, note: str = "", *, kind: str | None = None) -> dict:
+    org = settings.get("organisation") or {}
+    upi = _upi_block_for_kind(settings, kind)
     bank = org.get("bank_account") or {}
     payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "ONE 10 EVENT ORGANISING COMMITEE"
     vpa = (upi.get("vpa") or "").strip()
     amount_rupees = f"{amount_paise / 100:.2f}"
     merchant_uri = (upi.get("merchant_upi_uri") or "").strip()
-    # When a merchant QR was uploaded (qr_locked / merchant URI), never synthesize a
-    # simplified upi:// string — banks may reject it. Use the merchant URI for tap.
+    default_note = "One10 food" if kind == "food_subscription" else "One10 subscription"
     qr_data = ""
     if vpa and not upi.get("qr_locked") and not merchant_uri:
         from urllib.parse import quote
         qr_data = (
             f"upi://pay?pa={quote(vpa)}&pn={quote(payee)}&am={amount_rupees}"
-            f"&cu=INR&tn={quote(note or 'One10 subscription')}"
+            f"&cu=INR&tn={quote(note or default_note)}"
         )
     intent_url = _merchant_intent_url(upi, amount_rupees) or qr_data
     return {
@@ -722,7 +774,9 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "") -> dict:
         "qr_data": qr_data,
         "upi_intent_url": intent_url,
         "upi_app_links": _upi_app_links(intent_url),
-        "static_qr_url": upi.get("static_qr_url") or "/images/payment-qr.png",
+        "static_qr_url": upi.get("static_qr_url") or (
+            "/images/food-payment-qr.png" if kind == "food_subscription" else "/images/payment-qr.png"
+        ),
         "instructions": upi.get("instructions") or "",
         "bank_account": {
             "account_name": bank.get("account_name"),
@@ -742,7 +796,7 @@ async def upi_session(intent_id: str):
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
     settings = await get_settings()
     due = _intent_due_paise(intent)
-    payload = _upi_payload(settings, due, note=intent["id"][:20])
+    payload = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
     return {
         "intent_id": intent_id,
         "status_token": status_token(intent_id),
@@ -752,7 +806,6 @@ async def upi_session(intent_id: str):
         "amount_due_paise": due,
         "partially_paid": intent.get("status") == "partially_paid",
         "payment": payload,
-        # Dynamic QR encodes the due amount; static committee PNG is subscription-era ₹3,500.
         "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
         "campaign_notice": (settings.get("campaign") or {}).get("important_notice"),
     }
@@ -765,7 +818,9 @@ async def upi_qr_png(intent_id: str):
     if not intent:
         raise HTTPException(status_code=404, detail="Not found.")
     settings = await get_settings()
-    payload = _upi_payload(settings, _intent_due_paise(intent), note=intent["id"][:20])
+    payload = _upi_payload(
+        settings, _intent_due_paise(intent), note=intent["id"][:20], kind=intent.get("kind"),
+    )
     qr_source = payload.get("qr_data") or payload.get("upi_intent_url") or ""
     if not qr_source:
         raise HTTPException(status_code=404, detail="Dynamic UPI QR not configured.")
@@ -1165,7 +1220,9 @@ async def upi_submit(request: Request):
                         residual = {
                             "amount_paise": due_after,
                             "amount_fmt": fmt_inr(due_after),
-                            "payment": _upi_payload(settings, due_after, note=intent_id[:20]),
+                            "payment": _upi_payload(
+                                settings, due_after, note=intent_id[:20], kind=intent.get("kind"),
+                            ),
                             "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
                         }
                 else:
@@ -1449,6 +1506,49 @@ async def receipt_by_flat(body: dict = Body(...), request: Request = None):
             "message": "Receipt found for this flat and transaction ID. You can download it below.",
         }
 
+    # Same UTR already uploaded and waiting on committee review — don't loop Generate again.
+    under_review = None
+    if household:
+        under_review = await db.upi_submissions.find_one(
+            {
+                "household_id": household["id"],
+                "reference_normalized": txn_norm,
+                "status": {"$in": ["needs_review", "processing", "submitted"]},
+                "receipt_id": {"$in": [None, ""]},
+            },
+            {"_id": 0},
+            sort=[("created_at", -1)],
+        )
+        if not under_review:
+            under_review = await db.upi_submissions.find_one(
+                {
+                    "household_id": household["id"],
+                    "reference_normalized": txn_norm,
+                    "status": "needs_review",
+                },
+                {"_id": 0},
+                sort=[("created_at", -1)],
+            )
+    if under_review and not under_review.get("receipt_id"):
+        return {
+            "status": "under_review",
+            "household": ({
+                "tower_name": household.get("tower_name") or "",
+                "flat_number": household.get("flat_number") or "",
+                "primary_name": household.get("primary_name") or "",
+            } if household else None),
+            "receipts": [],
+            "pending": {
+                "intent_id": under_review.get("intent_id"),
+                "status_token": status_token(under_review["intent_id"]) if under_review.get("intent_id") else None,
+                "submission_id": under_review.get("id"),
+            },
+            "message": under_review.get("review_message") or (
+                "Payment proof for this flat and transaction ID is already with the committee for review. "
+                "Please do not pay again."
+            ),
+        }
+
     return {
         "status": "not_found",
         "household": ({
@@ -1526,9 +1626,17 @@ async def receipt_start_from_proof(body: dict = Body(...), request: Request = No
         hid = household["id"]
         # Keep contact fresh for committee follow-up when resident self-serves a receipt.
         patch = {}
-        if not (household.get("primary_name") or "").strip():
+        cur_name = (household.get("primary_name") or "").strip()
+        cur_mobile = (household.get("primary_mobile") or "").strip()
+        placeholder_names = {"", "check", "test", "example", "n/a", "na"}
+        if name and (not cur_name or cur_name.lower() in placeholder_names):
             patch["primary_name"] = name
-        if not (household.get("primary_mobile") or "").strip():
+            patch["family_display_name"] = name
+        if mobile and (
+            not cur_mobile
+            or cur_mobile in {"9876543210", "0000000000"}
+            or cur_mobile.startswith("000")
+        ):
             patch["primary_mobile"] = mobile
         if patch:
             await db.households.update_one({"id": hid}, {"$set": patch})
@@ -1578,9 +1686,19 @@ async def receipt_start_from_proof(body: dict = Body(...), request: Request = No
             "household_id": hid,
             "kind": "subscription",
             "status": {"$in": ["payment_pending", "pending", "authorised", "partially_paid"]},
+            "expected_utr": txn_norm,
         },
         sort=[("created_at", -1)],
     )
+    if not intent:
+        intent = await db.subscription_intents.find_one(
+            {
+                "household_id": hid,
+                "kind": "subscription",
+                "status": {"$in": ["payment_pending", "pending", "authorised", "partially_paid"]},
+            },
+            sort=[("created_at", -1)],
+        )
     if not intent:
         base = int(settings["subscription"]["base_amount_paise"])
         donation = 0

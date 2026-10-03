@@ -526,7 +526,8 @@ CHART_OF_ACCOUNTS = [
 
 # ---------------------------------------------------------------- Events / cost centres
 EVENTS = [
-    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI", "dates": "TBC"},
+    {"id": "ev_khuti", "name": "Khuti Puja", "cost_centre": "KHUTI",
+     "dates": "13 September 2026, 9:00 AM"},
     {"id": "ev_durga", "name": "Durga Puja", "cost_centre": "DURGA",
      "dates": "16–21 October 2026 (Sasthi–Dashami)"},
     {"id": "ev_lakshmi", "name": "Lakshmi Puja", "cost_centre": "LAKSHMI", "dates": "TBC"},
@@ -536,7 +537,8 @@ EVENTS = [
 ]
 
 # ---------------------------------------------------------------- Towers & flats (demo master data)
-TOWERS = [{"id": f"tower_{i}", "name": f"Tower {i}"} for i in range(1, 13)]
+# One10 estate has Towers 1–11 only (no Tower 12).
+TOWERS = [{"id": f"tower_{i}", "name": f"Tower {i}"} for i in range(1, 12)]
 
 
 def _cycle_seed_doc(cycle_id: str, name: str, slug: str, kind: str, campaign: dict,

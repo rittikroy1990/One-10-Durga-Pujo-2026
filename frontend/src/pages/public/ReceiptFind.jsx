@@ -152,6 +152,15 @@ export default function ReceiptFind() {
       if (r.data.status === "found" && (r.data.receipts || []).length) {
         setStep("done");
         toast.success("Receipt found — you can download it.");
+      } else if (r.data.status === "under_review") {
+        setGenResult({
+          status: "needs_review",
+          message: r.data.message,
+          receipts: [],
+          statusToken: r.data.pending?.status_token,
+        });
+        setStep("done");
+        toast.message("Payment proof is already under committee review.");
       } else {
         setStep("generate");
         toast.message("No matching receipt — upload payment details to generate one.");
@@ -484,11 +493,18 @@ export default function ReceiptFind() {
           <div className="mt-8">
             {genResult?.status === "needs_review" ? (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-brown-900">
-                <div className="text-sm font-semibold text-amber-800">Submitted for review</div>
+                <div className="text-sm font-semibold text-amber-800">Under review</div>
                 <p className="mt-2 text-sm text-brown-800/80">{genResult.message}</p>
                 <p className="mt-2 text-xs text-brown-800/55">
                   Do not pay again. The committee will verify and issue your receipt.
                 </p>
+                {genResult.statusToken ? (
+                  <div className="mt-4">
+                    <Link to={`/payment/status?token=${encodeURIComponent(genResult.statusToken)}`}>
+                      <Button variant="outline" size="sm">View payment status</Button>
+                    </Link>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <ReceiptCards receipts={doneReceipts} household={lookup?.household} />

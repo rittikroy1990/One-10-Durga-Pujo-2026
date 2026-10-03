@@ -1,5 +1,6 @@
 """Manual payment modes with maker-checker controls, plus admin collection registers."""
-from fastapi import APIRouter, Depends, Request, HTTPException, Body
+from fastapi import APIRouter, Depends, Request, HTTPException, Body, UploadFile, File, Form
+from fastapi.responses import Response
 
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id
@@ -225,8 +226,58 @@ async def admin_household_detail(hid: str, user: dict = Depends(require("househo
 
 @router.get("/admin/receipts")
 async def admin_receipts(user: dict = Depends(require("receipts:read"))):
+    from docs import receipt_is_bank_verified
     rs = await db.receipts.find({}, {"_id": 0}).sort("issued_at", -1).to_list(5000)
-    return {"items": rs, "count": len(rs)}
+    items = []
+    for r in rs:
+        row = dict(r)
+        row["bank_verified"] = receipt_is_bank_verified(r)
+        items.append(row)
+    return {"items": items, "count": len(items)}
+
+
+@router.post("/admin/receipts/{rid}/bank-verify")
+async def admin_receipt_bank_verify(
+    rid: str,
+    request: Request = None,
+    user: dict = Depends(require("receipts:manage", "payments:manage")),
+):
+    """Treasurer confirms the UTR appears on the bank statement → mark receipt bank verified."""
+    from docs import receipt_is_bank_verified
+
+    r = await db.receipts.find_one({"id": rid}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Receipt not found.")
+    if r.get("status") not in ("issued", "partially_refunded"):
+        raise HTTPException(status_code=400, detail="Only issued receipts can be bank-verified.")
+    if receipt_is_bank_verified(r):
+        return {"ok": True, "already": True, "receipt": {**r, "bank_verified": True}}
+
+    now = iso()
+    patch = {
+        "bank_verified": True,
+        "verification_level": "bank_statement",
+        "bank_verified_at": now,
+        "bank_verified_by": user.get("user_id") or user.get("login_id") or "",
+    }
+    await db.receipts.update_one({"id": rid}, {"$set": patch})
+    # Keep linked UPI payment row in sync when present
+    pay_id = r.get("payment_id")
+    if pay_id:
+        await db.payments.update_many(
+            {"provider_payment_id": pay_id},
+            {"$set": {"bank_verified": True, "bank_verified_at": now}},
+        )
+    await audit(
+        "receipt.bank_verify",
+        actor=user,
+        entity_type="receipt",
+        entity_id=rid,
+        after={"receipt_no": r.get("receipt_no"), "payment_id": pay_id},
+        request=request,
+    )
+    updated = {**r, **patch}
+    return {"ok": True, "already": False, "receipt": updated}
 
 
 @router.post("/admin/households/{hid}/clear-subscription")
@@ -293,7 +344,6 @@ async def admin_intents(user: dict = Depends(require("payments:read"))):
 
 @router.get("/admin/receipts/{rid}/pdf")
 async def admin_receipt_pdf(rid: str, user: dict = Depends(require("receipts:read"))):
-    from fastapi import Response
     from docs import receipt_pdf
     r = await db.receipts.find_one({"id": rid}, {"_id": 0})
     if not r:
@@ -304,3 +354,65 @@ async def admin_receipt_pdf(rid: str, user: dict = Depends(require("receipts:rea
     pdf = receipt_pdf(r, settings, verify_url)
     return Response(content=pdf, media_type="application/pdf",
                     headers={"Content-Disposition": f'inline; filename="{r["receipt_no"]}.pdf"'})
+
+
+@router.get("/admin/collection/template")
+async def admin_collection_template(user: dict = Depends(require("receipts:read", "households:read", "payments:read"))):
+    """Download a sample-filled Excel template for bulk subscription/donation import."""
+    from subscription_import import TEMPLATE_FILENAME, base_amount_paise, build_template_xlsx
+
+    settings = await get_settings()
+    base_rupees = max(1, int(base_amount_paise(settings) or 350000) // 100)
+    data = build_template_xlsx(base_rupees=base_rupees)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{TEMPLATE_FILENAME}"'},
+    )
+
+
+@router.post("/admin/collection/import")
+async def admin_collection_import(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: bool = Form(False),
+    user: dict = Depends(require("receipts:manage", "households:write", "payments:manage")),
+):
+    """Upload a filled Excel/CSV template — upserts households and issues receipts."""
+    from subscription_import import run_import
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    try:
+        summary = await run_import(
+            raw,
+            file.filename or "upload.xlsx",
+            dry_run=bool(dry_run),
+            actor=user,
+            request=request,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read Excel/CSV. Download the sample template, fill it, and try again.",
+        )
+
+    await audit(
+        "collection.excel_import",
+        entity_type="collection_import",
+        entity_id=summary.get("cycle_id") or "import",
+        after={
+            "filename": file.filename,
+            "dry_run": bool(dry_run),
+            "message": summary.get("message"),
+            "issued": len(summary.get("issued") or []),
+            "skipped": len(summary.get("skipped") or []),
+            "errors": len(summary.get("errors") or []),
+        },
+        request=request,
+        actor=user,
+    )
+    return summary

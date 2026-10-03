@@ -8,6 +8,7 @@ import FoodMenuMatrix from "./FoodMenuMatrix";
 
 const MEAL_CATEGORIES = [
   { value: "breakfast", label: "Breakfast" },
+  { value: "breakfast_packet", label: "Breakfast packet (veg)" },
   { value: "lunch", label: "Lunch" },
   { value: "dinner", label: "Dinner" },
 ];
@@ -108,8 +109,12 @@ export default function FoodMenuAdmin() {
       toast.error("Select the menu date");
       return;
     }
-    if (!["breakfast", "lunch", "dinner"].includes(itemForm.category)) {
-      toast.error("Select Breakfast, Lunch, or Dinner");
+    if (!MEAL_CATEGORIES.some((c) => c.value === itemForm.category)) {
+      toast.error("Select Breakfast, Breakfast packet, Lunch, or Dinner");
+      return;
+    }
+    if (itemForm.category === "breakfast_packet" && itemForm.diet !== "veg") {
+      toast.error("Breakfast packet is pure veg");
       return;
     }
     if (!["veg", "non_veg"].includes(itemForm.diet)) {

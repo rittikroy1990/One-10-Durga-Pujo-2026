@@ -344,7 +344,7 @@ export default function FoodMenuMatrix() {
   };
 
   const seedOfficial = async () => {
-    if (!window.confirm("Load the official Pujo poster menu (all 36 cells, prices, notes, day plate images)? Existing cell data will be overwritten.")) {
+    if (!window.confirm("Load the official Pujo poster menu (breakfast, veg breakfast packet, lunch and dinner for all days, with prices, notes and plate images)? Existing cell data will be overwritten.")) {
       return;
     }
     setSeeding(true);

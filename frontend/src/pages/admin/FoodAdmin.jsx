@@ -51,7 +51,7 @@ export default function FoodAdmin() {
   const [pricesOpen, setPricesOpen] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [priceForm, setPriceForm] = useState({
-    breakfast: "60",
+    breakfast: "70",
     lunch: "300",
     dinner: "300",
     payment_enabled: false,
@@ -74,7 +74,7 @@ export default function FoodAdmin() {
           if (p?.code) map[p.code] = String(Math.round((Number(p.amount_paise) || 0) / 100));
         }
         setPriceForm({
-          breakfast: map.breakfast || "60",
+          breakfast: map.breakfast || "70",
           lunch: map.lunch || "300",
           dinner: map.dinner || "300",
           payment_enabled: !!r.data.payment_enabled,

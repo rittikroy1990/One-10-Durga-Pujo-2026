@@ -159,7 +159,7 @@ def _selection_totals(selections: list) -> tuple:
 
 
 DEFAULT_MEAL_PRICES_PAISE = {
-    "breakfast": 6000,   # ₹60
+    "breakfast": 7000,   # ₹70
     "lunch": 30000,      # ₹300
     "dinner": 30000,     # ₹300
 }
@@ -371,9 +371,11 @@ async def admin_food_prices(user: dict = Depends(require("households:read", "ops
 
 MEAL_CATEGORIES = {
     "breakfast": "Breakfast",
+    "breakfast_packet": "Breakfast packet",
     "lunch": "Lunch",
     "dinner": "Dinner",
 }
+_MEAL_SORT_TENS = {"breakfast": 10, "breakfast_packet": 20, "lunch": 30, "dinner": 40}
 DIET_TYPES = {
     "veg": "Veg",
     "non_veg": "Non-veg",
@@ -385,6 +387,8 @@ def _normalize_meal_category(raw: str) -> str:
     aliases = {
         "bf": "breakfast",
         "brkfast": "breakfast",
+        "packet": "breakfast_packet",
+        "breakfast_pack": "breakfast_packet",
         "l": "lunch",
         "d": "dinner",
         "din": "dinner",
@@ -424,7 +428,7 @@ def _normalize_menu_date(raw: str) -> str:
 def _default_menu_image(category: str, diet: str, day_code: str = "") -> str:
     """Prefer day×meal×diet plate photos; fall back to generic meal samples."""
     cat = (category or "").strip().lower()
-    if cat not in {"breakfast", "lunch", "dinner"}:
+    if cat not in MEAL_CATEGORIES:
         return ""
     day = (day_code or "").strip().lower()
     diet_norm = (diet or "").strip().lower()
@@ -656,7 +660,7 @@ async def admin_seed_official_pujo_menu(
     request: Request,
     user: dict = Depends(require("households:write", "ops:manage", "receipts:manage", "settings:manage")),
 ):
-    """Replace/upsert all 36 cells from the committee poster catalog + day plate images."""
+    """Replace/upsert every poster cell (incl. veg breakfast packets) + day plate images."""
     from pujo_menu_2026 import official_cells_for_seed, MENU_META
     cells = official_cells_for_seed()
     upserted = 0
@@ -711,6 +715,7 @@ async def admin_upsert_matrix_cell(request: Request, user: dict = Depends(requir
     """Create/update one matrix cell (multipart): day_code, meal, diet, price, image, …"""
     from food_menu_matrix import (
         DAYS, MEALS, MATRIX_DIETS, matrix_key, default_cell_name, DEFAULT_CELL_PRICE_RUPEES,
+        meal_allows_diet,
     )
     form = await request.form()
     day_code = (form.get("day_code") or "").strip().lower()
@@ -720,9 +725,11 @@ async def admin_upsert_matrix_cell(request: Request, user: dict = Depends(requir
     if not day:
         raise HTTPException(status_code=400, detail="Unknown Pujo day code.")
     if not meal:
-        raise HTTPException(status_code=400, detail="Meal must be breakfast, lunch, or dinner.")
+        raise HTTPException(status_code=400, detail="Meal must be breakfast, breakfast packet, lunch, or dinner.")
     if not diet:
         raise HTTPException(status_code=400, detail="Diet must be veg or non_veg.")
+    if not meal_allows_diet(meal, diet):
+        raise HTTPException(status_code=400, detail="Breakfast packet is pure veg only.")
 
     key = matrix_key(day_code, meal, diet)
     meal_label = next(m["label"] for m in MEALS if m["code"] == meal)
@@ -802,7 +809,7 @@ async def admin_upsert_matrix_cell(request: Request, user: dict = Depends(requir
         rec = {
             "id": item_id,
             **patch,
-            "sort_order": int(day.get("order") or 0) * 100 + (1 if meal == "breakfast" else 2 if meal == "lunch" else 3) * 10 + (1 if diet == "veg" else 2),
+            "sort_order": int(day.get("order") or 0) * 100 + _MEAL_SORT_TENS.get(meal, 40) + (1 if diet == "veg" else 2),
             "created_at": iso(),
             "created_by": user.get("user_id") or "",
             "source": "matrix",
@@ -1015,7 +1022,7 @@ async def admin_food_matrix_upload_overall(
                 **patch,
                 "image_url": patch.get("image_url") or "",
                 "sort_order": int(day.get("order") or 0) * 100
-                    + (1 if meal == "breakfast" else 2 if meal == "lunch" else 3) * 10
+                    + _MEAL_SORT_TENS.get(meal, 40)
                     + (1 if diet == "veg" else 2),
                 "created_at": iso(),
                 "created_by": user.get("user_id") or "",

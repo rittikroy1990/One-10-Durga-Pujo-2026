@@ -73,7 +73,16 @@ async def public_campaign_by_slug(slug: str):
 
 @router.get("/towers")
 async def list_towers():
-    towers = await db.towers.find({}, {"_id": 0}).sort("name", 1).to_list(200)
+    towers = await db.towers.find(
+        {"id": {"$ne": "tower_12"}, "name": {"$ne": "Tower 12"}},
+        {"_id": 0},
+    ).to_list(200)
+
+    def _tower_num(name: str) -> int:
+        digits = "".join(ch for ch in str(name or "") if ch.isdigit())
+        return int(digits) if digits else 999
+
+    towers.sort(key=lambda t: (_tower_num(t.get("name")), t.get("name") or ""))
     return {"items": towers}
 
 

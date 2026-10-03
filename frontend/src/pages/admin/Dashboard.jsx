@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
-import { RefreshCw, PieChart as PieIcon, Wallet, UtensilsCrossed, Receipt } from "lucide-react";
+import {
+  RefreshCw, PieChart as PieIcon, Wallet, UtensilsCrossed, Receipt, ImageDown, Share2,
+} from "lucide-react";
+import { toast } from "sonner";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -10,6 +13,11 @@ import api from "../../lib/api";
 import { Card, CardBody, Stat, Spinner, Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 import { FootfallDayChart } from "../../components/Footfall";
+import {
+  TOWER_COLORS,
+  buildControlTowerPngBlob,
+  shareOrDownloadPng,
+} from "../../lib/controlTowerReport";
 
 const COLORS = {
   vermilion: "#D9381E",
@@ -21,12 +29,10 @@ const COLORS = {
   violet: "#7C3AED",
   rose: "#E11D48",
   slate: "#64748B",
+  teal: "#0F766E",
+  pink: "#DB2777",
+  blue: "#2563EB",
 };
-
-const TOWER_PALETTE = [
-  COLORS.vermilion, COLORS.gold, COLORS.emerald, COLORS.sky,
-  COLORS.violet, COLORS.amber, COLORS.rose, "#0F766E",
-];
 
 const METHOD_COLORS = {
   upi_qr: COLORS.emerald,
@@ -44,6 +50,20 @@ function methodLabel(m) {
 
 function isFoodPaid(status) {
   return ["paid", "captured", "settled"].includes(String(status || "").toLowerCase());
+}
+
+function isTower12(name) {
+  const s = String(name || "").trim().toLowerCase();
+  return s === "tower 12" || s === "t12" || s === "tower_12";
+}
+
+function towerShort(name) {
+  return String(name || "").replace(/^Tower\s+/i, "T");
+}
+
+function towerSortKey(name) {
+  const digits = String(name || "").replace(/\D/g, "");
+  return digits ? Number(digits) : 999;
 }
 
 function ChartTooltip({ active, payload }) {
@@ -66,11 +86,11 @@ function EmptyChart({ label = "No data yet" }) {
   );
 }
 
-function Donut({ data, innerRadius = 52, outerRadius = 82 }) {
+function RingChart({ data, innerRadius = 52, outerRadius = 82, height = 240 }) {
   const total = data.reduce((s, d) => s + (Number(d.value) || 0), 0);
   if (!total) return <EmptyChart />;
   return (
-    <ResponsiveContainer width="100%" height={240}>
+    <ResponsiveContainer width="100%" height={height}>
       <PieChart>
         <Pie
           data={data}
@@ -85,7 +105,7 @@ function Donut({ data, innerRadius = 52, outerRadius = 82 }) {
           strokeWidth={2}
         >
           {data.map((d, i) => (
-            <Cell key={d.name || i} fill={d.color || TOWER_PALETTE[i % TOWER_PALETTE.length]} />
+            <Cell key={d.name || i} fill={d.color || TOWER_COLORS[i % TOWER_COLORS.length]} />
           ))}
         </Pie>
         <Tooltip content={<ChartTooltip />} />
@@ -97,6 +117,14 @@ function Donut({ data, innerRadius = 52, outerRadius = 82 }) {
       </PieChart>
     </ResponsiveContainer>
   );
+}
+
+function Donut(props) {
+  return <RingChart {...props} />;
+}
+
+function SolidPie({ data, outerRadius = 88, height = 240 }) {
+  return <RingChart data={data} innerRadius={0} outerRadius={outerRadius} height={height} />;
 }
 
 function SectionTitle({ icon: Icon, title, to, linkLabel }) {
@@ -123,6 +151,8 @@ export default function Dashboard() {
   const [exp, setExp] = useState(null);
   const [food, setFood] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const reportBusy = useRef(false);
 
   const load = () => {
     setLoading(true);
@@ -159,16 +189,47 @@ export default function Dashboard() {
       }));
   }, [col]);
 
-  const towerBar = useMemo(() => {
+  const towersClean = useMemo(() => {
     if (!col?.by_tower) return [];
-    return col.by_tower
-      .filter((t) => (t.paid || 0) > 0 || (t.registered || 0) > 0)
-      .map((t) => ({
-        tower: String(t.tower || "").replace(/^Tower\s+/i, "T"),
-        paid: t.paid || 0,
-        registered: t.registered || 0,
-      }));
+    return [...col.by_tower]
+      .filter((t) => !isTower12(t.tower) && t.tower_id !== "tower_12")
+      .sort((a, b) => towerSortKey(a.tower) - towerSortKey(b.tower));
   }, [col]);
+
+  // Homes → pie; amount → bar (same towers, different metrics — no chart-type duplicate)
+  const towerPaidPie = useMemo(() => {
+    return towersClean
+      .filter((t) => (Number(t.paid) || 0) > 0)
+      .map((t, i) => ({
+        name: towerShort(t.tower),
+        value: Number(t.paid) || 0,
+        color: TOWER_COLORS[i % TOWER_COLORS.length],
+        valueFmt: `${t.paid} households`,
+        extra: formatPaise(t.amount || 0),
+      }));
+  }, [towersClean]);
+
+  const towerAmountBar = useMemo(() => {
+    return towersClean
+      .filter((t) => (Number(t.amount) || 0) > 0)
+      .map((t, i) => ({
+        tower: towerShort(t.tower),
+        amountRupees: Math.round((Number(t.amount) || 0) / 100),
+        amountPaise: Number(t.amount) || 0,
+        fill: TOWER_COLORS[i % TOWER_COLORS.length],
+      }));
+  }, [towersClean]);
+
+  const towerAmountSlices = useMemo(
+    () =>
+      towerAmountBar.map((t) => ({
+        name: t.tower,
+        value: t.amountPaise,
+        color: t.fill,
+        valueFmt: formatPaise(t.amountPaise),
+      })),
+    [towerAmountBar],
+  );
 
   const dailyArea = useMemo(() => {
     if (!col?.daily?.length) return [];
@@ -197,7 +258,7 @@ export default function Dashboard() {
       .map((r, i) => ({
         name: r.name || r.account_code || "Other",
         value: Number(r.amount_paise) || 0,
-        color: TOWER_PALETTE[i % TOWER_PALETTE.length],
+        color: TOWER_COLORS[i % TOWER_COLORS.length],
         valueFmt: formatPaise(r.amount_paise),
       }));
   }, [exp]);
@@ -247,16 +308,61 @@ export default function Dashboard() {
       + (aud.missing_evidence || 0)
     : 0;
 
+  const netBalancePaise = (Number(col?.grand_total) || 0) - (Number(exp?.paid_total_paise) || 0);
+
+  const generateReport = async () => {
+    if (reportBusy.current || loading || !col) return;
+    reportBusy.current = true;
+    setExporting(true);
+    try {
+      const blob = await buildControlTowerPngBlob({
+        collected: formatPaise(col?.grand_total),
+        paidHouseholds: col?.paid ?? "—",
+        expenses: formatPaise(exp?.paid_total_paise),
+        netBalance: formatPaise(netBalancePaise),
+        foodOrders: String(foodStats.total ?? 0),
+        towerSlices: towerAmountSlices,
+        methodSlices: methodPie,
+        towerHomes: towerPaidPie,
+      });
+      const stamp = new Date().toISOString().slice(0, 10);
+      const filename = `one10-control-tower-${stamp}.png`;
+      const mode = await shareOrDownloadPng(blob, filename);
+      if (mode === "shared") toast.success("Report shared");
+      else if (mode === "downloaded") toast.success("PNG downloaded — share it on WhatsApp");
+    } catch (err) {
+      console.error(err);
+      toast.error("Could not generate report PNG");
+    } finally {
+      setExporting(false);
+      reportBusy.current = false;
+    }
+  };
+
   return (
     <div data-testid="admin-dashboard" data-page="control-tower">
-      <div className="mb-5 flex items-center justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-4xl">Control Tower</h1>
           <p className="text-sm text-brown-800/50">
             High-level view of collection, expenses, food subscriptions and cash.
           </p>
         </div>
-        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /> Refresh</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={generateReport}
+            disabled={loading || exporting || !col}
+            data-testid="control-tower-report"
+          >
+            {exporting ? <Spinner className="h-4 w-4 text-white" /> : <Share2 className="h-4 w-4" />}
+            {exporting ? "Building…" : "Share report PNG"}
+          </Button>
+          <Button variant="subtle" size="sm" onClick={load}>
+            <RefreshCw className="h-4 w-4" /> Refresh
+          </Button>
+        </div>
       </div>
 
       {loading && <div className="flex justify-center py-16"><Spinner className="text-vermilion-500" /></div>}
@@ -268,7 +374,12 @@ export default function Dashboard() {
             <Stat label="Collected" value={formatPaise(col?.grand_total)} accent="text-emerald-700" />
             <Stat label="Paid households" value={col?.paid ?? "—"} sub={col ? `${col.collection_rate_pct || 0}% of eligible` : undefined} />
             <Stat label="Expenses paid" value={formatPaise(exp?.paid_total_paise)} accent="text-vermilion-600" />
-            <Stat label="Cash position" value={formatPaise(fin?.current_balance)} />
+            <Stat
+              label="Net balance"
+              value={formatPaise(netBalancePaise)}
+              accent="text-emerald-800"
+              sub="Collected − expenses"
+            />
             <Stat label="Food orders" value={foodStats.total} sub={`${foodStats.meals} meal lines`} />
           </div>
 
@@ -276,62 +387,91 @@ export default function Dashboard() {
           <section>
             <SectionTitle icon={Wallet} title="Collection" to="/admin/collection" linkLabel="Collection →" />
             <div className="grid gap-4 lg:grid-cols-3">
-              <Card><CardBody>
-                <h3 className="mb-1 flex items-center gap-2 font-display text-lg">
-                  <PieIcon className="h-4 w-4 text-vermilion-500" /> Collected mix
-                </h3>
-                <p className="mb-1 text-xs text-brown-800/50">Subscription vs donations</p>
-                {paidMixPie.length ? <Donut data={paidMixPie} /> : <EmptyChart label="No collections yet" />}
-              </CardBody></Card>
-              <Card><CardBody>
-                <h3 className="mb-1 font-display text-lg">Payment methods</h3>
-                <p className="mb-1 text-xs text-brown-800/50">Share of collected amount</p>
-                {methodPie.length ? <Donut data={methodPie} /> : <EmptyChart label="No method data" />}
-              </CardBody></Card>
-              <Card><CardBody>
-                <h3 className="mb-1 font-display text-lg">Paid by tower</h3>
-                <p className="mb-1 text-xs text-brown-800/50">Households with receipts</p>
-                {towerBar.length ? (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={towerBar} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+              <Card className="overflow-hidden bg-gradient-to-br from-emerald-50/80 via-white to-white">
+                <CardBody>
+                  <h3 className="mb-1 flex items-center gap-2 font-display text-lg">
+                    <PieIcon className="h-4 w-4 text-emerald-600" /> Collected mix
+                  </h3>
+                  <p className="mb-1 text-xs text-brown-800/50">Subscription vs donations</p>
+                  {paidMixPie.length ? <Donut data={paidMixPie} /> : <EmptyChart label="No collections yet" />}
+                </CardBody>
+              </Card>
+              <Card className="overflow-hidden bg-gradient-to-br from-sky-50/70 via-white to-white">
+                <CardBody>
+                  <h3 className="mb-1 font-display text-lg">Payment methods</h3>
+                  <p className="mb-1 text-xs text-brown-800/50">Share of collected amount</p>
+                  {methodPie.length ? <Donut data={methodPie} /> : <EmptyChart label="No method data" />}
+                </CardBody>
+              </Card>
+              <Card className="overflow-hidden bg-gradient-to-br from-violet-50/70 via-white to-rose-50/30">
+                <CardBody>
+                  <h3 className="mb-1 font-display text-lg">Paid homes by tower</h3>
+                  <p className="mb-1 text-xs text-brown-800/50">Household counts · Towers 1–11</p>
+                  {towerPaidPie.length ? (
+                    <SolidPie data={towerPaidPie} />
+                  ) : (
+                    <EmptyChart label="No paid households yet" />
+                  )}
+                </CardBody>
+              </Card>
+            </div>
+
+            <Card className="mt-4 overflow-hidden bg-gradient-to-br from-amber-50/50 via-white to-white">
+              <CardBody>
+                <h3 className="mb-1 font-display text-lg">Collected ₹ by tower</h3>
+                <p className="mb-1 text-xs text-brown-800/50">Amount issued on receipts · Towers 1–11</p>
+                {towerAmountBar.length ? (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <BarChart data={towerAmountBar} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
                       <XAxis dataKey="tower" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                      <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }} />
-                      <Bar dataKey="paid" fill={COLORS.emerald} name="Paid" radius={[4, 4, 0, 0]} />
+                      <YAxis tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                      <Tooltip
+                        formatter={(_v, _n, item) => [formatPaise(item?.payload?.amountPaise), "Collected"]}
+                        contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
+                      />
+                      <Bar dataKey="amountRupees" name="Collected ₹" radius={[6, 6, 0, 0]}>
+                        {towerAmountBar.map((row) => (
+                          <Cell key={row.tower} fill={row.fill} />
+                        ))}
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <EmptyChart label="No paid households yet" />
+                  <EmptyChart label="No tower amounts yet" />
                 )}
-              </CardBody></Card>
-            </div>
-            <Card className="mt-4"><CardBody>
-              <h3 className="mb-1 font-display text-lg">Daily collection trend</h3>
-              <p className="mb-2 text-xs text-brown-800/50">Amount collected by day (₹)</p>
-              {dailyArea.length > 0 ? (
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={dailyArea} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="collectFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor={COLORS.vermilion} stopOpacity={0.35} />
-                        <stop offset="100%" stopColor={COLORS.vermilion} stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                    <YAxis tick={{ fontSize: 11, fill: "#6B5B4F" }} />
-                    <Tooltip
-                      formatter={(v, _n, item) => [formatPaise(item?.payload?.amountPaise ?? Math.round(v * 100)), "Collected"]}
-                      contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
-                    />
-                    <Area type="monotone" dataKey="amount" stroke={COLORS.vermilion} fill="url(#collectFill)" strokeWidth={2} name="Collected" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <EmptyChart label="No daily collections yet" />
-              )}
-            </CardBody></Card>
+              </CardBody>
+            </Card>
+
+            <Card className="mt-4 overflow-hidden bg-gradient-to-b from-vermilion-500/5 to-white">
+              <CardBody>
+                <h3 className="mb-1 font-display text-lg">Daily collection trend</h3>
+                <p className="mb-2 text-xs text-brown-800/50">Amount collected by day (₹)</p>
+                {dailyArea.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={dailyArea} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="collectFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={COLORS.vermilion} stopOpacity={0.4} />
+                          <stop offset="55%" stopColor={COLORS.gold} stopOpacity={0.18} />
+                          <stop offset="100%" stopColor={COLORS.emerald} stopOpacity={0.02} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E8DFD0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                      <YAxis tick={{ fontSize: 11, fill: "#6B5B4F" }} />
+                      <Tooltip
+                        formatter={(v, _n, item) => [formatPaise(item?.payload?.amountPaise ?? Math.round(v * 100)), "Collected"]}
+                        contentStyle={{ borderRadius: 8, border: "1px solid #E8DFD0", fontSize: 12 }}
+                      />
+                      <Area type="monotone" dataKey="amount" stroke={COLORS.vermilion} fill="url(#collectFill)" strokeWidth={2.5} name="Collected" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyChart label="No daily collections yet" />
+                )}
+              </CardBody>
+            </Card>
           </section>
 
           {/* Expenses + Food */}
@@ -342,11 +482,13 @@ export default function Dashboard() {
                 <Stat label="Paid total" value={formatPaise(exp?.paid_total_paise)} accent="text-vermilion-600" />
                 <Stat label="Paid records" value={exp?.count_paid ?? "—"} />
               </div>
-              <Card><CardBody>
-                <h3 className="mb-1 font-display text-lg">By category</h3>
-                <p className="mb-1 text-xs text-brown-800/50">Paid expenses mix</p>
-                {expensePie.length ? <Donut data={expensePie} /> : <EmptyChart label="No paid expenses yet" />}
-              </CardBody></Card>
+              <Card className="overflow-hidden bg-gradient-to-br from-rose-50/60 to-white">
+                <CardBody>
+                  <h3 className="mb-1 font-display text-lg">By category</h3>
+                  <p className="mb-1 text-xs text-brown-800/50">Paid expenses mix</p>
+                  {expensePie.length ? <Donut data={expensePie} /> : <EmptyChart label="No paid expenses yet" />}
+                </CardBody>
+              </Card>
             </section>
 
             <section>
@@ -365,27 +507,31 @@ export default function Dashboard() {
                   accent="text-amber-700"
                 />
               </div>
-              <Card><CardBody>
-                <h3 className="mb-1 font-display text-lg">Order status</h3>
-                <p className="mb-1 text-xs text-brown-800/50">
-                  Food page {foodStats.pageEnabled ? "open" : "coming soon"}
-                </p>
-                {foodPie.length ? <Donut data={foodPie} /> : <EmptyChart label="No food orders yet" />}
-              </CardBody></Card>
+              <Card className="overflow-hidden bg-gradient-to-br from-amber-50/70 to-white">
+                <CardBody>
+                  <h3 className="mb-1 font-display text-lg">Order status</h3>
+                  <p className="mb-1 text-xs text-brown-800/50">
+                    Food page {foodStats.pageEnabled ? "open" : "coming soon"}
+                  </p>
+                  {foodPie.length ? <Donut data={foodPie} /> : <EmptyChart label="No food orders yet" />}
+                </CardBody>
+              </Card>
             </section>
           </div>
 
           {/* Cash + Footfall + Audit */}
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card><CardBody>
-              <h3 className="mb-1 font-display text-lg">Cash position</h3>
-              <p className="mb-1 text-xs text-brown-800/50">Bank · cash · gateway</p>
-              <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-brown-800/45">Bank</span><div className="font-semibold tabular-nums">{formatPaise(fin?.bank_balance)}</div></div>
-                <div><span className="text-brown-800/45">Cash</span><div className="font-semibold tabular-nums">{formatPaise(fin?.cash_balance)}</div></div>
-              </div>
-              {finPie.length ? <Donut data={finPie} innerRadius={44} outerRadius={72} /> : <EmptyChart label="No balances yet" />}
-            </CardBody></Card>
+            <Card className="overflow-hidden bg-gradient-to-br from-emerald-50/80 to-sky-50/40">
+              <CardBody>
+                <h3 className="mb-1 font-display text-lg">Bank &amp; cash on hand</h3>
+                <p className="mb-1 text-xs text-brown-800/50">Ledger balances (bank · cash · gateway)</p>
+                <div className="mb-2 grid grid-cols-2 gap-2 text-sm">
+                  <div><span className="text-brown-800/45">Bank</span><div className="font-semibold tabular-nums">{formatPaise(fin?.bank_balance)}</div></div>
+                  <div><span className="text-brown-800/45">Cash</span><div className="font-semibold tabular-nums">{formatPaise(fin?.cash_balance)}</div></div>
+                </div>
+                {finPie.length ? <Donut data={finPie} innerRadius={44} outerRadius={72} /> : <EmptyChart label="No balances yet" />}
+              </CardBody>
+            </Card>
 
             <Card className="lg:col-span-2"><CardBody>
               <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
@@ -428,6 +574,14 @@ export default function Dashboard() {
                 <Link to="/admin/audit" className="rounded-full bg-vermilion-500/10 px-3 py-1 font-semibold text-vermilion-700 ring-1 ring-vermilion-500/20 hover:bg-vermilion-500/15">
                   Audit →
                 </Link>
+                <button
+                  type="button"
+                  onClick={generateReport}
+                  disabled={exporting || !col}
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-600/10 px-3 py-1 font-semibold text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-600/15 disabled:opacity-50"
+                >
+                  <ImageDown className="h-3.5 w-3.5" /> WhatsApp PNG
+                </button>
               </div>
             </div>
           </CardBody></Card>

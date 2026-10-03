@@ -54,20 +54,22 @@ P = {
 ROLE_PERMISSIONS = {
     "system_admin": {"settings:read", "settings:manage", "users:manage", "audit:read",
                      "reports:read", "households:read", "payments:read", "receipts:read",
-                     "receipts:manage", "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read"},
+                     "receipts:manage", "accounting:read", "recon:read", "budget:read", "ops:read",
+                     "documents:read", "expense:create"},
     "convenor": {"settings:read", "reports:read", "audit:read", "households:read", "payments:read",
                  "receipts:read", "receipts:manage", "manual:approve", "refunds:approve",
                  "accounting:read", "recon:read", "budget:read", "budget:approve",
-                 "procurement:approve", "payment_run:approve", "expense:approve",
+                 "procurement:approve", "payment_run:approve", "expense:approve", "expense:create",
                  "ops:read", "ops:manage", "period:close", "public_report:publish",
                  "advance:manage", "documents:read", "documents:write"},
     "treasurer": {"reports:read", "households:read", "payments:read", "payments:manage",
                   "receipts:read", "receipts:manage", "manual:approve", "refunds:create",
                   "accounting:read", "accounting:post", "recon:read", "recon:manage",
                   "budget:read", "payment_run:approve", "period:close",
-                  "advance:manage", "documents:read", "documents:write", "audit:read"},
+                  "advance:manage", "documents:read", "documents:write", "audit:read",
+                  "expense:create", "expense:approve"},
     "collector": {"households:read", "households:write", "payments:read", "manual:create",
-                  "receipts:read", "documents:read", "documents:write"},
+                  "receipts:read", "documents:read", "documents:write", "expense:create"},
     "reconciliation_officer": {"payments:read", "recon:read", "recon:manage", "accounting:read",
                                "reports:read", "documents:read", "documents:write"},
     "budget_owner": {"budget:read", "budget:manage", "procurement:create", "reports:read",
@@ -78,15 +80,16 @@ ROLE_PERMISSIONS = {
     "payment_maker": {"payment_run:create", "accounting:read", "reports:read", "documents:read",
                       "documents:write"},
     "payment_approver": {"payment_run:approve", "accounting:read", "reports:read", "documents:read"},
-    "coordinator": {"ops:read", "ops:manage", "documents:read", "documents:write"},
+    "coordinator": {"ops:read", "ops:manage", "documents:read", "documents:write", "expense:create"},
     "inventory_custodian": {"ops:read", "ops:manage", "documents:read"},
     "auditor": {"reports:read", "audit:read", "households:read", "payments:read", "receipts:read",
                 "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
                 "settings:read"},
-    # All EOC members: view portal data; elevated roles add write/approve powers
+    # All EOC members: view portal data; can record expenses; elevated roles add approve powers
     "committee_member": {
         "settings:read", "reports:read", "households:read", "payments:read", "receipts:read",
         "accounting:read", "recon:read", "budget:read", "ops:read", "documents:read",
+        "expense:create",
     },
     "resident": set(),
 }
@@ -235,30 +238,39 @@ DEMO_USERS = [
 
 # Preview committee logins — short user id + easy shared password (NOT for production).
 # All have view access via committee_member; some hold elevated EOC roles.
+# Platform owner (Rittik) alone holds system_admin — committee does not.
 COMMITTEE_PASSWORD = "one10"
+SIGNATORY_DESIGNATIONS = {
+    "President", "Vice President", "Joint Secretary", "Asst. Secretary",
+    "Joint Treasurer", "Treasurer", "Secretary",
+}
 COMMITTEE_LOGINS = [
+    {"login_id": "rittik", "name": "Rittik Roy", "designation": "Platform Admin",
+     "roles": ["system_admin"], "is_signatory": False},
     {"login_id": "abhijit", "name": "Abhijit Chakrabarti", "designation": "President",
-     "roles": ["committee_member", "convenor", "system_admin"]},
+     "roles": ["committee_member", "convenor"], "is_signatory": True},
     {"login_id": "subhasis", "name": "Subhasis Sarkar", "designation": "Vice President",
-     "roles": ["committee_member"]},
+     "roles": ["committee_member"], "is_signatory": True},
     {"login_id": "anjan", "name": "Anjan Nandy", "designation": "Vice President",
-     "roles": ["committee_member"]},
+     "roles": ["committee_member"], "is_signatory": True},
     {"login_id": "binoy", "name": "Binoy Banerjee", "designation": "Joint Secretary",
-     "roles": ["committee_member", "coordinator", "collector"]},
+     "roles": ["committee_member", "coordinator", "collector"], "is_signatory": True},
     {"login_id": "debabrata", "name": "Debabrata Dey", "designation": "Joint Secretary",
-     "roles": ["committee_member", "coordinator", "collector"]},
+     "roles": ["committee_member", "coordinator", "collector"], "is_signatory": True},
     {"login_id": "smriti", "name": "Smriti Sasmal", "designation": "Asst. Secretary",
-     "roles": ["committee_member"]},
+     "roles": ["committee_member"], "is_signatory": True},
     {"login_id": "suman", "name": "Suman Nandy", "designation": "Asst. Secretary",
-     "roles": ["committee_member"]},
+     "roles": ["committee_member", "treasurer"], "is_signatory": True, "password_env": "SEED_PASSWORD_SUMAN"},
+    {"login_id": "arka", "name": "Arka", "designation": "Treasurer team",
+     "roles": ["committee_member", "treasurer"], "is_signatory": False, "password_env": "SEED_PASSWORD_ARKA"},
     {"login_id": "apc", "name": "APC", "designation": "Joint Treasurer",
-     "roles": ["committee_member", "treasurer"]},
+     "roles": ["committee_member", "treasurer"], "is_signatory": True, "password_env": "SEED_PASSWORD_APC"},
     {"login_id": "subrata", "name": "Subrata Chatterjee", "designation": "Joint Treasurer",
-     "roles": ["committee_member", "treasurer"]},
+     "roles": ["committee_member", "treasurer"], "is_signatory": True},
     {"login_id": "alok", "name": "Alok Biswas", "designation": "Advisor",
-     "roles": ["committee_member", "auditor"]},
+     "roles": ["committee_member", "auditor"], "is_signatory": False},
     {"login_id": "scp", "name": "SC Purakayastha", "designation": "Advisor",
-     "roles": ["committee_member", "auditor"]},
+     "roles": ["committee_member", "auditor"], "is_signatory": False},
 ]
 
 
@@ -306,11 +318,15 @@ async def seed_demo_users():
             })
             created.append(email)
 
-    pw_hash = hash_password(COMMITTEE_PASSWORD)
     for row in COMMITTEE_LOGINS:
         lid = row["login_id"]
         existing = await db.users.find_one({"login_id": lid})
         email = f"{lid}@committee.one10"
+        is_signatory = bool(row["is_signatory"]) if "is_signatory" in row else (
+            row.get("designation") in SIGNATORY_DESIGNATIONS
+        )
+        row_pw = (os.environ.get(row.get("password_env") or "") or COMMITTEE_PASSWORD).strip() or COMMITTEE_PASSWORD
+        row_hash = hash_password(row_pw)
         doc = {
             "login_id": lid,
             "email": email,
@@ -318,10 +334,11 @@ async def seed_demo_users():
             "designation": row["designation"],
             "picture": "",
             "roles": row["roles"],
-            "password_hash": pw_hash,
+            "password_hash": row_hash,
             "is_active": True,
             "is_demo": True,
             "is_committee": True,
+            "is_signatory": is_signatory,
             "updated_at": iso(),
         }
         if not existing:
@@ -330,16 +347,17 @@ async def seed_demo_users():
             await db.users.insert_one(doc)
             created.append(lid)
         else:
+            # Never overwrite an existing password — users can change their own.
             await db.users.update_one(
                 {"login_id": lid},
                 {"$set": {
                     "name": row["name"],
                     "designation": row["designation"],
                     "roles": row["roles"],
-                    "password_hash": pw_hash,
                     "is_active": True,
                     "is_demo": True,
                     "is_committee": True,
+                    "is_signatory": is_signatory,
                     "updated_at": iso(),
                 }},
             )

@@ -14,6 +14,7 @@ router = APIRouter(prefix="/api")
 
 # Milestone visit counts for celebration banners (no named prizes publicly).
 MILESTONE_PRIZES = (
+    {"at": 1_500, "code": "m15h", "title": "1,500 visits", "prize": ""},
     {"at": 2_000, "code": "m2k", "title": "2,000 visits", "prize": ""},
     {"at": 3_000, "code": "m3k", "title": "3,000 visits", "prize": ""},
     {"at": 4_000, "code": "m4k", "title": "4,000 visits", "prize": ""},

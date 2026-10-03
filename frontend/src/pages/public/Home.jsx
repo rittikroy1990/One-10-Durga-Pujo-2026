@@ -19,6 +19,7 @@ const DELETED_LIVE = new Set([
   "/images/campaign/live/live-01.jpg",
   "/images/campaign/live/live-03.jpg",
   "/images/campaign/live/live-04.jpg",
+  "/images/campaign/live/live-32.jpg", // couple at pratima — removed from site
 ]);
 const LIVE = LIVE_ALL; // keep index map stable for named placements
 const ok = (src) => src && !DELETED_LIVE.has(src);
@@ -31,7 +32,6 @@ const SINDOOR_GROUP = LIVE[27]; // 28
 const SINDOOR_GROUP_B = LIVE[28]; // 29
 const FAMILY_AT_PANDAL = LIVE[29]; // 30 — family selfie
 const SINDUR_RITUAL = LIVE[30]; // 31 — offering sindoor to Maa
-const COUPLE_AT_PRATIMA = LIVE[31]; // 32 — couple before the pratima
 const PLACE_MAIN = LIVE[20]; // 21 — purohit aarti before Maa
 const SKIP_PEEK = new Set([0, 2, 3, 10, 11, 12, 20, 29, 30, 31]); // drop deleted + dedicated placements
 const PEEK_POOL = LIVE.filter((_, i) => i < 27 && !SKIP_PEEK.has(i)).filter(ok);
@@ -49,12 +49,11 @@ const USED = new Set([
   HERO, PLACE_MAIN, TOWERS, FIREWORK, ...SLIDER_A,
   ...DELETED_LIVE,
   LIVE[10],
-  FAMILY_AT_PANDAL, COUPLE_AT_PRATIMA, SINDOOR_GROUP, SINDOOR_GROUP_B,
+  FAMILY_AT_PANDAL, SINDOOR_GROUP, SINDOOR_GROUP_B,
 ]);
 const SLIDER_B_CLEAN = [
   ...LIVE.filter((src) => ok(src) && !USED.has(src) && src !== SINDUR_RITUAL),
   SINDUR_RITUAL,
-  COUPLE_AT_PRATIMA,
 ].filter(ok);
 
 function PhotoSlider({ images, intervalMs = 4500, aspect = "aspect-[16/10]", fit = "cover", className = "", testid = "photo-slider" }) {

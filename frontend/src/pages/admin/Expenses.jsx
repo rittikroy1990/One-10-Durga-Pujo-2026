@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Receipt, Plus, RefreshCw, Upload, ExternalLink, Ban } from "lucide-react";
+import { Receipt, Plus, RefreshCw, Upload, Download, ExternalLink, Ban } from "lucide-react";
 import api from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import {
-  Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Tabs,
+  Card, CardBody, Table, THead, TR, TH, TD, StatusBadge, Button, Dialog,
   Label, Input, Select, Spinner,
 } from "../../components/ui";
 import { formatPaise, formatDateIST } from "../../lib/utils";
@@ -26,41 +26,29 @@ function todayISO() {
 
 function canWriteExpenses(user) {
   const perms = new Set(user?.permissions || []);
-  return perms.has("expense:approve") || perms.has("accounting:post");
+  return perms.has("expense:create") || perms.has("expense:approve") || perms.has("accounting:post");
 }
 
 export default function Expenses() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("record");
   const writeOk = canWriteExpenses(user);
+  const importRef = useRef(null);
+  const billRef = useRef(null);
 
-  return (
-    <div data-testid="expenses-page">
-      <h1 className="mb-1 font-display text-4xl">Expenses</h1>
-      <p className="mb-4 text-sm text-brown-800/50">
-        Record spends with bills. Totals feed Control Tower cash position.
-      </p>
-      <Tabs
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { value: "record", label: "Record" },
-          { value: "list", label: "All" },
-          { value: "summary", label: "By category" },
-        ]}
-      />
-      {tab === "record" && <RecordExpense writeOk={writeOk} onRecorded={() => setTab("list")} />}
-      {tab === "list" && <ExpenseList writeOk={writeOk} />}
-      {tab === "summary" && <ExpenseSummary />}
-    </div>
-  );
-}
-
-function RecordExpense({ writeOk, onRecorded }) {
+  const [items, setItems] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
+  const [status, setStatus] = useState("");
+  const [accountCode, setAccountCode] = useState("");
+  const [paidFrom, setPaidFrom] = useState("");
+  const [voiding, setVoiding] = useState("");
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [bill, setBill] = useState(null);
-  const fileRef = useRef(null);
+  const [downloading, setDownloading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [importResult, setImportResult] = useState(null);
   const [form, setForm] = useState({
     date: todayISO(),
     payee: "",
@@ -73,20 +61,79 @@ function RecordExpense({ writeOk, onRecorded }) {
     notes: "",
   });
 
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = {};
+    if (status) params.status = status;
+    if (accountCode) params.account_code = accountCode;
+    if (paidFrom) params.paid_from = paidFrom;
+    api.get("/admin/expenses", { params })
+      .then((r) => {
+        setItems(r.data.items || []);
+        setSummary(r.data.summary || null);
+      })
+      .catch(() => toast.error("Could not load expenses"))
+      .finally(() => setLoading(false));
+  }, [status, accountCode, paidFrom]);
+
   useEffect(() => {
     api.get("/admin/expenses/categories")
       .then((r) => {
-        const items = r.data.items || [];
-        setCategories(items);
-        if (items.length && !items.find((c) => c.code === form.account_code)) {
-          setForm((f) => ({ ...f, account_code: items[0].code }));
+        const list = r.data.items || [];
+        setCategories(list);
+        if (list.length && !list.find((c) => c.code === form.account_code)) {
+          setForm((f) => ({ ...f, account_code: list[0].code }));
         }
       })
-      .catch(() => toast.error("Could not load expense categories"));
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(load, [load]);
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const downloadSample = async () => {
+    setDownloading(true);
+    try {
+      const r = await api.get("/admin/expenses/template", { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "one10_expense_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Sample template downloaded — replace the example rows and upload");
+    } catch {
+      toast.error("Could not download template");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const onUpload = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!writeOk) {
+      toast.error("You do not have permission to import expenses.");
+      return;
+    }
+    setUploading(true);
+    setImportResult(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post("/admin/expenses/import", fd);
+      setImportResult(r.data);
+      toast.success(r.data.message || "Import complete");
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Import failed");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -95,18 +142,9 @@ function RecordExpense({ writeOk, onRecorded }) {
       return;
     }
     const amt = Number(form.amount_rupees);
-    if (!form.payee.trim()) {
-      toast.error("Payee is required");
-      return;
-    }
-    if (!form.purpose.trim()) {
-      toast.error("Purpose is required");
-      return;
-    }
-    if (Number.isNaN(amt) || amt <= 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
+    if (!form.payee.trim()) return toast.error("Payee is required");
+    if (!form.purpose.trim()) return toast.error("Purpose is required");
+    if (Number.isNaN(amt) || amt <= 0) return toast.error("Enter a valid amount");
     setBusy(true);
     try {
       const fd = new FormData();
@@ -126,7 +164,8 @@ function RecordExpense({ writeOk, onRecorded }) {
         notes: "",
       });
       setBill(null);
-      onRecorded?.();
+      setOpen(false);
+      load();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not record expense");
     } finally {
@@ -134,49 +173,230 @@ function RecordExpense({ writeOk, onRecorded }) {
     }
   };
 
-  if (!writeOk) {
-    return (
-      <Card>
-        <CardBody>
-          <p className="text-sm text-amber-800">
-            Only treasurers / convenors can record expenses. You can still view All and By category.
-          </p>
-        </CardBody>
-      </Card>
-    );
-  }
+  const voidExpense = async (row) => {
+    if (!writeOk) return;
+    if (!window.confirm(`Void expense ${row.voucher_no || row.id}? This reverses the ledger and restores balance.`)) return;
+    setVoiding(row.id);
+    try {
+      await api.post(`/admin/expenses/${row.id}/void`, { reason: "Voided from Expenses admin" });
+      toast.success("Expense voided");
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not void expense");
+    } finally {
+      setVoiding("");
+    }
+  };
+
+  const exportCols = [
+    { key: "date", label: "Date" },
+    { key: "voucher_no", label: "Voucher" },
+    { key: "payee", label: "Payee" },
+    { key: "purpose", label: "Purpose" },
+    { key: "account_name", label: "Category", exportValue: (r) => r.account_name || r.account_code },
+    { key: "amount_paise", label: "Amount (₹)", exportValue: (r) => (Number(r.amount_paise || 0) / 100).toFixed(2) },
+    { key: "paid_from", label: "Paid from" },
+    { key: "payment_mode", label: "Mode" },
+    { key: "utr", label: "UTR" },
+    { key: "status", label: "Status" },
+  ];
+
+  const byCat = useMemo(() => summary?.by_category || [], [summary]);
 
   return (
-    <Card data-testid="expense-record-card">
-      <CardBody>
-        <div className="mb-4 flex items-start gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-vermilion-500/10 text-vermilion-600">
-            <Plus className="h-5 w-5" />
-          </span>
-          <div>
-            <div className="font-display text-xl text-brown-900">Record paid expense</div>
-            <p className="text-sm text-brown-800/55">
-              Saves as paid immediately — reduces bank or cash on Control Tower.
-            </p>
+    <div data-testid="expenses-page" className="space-y-5">
+      <div>
+        <h1 className="mb-1 font-display text-4xl">Expenses</h1>
+        <p className="text-sm text-brown-800/50">
+          Paid spends with bills. Download the sample Excel, fill it, upload to update the database — or record one at a time.
+        </p>
+      </div>
+
+      {summary && (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card><CardBody className="p-4">
+            <div className="text-[10px] uppercase tracking-wider text-brown-800/45">Paid total</div>
+            <div className="mt-1 font-display text-2xl text-vermilion-600">{formatPaise(summary.paid_total_paise)}</div>
+          </CardBody></Card>
+          <Card><CardBody className="p-4">
+            <div className="text-[10px] uppercase tracking-wider text-brown-800/45">Paid expenses</div>
+            <div className="mt-1 font-display text-2xl">{summary.count_paid}</div>
+          </CardBody></Card>
+          <Card><CardBody className="p-4">
+            <div className="text-[10px] uppercase tracking-wider text-brown-800/45">Top category</div>
+            <div className="mt-1 truncate font-display text-lg">
+              {byCat[0] ? `${byCat[0].name} · ${formatPaise(byCat[0].amount_paise)}` : "—"}
+            </div>
+          </CardBody></Card>
+        </div>
+      )}
+
+      <Card data-testid="expense-list-card"><CardBody>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <Label>Status</Label>
+              <Select value={status} onChange={(e) => setStatus(e.target.value)} className="min-w-[120px]">
+                <option value="">All</option>
+                <option value="paid">Paid</option>
+                <option value="voided">Voided</option>
+              </Select>
+            </div>
+            <div>
+              <Label>Category</Label>
+              <Select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className="min-w-[160px]">
+                <option value="">All</option>
+                {categories.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>Paid from</Label>
+              <Select value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)} className="min-w-[120px]">
+                <option value="">All</option>
+                <option value="bank">Bank</option>
+                <option value="cash">Cash</option>
+              </Select>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="subtle" size="sm" disabled={downloading} onClick={downloadSample} data-testid="expense-template-download">
+              <Download className="h-4 w-4" /> {downloading ? "…" : "Download sample"}
+            </Button>
+            <input
+              ref={importRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={onUpload}
+              data-testid="expense-import-input"
+            />
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={uploading || !writeOk}
+              onClick={() => importRef.current?.click()}
+              data-testid="expense-import-upload"
+            >
+              <Upload className="h-4 w-4" /> {uploading ? "Uploading…" : "Upload filled"}
+            </Button>
+            <ExportCsvButton filename="expenses.csv" columns={exportCols} items={items} data-testid="expenses-export-csv" />
+            <Button variant="subtle" size="sm" onClick={load} aria-label="Refresh"><RefreshCw className="h-4 w-4" /></Button>
+            <Button
+              variant="admin"
+              size="sm"
+              disabled={!writeOk}
+              onClick={() => setOpen(true)}
+              data-testid="expense-record-btn"
+            >
+              <Plus className="h-4 w-4" /> Record expense
+            </Button>
           </div>
         </div>
 
-        <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+        {importResult && (
+          <div className="mb-3 rounded-lg border border-sun-400/30 bg-sun-50/60 px-3 py-2 text-sm text-brown-800/80" data-testid="expense-import-result">
+            {importResult.message}
+            {!!(importResult.errors || []).length && (
+              <ul className="mt-1 list-disc pl-5 text-xs text-vermilion-700">
+                {(importResult.errors || []).slice(0, 5).map((e, i) => (
+                  <li key={i}>{e.reason || e.message || JSON.stringify(e)}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {!writeOk && (
+          <p className="mb-3 text-sm text-amber-800">
+            View only — treasurers / convenors can record, import and void expenses.
+          </p>
+        )}
+
+        {loading ? <Spinner className="text-vermilion-500" /> : (
+          <Table>
+            <THead>
+              <TR>
+                <TH>Date</TH>
+                <TH>Voucher</TH>
+                <TH>Payee</TH>
+                <TH>Category</TH>
+                <TH right>Amount</TH>
+                <TH>From</TH>
+                <TH>Status</TH>
+                <TH>Bill</TH>
+                <TH>Actions</TH>
+              </TR>
+            </THead>
+            <tbody>
+              {items.length === 0 && (
+                <TR><TD colSpan={9} className="text-center text-brown-800/45">No expenses yet.</TD></TR>
+              )}
+              {items.map((row) => (
+                <TR key={row.id} data-testid={`expense-row-${row.id}`}>
+                  <TD>{row.date || formatDateIST(row.created_at)}</TD>
+                  <TD className="font-mono text-xs">{row.voucher_no || "—"}</TD>
+                  <TD>
+                    <div className="font-medium">{row.payee || row.claimant_name || "—"}</div>
+                    <div className="line-clamp-1 text-xs text-brown-800/45">{row.purpose}</div>
+                  </TD>
+                  <TD>{row.account_name || row.account_code}</TD>
+                  <TD right>{formatPaise(row.amount_paise)}</TD>
+                  <TD className="capitalize">{row.paid_from || "—"}</TD>
+                  <TD><StatusBadge status={row.status} /></TD>
+                  <TD>
+                    {row.bill_url ? (
+                      <a href={mediaUrl(row.bill_url)} target="_blank" rel="noreferrer" className="inline-flex text-vermilion-600" data-testid={`expense-bill-${row.id}`}>
+                        <ExternalLink className="h-4 w-4" />
+                      </a>
+                    ) : "—"}
+                  </TD>
+                  <TD>
+                    {writeOk && row.status === "paid" && (
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        disabled={voiding === row.id}
+                        onClick={() => voidExpense(row)}
+                        data-testid={`expense-void-${row.id}`}
+                      >
+                        <Ban className="h-3.5 w-3.5" /> {voiding === row.id ? "…" : "Void"}
+                      </Button>
+                    )}
+                  </TD>
+                </TR>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </CardBody></Card>
+
+      <Dialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Record paid expense"
+        size="lg"
+        footer={(
+          <>
+            <Button variant="subtle" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="admin" onClick={submit} disabled={busy || !writeOk} data-testid="expense-submit-btn">
+              <Receipt className="h-4 w-4" /> {busy ? "Saving…" : "Record expense"}
+            </Button>
+          </>
+        )}
+      >
+        <p className="mb-3 text-sm text-brown-800/55">
+          Saves as paid immediately — reduces bank or cash on Control Tower.
+        </p>
+        <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2" data-testid="expense-record-form">
           <div>
             <Label required>Date</Label>
             <Input type="date" value={form.date} onChange={set("date")} data-testid="expense-date" />
           </div>
           <div>
             <Label required>Amount (₹)</Label>
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.amount_rupees}
-              onChange={set("amount_rupees")}
-              placeholder="0"
-              data-testid="expense-amount"
-            />
+            <Input type="number" min={0} step="0.01" value={form.amount_rupees} onChange={set("amount_rupees")} placeholder="0" data-testid="expense-amount" />
           </div>
           <div className="sm:col-span-2">
             <Label required>Payee</Label>
@@ -217,11 +437,11 @@ function RecordExpense({ writeOk, onRecorded }) {
           <div className="sm:col-span-2">
             <Label>Bill / receipt</Label>
             <div className="mt-1 flex flex-wrap items-center gap-3">
-              <Button type="button" variant="subtle" size="sm" onClick={() => fileRef.current?.click()}>
+              <Button type="button" variant="subtle" size="sm" onClick={() => billRef.current?.click()}>
                 <Upload className="h-4 w-4" /> {bill ? "Change file" : "Upload bill"}
               </Button>
               <input
-                ref={fileRef}
+                ref={billRef}
                 type="file"
                 accept="image/*,.pdf,application/pdf"
                 className="hidden"
@@ -239,244 +459,8 @@ function RecordExpense({ writeOk, onRecorded }) {
             <Label>Notes</Label>
             <Input value={form.notes} onChange={set("notes")} placeholder="Internal note (optional)" data-testid="expense-notes" />
           </div>
-          <div className="sm:col-span-2">
-            <Button type="submit" variant="admin" disabled={busy} data-testid="expense-submit-btn">
-              <Receipt className="h-4 w-4" /> {busy ? "Saving…" : "Record expense"}
-            </Button>
-          </div>
         </form>
-      </CardBody>
-    </Card>
-  );
-}
-
-function ExpenseList({ writeOk }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState("");
-  const [accountCode, setAccountCode] = useState("");
-  const [paidFrom, setPaidFrom] = useState("");
-  const [categories, setCategories] = useState([]);
-  const [voiding, setVoiding] = useState("");
-
-  const load = useCallback(() => {
-    setLoading(true);
-    const params = {};
-    if (status) params.status = status;
-    if (accountCode) params.account_code = accountCode;
-    if (paidFrom) params.paid_from = paidFrom;
-    api.get("/admin/expenses", { params })
-      .then((r) => setItems(r.data.items || []))
-      .catch(() => toast.error("Could not load expenses"))
-      .finally(() => setLoading(false));
-  }, [status, accountCode, paidFrom]);
-
-  useEffect(() => {
-    api.get("/admin/expenses/categories").then((r) => setCategories(r.data.items || [])).catch(() => {});
-  }, []);
-  useEffect(load, [load]);
-
-  const voidExpense = async (row) => {
-    if (!writeOk) return;
-    if (!window.confirm(`Void expense ${row.voucher_no || row.id}? This reverses the ledger and restores balance.`)) return;
-    setVoiding(row.id);
-    try {
-      await api.post(`/admin/expenses/${row.id}/void`, { reason: "Voided from Expenses admin" });
-      toast.success("Expense voided");
-      load();
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Could not void expense");
-    } finally {
-      setVoiding("");
-    }
-  };
-
-  const exportCols = [
-    { key: "date", label: "Date" },
-    { key: "voucher_no", label: "Voucher" },
-    { key: "payee", label: "Payee" },
-    { key: "purpose", label: "Purpose" },
-    { key: "account_name", label: "Category", exportValue: (r) => r.account_name || r.account_code },
-    { key: "amount_paise", label: "Amount (₹)", exportValue: (r) => (Number(r.amount_paise || 0) / 100).toFixed(2) },
-    { key: "paid_from", label: "Paid from" },
-    { key: "payment_mode", label: "Mode" },
-    { key: "utr", label: "UTR" },
-    { key: "status", label: "Status" },
-  ];
-
-  return (
-    <Card data-testid="expense-list-card">
-      <CardBody>
-        <div className="mb-3 flex flex-wrap items-end gap-2">
-          <div>
-            <Label>Status</Label>
-            <Select value={status} onChange={(e) => setStatus(e.target.value)} className="min-w-[120px]">
-              <option value="">All</option>
-              <option value="paid">Paid</option>
-              <option value="voided">Voided</option>
-              <option value="submitted">Submitted</option>
-            </Select>
-          </div>
-          <div>
-            <Label>Category</Label>
-            <Select value={accountCode} onChange={(e) => setAccountCode(e.target.value)} className="min-w-[160px]">
-              <option value="">All</option>
-              {categories.map((c) => (
-                <option key={c.code} value={c.code}>{c.name}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label>Paid from</Label>
-            <Select value={paidFrom} onChange={(e) => setPaidFrom(e.target.value)} className="min-w-[120px]">
-              <option value="">All</option>
-              <option value="bank">Bank</option>
-              <option value="cash">Cash</option>
-            </Select>
-          </div>
-          <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
-          <ExportCsvButton filename="expenses.csv" columns={exportCols} items={items} data-testid="expenses-export-csv" />
-        </div>
-
-        {loading ? <Spinner className="text-vermilion-500" /> : (
-          <Table>
-            <THead>
-              <TR>
-                <TH>Date</TH>
-                <TH>Voucher</TH>
-                <TH>Payee</TH>
-                <TH>Category</TH>
-                <TH right>Amount</TH>
-                <TH>From</TH>
-                <TH>Status</TH>
-                <TH>Bill</TH>
-                <TH>Actions</TH>
-              </TR>
-            </THead>
-            <tbody>
-              {items.length === 0 && (
-                <TR><TD colSpan={9} className="text-center text-brown-800/45">No expenses yet.</TD></TR>
-              )}
-              {items.map((row) => (
-                <TR key={row.id} data-testid={`expense-row-${row.id}`}>
-                  <TD>{row.date || formatDateIST(row.created_at)}</TD>
-                  <TD className="font-mono text-xs">{row.voucher_no || "—"}</TD>
-                  <TD>
-                    <div className="font-medium">{row.payee || row.claimant_name || "—"}</div>
-                    <div className="text-xs text-brown-800/45 line-clamp-1">{row.purpose}</div>
-                  </TD>
-                  <TD>{row.account_name || row.account_code}</TD>
-                  <TD right>{formatPaise(row.amount_paise)}</TD>
-                  <TD className="capitalize">{row.paid_from || "—"}</TD>
-                  <TD><StatusBadge status={row.status} /></TD>
-                  <TD>
-                    {row.bill_url ? (
-                      <a href={mediaUrl(row.bill_url)} target="_blank" rel="noreferrer" className="inline-flex text-vermilion-600" data-testid={`expense-bill-${row.id}`}>
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    ) : "—"}
-                  </TD>
-                  <TD>
-                    {writeOk && row.status === "paid" && (
-                      <Button
-                        variant="subtle"
-                        size="sm"
-                        disabled={voiding === row.id}
-                        onClick={() => voidExpense(row)}
-                        data-testid={`expense-void-${row.id}`}
-                      >
-                        <Ban className="h-3.5 w-3.5" /> {voiding === row.id ? "…" : "Void"}
-                      </Button>
-                    )}
-                  </TD>
-                </TR>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
-
-function ExpenseSummary() {
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    api.get("/admin/expenses")
-      .then((r) => setSummary(r.data.summary || null))
-      .catch(() => toast.error("Could not load summary"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(load, [load]);
-
-  const byCat = useMemo(() => summary?.by_category || [], [summary]);
-  const byFrom = useMemo(() => summary?.by_paid_from || [], [summary]);
-
-  return (
-    <div className="space-y-4" data-testid="expense-summary">
-      <div className="flex justify-end">
-        <Button variant="subtle" size="sm" onClick={load}><RefreshCw className="h-4 w-4" /></Button>
-      </div>
-      {loading || !summary ? (
-        <Spinner className="text-vermilion-500" />
-      ) : (
-        <>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Card><CardBody>
-              <div className="text-[10px] uppercase tracking-wider text-brown-800/45">Paid total</div>
-              <div className="mt-1 font-display text-3xl text-vermilion-600">{formatPaise(summary.paid_total_paise)}</div>
-            </CardBody></Card>
-            <Card><CardBody>
-              <div className="text-[10px] uppercase tracking-wider text-brown-800/45">Paid expenses</div>
-              <div className="mt-1 font-display text-3xl">{summary.count_paid}</div>
-            </CardBody></Card>
-            <Card><CardBody>
-              <div className="text-[10px] uppercase tracking-wider text-brown-800/45">All records</div>
-              <div className="mt-1 font-display text-3xl">{summary.count_all}</div>
-            </CardBody></Card>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card><CardBody>
-              <h3 className="mb-3 font-display text-xl">By category</h3>
-              {!byCat.length ? (
-                <p className="text-sm text-brown-800/45">No paid expenses yet.</p>
-              ) : (
-                <ul className="space-y-2 text-sm">
-                  {byCat.map((row) => (
-                    <li key={row.account_code} className="flex items-center justify-between gap-2 border-b border-sun-400/20 pb-2">
-                      <span>{row.name} <span className="text-xs text-brown-800/40">({row.account_code})</span></span>
-                      <span className="font-medium tabular-nums">{formatPaise(row.amount_paise)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardBody></Card>
-            <Card><CardBody>
-              <h3 className="mb-3 font-display text-xl">By paid from</h3>
-              {!byFrom.length ? (
-                <p className="text-sm text-brown-800/45">No paid expenses yet.</p>
-              ) : (
-                <ul className="space-y-2 text-sm">
-                  {byFrom.map((row) => (
-                    <li key={row.paid_from} className="flex items-center justify-between gap-2 border-b border-sun-400/20 pb-2">
-                      <span className="capitalize">{row.paid_from}</span>
-                      <span className="font-medium tabular-nums">{formatPaise(row.amount_paise)}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="mt-4 text-xs text-brown-800/50">
-                Closing cash position on Control Tower updates when expenses are paid or voided.
-              </p>
-            </CardBody></Card>
-          </div>
-        </>
-      )}
+      </Dialog>
     </div>
   );
 }

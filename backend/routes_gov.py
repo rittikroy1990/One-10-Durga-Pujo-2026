@@ -64,6 +64,43 @@ async def auth_me(user: dict = Depends(get_current_user)):
     return {**safe, "permissions": sorted(user_permissions(user))}
 
 
+@router.post("/auth/change-password")
+async def auth_change_password(body: dict = Body(...), request: Request = None,
+                               user: dict = Depends(get_current_user)):
+    """Any logged-in committee user can change their own password."""
+    from auth import hash_password, verify_password
+
+    current = (body.get("current_password") or body.get("old_password") or "").strip()
+    new_password = (body.get("new_password") or body.get("password") or "").strip()
+    confirm = (body.get("confirm_password") or "").strip()
+
+    if not current or not new_password:
+        raise HTTPException(status_code=400, detail="Current and new password are required.")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters.")
+    if confirm and confirm != new_password:
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match.")
+    if new_password == current:
+        raise HTTPException(status_code=400, detail="New password must be different from the current one.")
+
+    db_user = await db.users.find_one({"user_id": user["user_id"]})
+    if not db_user or not verify_password(current, db_user.get("password_hash", "")):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"password_hash": hash_password(new_password), "updated_at": iso()}},
+    )
+    await audit(
+        "auth.password.change",
+        actor=user,
+        entity_type="user",
+        entity_id=user["user_id"],
+        request=request,
+    )
+    return {"ok": True, "message": "Password updated."}
+
+
 @router.post("/auth/logout")
 async def auth_logout(request: Request, response: Response):
     token = request.cookies.get("session_token") or (
@@ -81,12 +118,92 @@ async def auth_roles(user: dict = Depends(require("users:manage", "audit:read", 
 
 
 # =============================================================== USERS
+def _public_user(u: dict) -> dict:
+    safe = {k: v for k, v in (u or {}).items() if k not in ("_id", "password_hash")}
+    safe["sod_conflicts"] = sod_conflicts(safe.get("roles") or [])
+    safe.setdefault("is_signatory", False)
+    safe.setdefault("designation", "")
+    safe.setdefault("login_id", "")
+    return safe
+
+
 @router.get("/users")
-async def list_users(user: dict = Depends(require("users:manage"))):
-    users = await db.users.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    for u in users:
-        u["sod_conflicts"] = sod_conflicts(u.get("roles", []))
-    return {"items": users}
+async def list_users(user: dict = Depends(require("users:manage", "settings:read", "audit:read"))):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(500)
+    return {"items": [_public_user(u) for u in users]}
+
+
+@router.post("/users")
+async def create_user(body: dict = Body(...), request: Request = None,
+                      user: dict = Depends(require("users:manage"))):
+    from auth import hash_password
+    from db import new_id
+    lid = (body.get("login_id") or "").strip().lower()
+    name = (body.get("name") or "").strip()
+    if not lid or not name:
+        raise HTTPException(status_code=400, detail="login_id and name are required.")
+    if not lid.isalnum():
+        raise HTTPException(status_code=400, detail="login_id must be letters/numbers only.")
+    if await db.users.find_one({"login_id": lid}):
+        raise HTTPException(status_code=409, detail="That login ID is already taken.")
+    password = (body.get("password") or "").strip() or "one10"
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
+    roles = [r for r in (body.get("roles") or ["committee_member"]) if r in ROLES]
+    if not roles:
+        roles = ["committee_member"]
+    designation = (body.get("designation") or "").strip()[:80]
+    doc = {
+        "user_id": new_id("user"),
+        "login_id": lid,
+        "email": f"{lid}@committee.one10",
+        "name": name[:120],
+        "designation": designation,
+        "picture": "",
+        "roles": roles,
+        "password_hash": hash_password(password),
+        "is_active": True,
+        "is_demo": False,
+        "is_committee": True,
+        "is_signatory": bool(body.get("is_signatory")),
+        "created_at": iso(),
+        "updated_at": iso(),
+    }
+    await db.users.insert_one(doc)
+    await audit(
+        "user.create", actor=user, entity_type="user", entity_id=doc["user_id"],
+        after={"login_id": lid, "roles": roles, "is_signatory": doc["is_signatory"]},
+        request=request,
+    )
+    return {"ok": True, "user": _public_user(doc)}
+
+
+@router.put("/users/{uid}")
+async def update_user(uid: str, body: dict = Body(...), request: Request = None,
+                      user: dict = Depends(require("users:manage"))):
+    target = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    patch = {}
+    if "name" in body:
+        patch["name"] = str(body.get("name") or "").strip()[:120]
+    if "designation" in body:
+        patch["designation"] = str(body.get("designation") or "").strip()[:80]
+    if "is_signatory" in body:
+        patch["is_signatory"] = bool(body.get("is_signatory"))
+    if "is_active" in body:
+        patch["is_active"] = bool(body.get("is_active"))
+    if not patch:
+        raise HTTPException(status_code=400, detail="Nothing to update.")
+    patch["updated_at"] = iso()
+    await db.users.update_one({"user_id": uid}, {"$set": patch})
+    await audit(
+        "user.update", actor=user, entity_type="user", entity_id=uid,
+        before={k: target.get(k) for k in patch if k != "updated_at"},
+        after=patch, request=request,
+    )
+    updated = await db.users.find_one({"user_id": uid}, {"_id": 0, "password_hash": 0})
+    return {"ok": True, "user": _public_user(updated)}
 
 
 @router.put("/users/{uid}/roles")
@@ -97,11 +214,32 @@ async def set_roles(uid: str, body: dict = Body(...), request: Request = None,
         raise HTTPException(status_code=404, detail="User not found.")
     roles = [r for r in body.get("roles", []) if r in ROLES]
     conflicts = sod_conflicts(roles)
-    await db.users.update_one({"user_id": uid}, {"$set": {"roles": roles}})
+    await db.users.update_one({"user_id": uid}, {"$set": {"roles": roles, "updated_at": iso()}})
     await audit("user.roles.change", actor=user, entity_type="user", entity_id=uid,
                 before={"roles": target.get("roles")}, after={"roles": roles, "conflicts": conflicts},
                 request=request)
     return {"ok": True, "roles": roles, "sod_conflicts": conflicts}
+
+
+@router.post("/users/{uid}/password")
+async def set_user_password(uid: str, body: dict = Body(...), request: Request = None,
+                            user: dict = Depends(require("users:manage"))):
+    from auth import hash_password
+    target = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+    password = (body.get("password") or "").strip()
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
+    await db.users.update_one(
+        {"user_id": uid},
+        {"$set": {"password_hash": hash_password(password), "updated_at": iso()}},
+    )
+    await audit(
+        "user.password.set", actor=user, entity_type="user", entity_id=uid,
+        after={"login_id": target.get("login_id")}, request=request,
+    )
+    return {"ok": True, "message": "Password updated."}
 
 
 # =============================================================== SETTINGS
@@ -151,7 +289,15 @@ def _payment_qr_paths():
         root / "frontend" / "public" / "images" / "payment-qr.png",
         root / "frontend" / "build" / "images" / "payment-qr.png",
         root / "_uploads" / "payment-qr.png",
+        *_live_web_image_paths("payment-qr.png"),
     ]
+
+
+def _live_web_image_paths(filename: str):
+    """nginx serves /images/ from the synced web root, not the repo build dir."""
+    from pathlib import Path
+    live = Path("/var/www/one10events/build/images")
+    return [live / filename] if live.is_dir() else []
 
 
 @router.get("/admin/payment-qr")
@@ -283,6 +429,147 @@ async def admin_upload_payment_qr(request: Request = None,
         "vpa": decoded_vpa or upi.get("vpa") or "",
         "payee_name": decoded_payee or upi.get("payee_name") or "",
         "message": "Payment QR saved and upload deactivated.",
+    }
+
+
+# =============================================================== ONE-TIME FOOD PAYMENT QR UPLOAD
+def _food_payment_qr_paths():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    return [
+        root / "frontend" / "public" / "images" / "food-payment-qr.png",
+        root / "frontend" / "build" / "images" / "food-payment-qr.png",
+        root / "_uploads" / "food-payment-qr.png",
+        *_live_web_image_paths("food-payment-qr.png"),
+    ]
+
+
+@router.get("/admin/food-payment-qr")
+async def admin_food_payment_qr_status(user: dict = Depends(require("settings:read", "settings:manage", "receipts:manage", "payments:manage", "households:write"))):
+    settings = await get_settings()
+    upi = (settings.get("organisation") or {}).get("food_upi") or {}
+    locked = bool(upi.get("qr_locked"))
+    url = upi.get("static_qr_url") or "/images/food-payment-qr.png"
+    return {
+        "locked": locked,
+        "uploaded": locked or bool(upi.get("qr_uploaded_at")),
+        "url": url,
+        "uploaded_at": upi.get("qr_uploaded_at"),
+        "uploaded_by": upi.get("qr_uploaded_by"),
+        "vpa": upi.get("vpa") or "",
+        "payee_name": upi.get("payee_name") or "",
+        "can_upload": not locked,
+    }
+
+
+@router.post("/admin/food-payment-qr")
+async def admin_upload_food_payment_qr(request: Request = None,
+                                       user: dict = Depends(require("settings:manage", "receipts:manage", "payments:manage", "households:write")),
+                                       file: UploadFile = File(...)):
+    """One-time upload of the Food UPI QR. After success, further uploads are locked."""
+    settings = await get_settings()
+    org = dict(settings.get("organisation") or {})
+    upi = dict(org.get("food_upi") or {})
+    if upi.get("qr_locked"):
+        raise HTTPException(
+            status_code=409,
+            detail="Food QR upload is deactivated — a QR was already uploaded once.",
+        )
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file.")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="QR image too large (max 8 MB).")
+    ctype = (file.content_type or "").lower()
+    name = (file.filename or "").lower()
+    if not (ctype.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        raise HTTPException(status_code=400, detail="Upload a PNG or JPG QR image.")
+
+    decoded_vpa = ""
+    decoded_payee = ""
+    decoded_uri = ""
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(data)).convert("RGB")
+        buf = _io.BytesIO()
+        im.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        try:
+            from pyzbar.pyzbar import decode as _zbar_decode
+            from urllib.parse import parse_qs, urlparse, unquote
+            for sym in _zbar_decode(im) or []:
+                raw = (sym.data or b"").decode("utf-8", errors="ignore").strip()
+                if not raw.lower().startswith("upi://"):
+                    continue
+                decoded_uri = raw
+                qs = parse_qs(urlparse(raw).query)
+                decoded_vpa = unquote((qs.get("pa") or [""])[0]).strip()
+                decoded_payee = unquote((qs.get("pn") or [""])[0]).strip()
+                break
+        except Exception:
+            pass
+    except Exception:
+        png_bytes = data
+
+    written = []
+    for path in _food_payment_qr_paths():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png_bytes)
+        written.append(str(path))
+
+    stamp = iso()
+    cache_bust = stamp.replace(":", "").replace("-", "").replace(".", "")[:18]
+    static_url = f"/images/food-payment-qr.png?v={cache_bust}"
+    upi.update({
+        "enabled": True,
+        "static_qr_url": static_url,
+        "qr_locked": True,
+        "qr_uploaded_at": stamp,
+        "qr_uploaded_by": user.get("email") or user.get("user_id") or "",
+        "instructions": (
+            "Scan the Food UPI QR with any UPI app and pay the exact cart total shown. "
+            "Then upload your payment screenshot and enter the UTR / UPI reference number."
+        ),
+    })
+    if decoded_vpa:
+        upi["vpa"] = decoded_vpa
+    if decoded_payee:
+        upi["payee_name"] = decoded_payee
+    if decoded_uri:
+        upi["merchant_upi_uri"] = decoded_uri
+    result = await db.application_settings.update_one(
+        {"id": "app_settings"},
+        {"$set": {"organisation.food_upi": upi, "updated_at": stamp}},
+    )
+    if result.matched_count == 0:
+        await db.application_settings.update_one(
+            {},
+            {"$set": {"organisation.food_upi": upi, "updated_at": stamp}},
+        )
+    await audit(
+        "food_payment_qr.upload",
+        actor=user,
+        entity_type="organisation.food_upi",
+        entity_id="food_payment_qr",
+        after={
+            "url": static_url,
+            "bytes": len(png_bytes),
+            "paths": written,
+            "vpa": decoded_vpa or upi.get("vpa"),
+            "payee_name": decoded_payee or upi.get("payee_name"),
+        },
+        request=request,
+    )
+    return {
+        "ok": True,
+        "locked": True,
+        "url": static_url,
+        "uploaded_at": stamp,
+        "vpa": decoded_vpa or upi.get("vpa") or "",
+        "payee_name": decoded_payee or upi.get("payee_name") or "",
+        "message": "Food QR saved and upload deactivated.",
     }
 
 
@@ -476,14 +763,33 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
         m = r.get("method", "other")
         method_totals[m] = method_totals.get(m, 0) + r.get("total_amount", 0)
 
-    # by tower
-    towers = await db.towers.find({}, {"_id": 0}).sort("name", 1).to_list(50)
+    # by tower (One10 has Towers 1–11 only)
+    towers = await db.towers.find(
+        {"id": {"$ne": "tower_12"}, "name": {"$ne": "Tower 12"}},
+        {"_id": 0},
+    ).to_list(50)
+
+    def _tower_num(name: str) -> int:
+        digits = "".join(ch for ch in str(name or "") if ch.isdigit())
+        return int(digits) if digits else 999
+
+    towers.sort(key=lambda t: _tower_num(t.get("name")))
     by_tower = []
     for t in towers:
         reg = await db.households.count_documents({"tower_id": t["id"], "is_deleted": {"$ne": True}})
         hh_ids = await db.households.distinct("id", {"tower_id": t["id"]})
-        pd = await db.receipts.count_documents({"household_id": {"$in": hh_ids}, "status": "issued"})
-        by_tower.append({"tower": t["name"], "registered": reg, "paid": pd})
+        pd = 0
+        amount = 0
+        async for r in db.receipts.find({"household_id": {"$in": hh_ids}, "status": "issued"}):
+            pd += 1
+            amount += int(r.get("total_amount") or 0)
+        by_tower.append({
+            "tower": t["name"],
+            "tower_id": t["id"],
+            "registered": reg,
+            "paid": pd,
+            "amount": amount,
+        })
 
     # daily trend
     trend = {}
@@ -795,7 +1101,16 @@ async def _rep_trial_balance():
 
 
 async def _rep_collection_by_tower():
-    towers = await db.towers.find({}, {"_id": 0}).to_list(50)
+    towers = await db.towers.find(
+        {"id": {"$ne": "tower_12"}, "name": {"$ne": "Tower 12"}},
+        {"_id": 0},
+    ).to_list(50)
+
+    def _tower_num(name: str) -> int:
+        digits = "".join(ch for ch in str(name or "") if ch.isdigit())
+        return int(digits) if digits else 999
+
+    towers.sort(key=lambda t: _tower_num(t.get("name")))
     rows = []
     for t in towers:
         hh_ids = await db.households.distinct("id", {"tower_id": t["id"]})

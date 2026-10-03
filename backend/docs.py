@@ -20,20 +20,20 @@ NOT_BANK_MUTED = colors.HexColor("#A85A2A")
 
 
 def receipt_is_bank_verified(receipt: dict) -> bool:
-    """DB/collection receipts are bank verified; screenshot self-serve is not.
+    """True when the receipt has been matched to a bank statement (or Excel import).
 
-    issuance_source == "payment_screenshot" → not bank verified (issued only).
-    Everything else (including legacy rows with bank_verified=False) → bank verified
-    when the receipt is found in the database / issued via collection.
+    Explicit bank_verified=True always wins (treasurer confirmation after screenshot issue).
+    payment_screenshot without that flag → not bank verified.
+    Collection / Excel / legacy rows → bank verified.
     """
+    if receipt.get("bank_verified") is True:
+        return True
     source = (receipt.get("issuance_source") or "").strip()
     if source == "payment_screenshot":
         return False
     if source == "collection" and receipt.get("bank_verified") is False:
         # Explicit collection override (e.g. cash pending settlement)
         return False
-    if receipt.get("bank_verified") is True:
-        return True
     # Legacy rows without payment_screenshot source: treat as bank verified
     return True
 

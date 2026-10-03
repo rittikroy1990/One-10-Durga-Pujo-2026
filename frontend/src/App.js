@@ -33,6 +33,8 @@ import Collection from "./pages/admin/Collection";
 import Expenses from "./pages/admin/Expenses";
 import FoodAdmin from "./pages/admin/FoodAdmin";
 import FoodMenuAdmin from "./pages/admin/FoodMenuAdmin";
+import AdminPortal from "./pages/admin/AdminPortal";
+import PaymentQrs from "./pages/admin/PaymentQrs";
 import Reconciliation from "./pages/admin/Reconciliation";
 import Accounting from "./pages/admin/Accounting";
 import Procurement from "./pages/admin/Procurement";
@@ -82,6 +84,8 @@ function AppRoutes() {
         <Route path="expenses" element={<Expenses />} />
         <Route path="food" element={<FoodAdmin />} />
         <Route path="food-menu" element={<FoodMenuAdmin />} />
+        <Route path="payment-qrs" element={<PaymentQrs />} />
+        <Route path="portal" element={<AdminPortal />} />
         <Route path="reconciliation" element={<Reconciliation />} />
         <Route path="accounting" element={<Accounting />} />
         <Route path="procurement" element={<Procurement />} />

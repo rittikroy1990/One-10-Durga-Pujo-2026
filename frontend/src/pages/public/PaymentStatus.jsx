@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2, Share2, BadgeCheck, Upload } from "lucide-react";
+import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2, Share2, BadgeCheck, Upload, Ticket } from "lucide-react";
 import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Input, Label } from "../../components/ui";
@@ -131,6 +131,7 @@ export default function PaymentStatus() {
           screenshot_url: null,
           acknowledge_available: false,
         });
+        setTries((t) => t + 1);
       } else if (r.data?.status === "paid") {
         setTries((t) => t + 1);
         toast.success("Payment acknowledged.");
@@ -257,9 +258,24 @@ export default function PaymentStatus() {
                   Payment recorded via UPI QR.
                 </p>
               )}
+              {data.food_voucher_token && (
+                <div className="mt-6 rounded-2xl border border-emerald-600/25 bg-emerald-50 p-4 text-left" data-testid="food-voucher-box">
+                  <div className="flex items-center gap-2 font-semibold text-emerald-900">
+                    <Ticket className="h-5 w-5" /> Your food voucher is ready
+                  </div>
+                  <p className="mt-1 text-sm text-emerald-900/75">
+                    Download or print it, then show it to a committee member to collect your food coupons.
+                  </p>
+                  <a href={`${API}/food/voucher/${data.food_voucher_token}/pdf`} target="_blank" rel="noreferrer" className="mt-3 inline-flex">
+                    <Button variant="primary" data-testid="open-food-voucher-btn">
+                      <Ticket className="h-4 w-4" /> Download food voucher
+                    </Button>
+                  </a>
+                </div>
+              )}
               <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer" className="sm:inline-flex">
-                  <Button variant="primary" className="w-full sm:w-auto" data-testid="download-receipt-btn">
+                  <Button variant={data.food_voucher_token ? "subtle" : "primary"} className="w-full sm:w-auto" data-testid="download-receipt-btn">
                     <FileText className="h-4 w-4" /> Download receipt
                   </Button>
                 </a>
@@ -294,6 +310,11 @@ export default function PaymentStatus() {
                 <b>{data.paid_amount_fmt || formatPaise(data.amount_paid_paise)}</b>.
               </p>
               <p className="mt-3 text-sm text-brown-800/80">{data.message}</p>
+              {data.kind === "food_subscription" && (
+                <p className="mt-2 text-xs text-brown-800/60">
+                  Your food voucher (for collecting food coupons) unlocks once the full amount is paid.
+                </p>
+              )}
 
               <div className="mt-6 rounded-2xl border border-vermilion-500/25 bg-white/70 p-5 text-left">
                 <div className="text-xs font-semibold uppercase tracking-[0.18em] text-vermilion-600">Balance due</div>

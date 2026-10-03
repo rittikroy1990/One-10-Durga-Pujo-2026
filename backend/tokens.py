@@ -7,6 +7,18 @@ SECRET = os.environ.get("RECEIPT_TOKEN_SECRET", "dev-secret")
 
 _receipt = URLSafeSerializer(SECRET, salt="receipt-verify")
 _status = URLSafeTimedSerializer(SECRET, salt="payment-status")
+_food_voucher = URLSafeSerializer(SECRET, salt="food-voucher")
+
+
+def food_voucher_token(food_id: str) -> str:
+    return _food_voucher.dumps({"f": food_id})
+
+
+def read_food_voucher_token(token: str) -> str | None:
+    try:
+        return _food_voucher.loads(token).get("f")
+    except BadSignature:
+        return None
 
 
 def receipt_token(receipt_id: str) -> str:
@@ -31,3 +43,4 @@ def read_status_token(token: str, max_age: int = 86400) -> str | None:
         return data.get("i")
     except (BadSignature, SignatureExpired):
         return None
+

@@ -5,7 +5,7 @@ import {
   UtensilsCrossed, Info, Clock, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
   Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon, Package,
 } from "lucide-react";
-import api from "../../lib/api";
+import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Input, Label, Select, Spinner, Dialog } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -19,6 +19,59 @@ function parseMenuDishes(text) {
     .split(/[,;•|]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+// Fallbacks for the server's COMPLIMENTARY_POLICY / COMPLIMENTARY_RULES (menu_meta).
+const DEFAULT_FREE_POLICY = [
+  { key: "ashtami_lunch", label: "Ashtami lunch", category: "lunch", day_code: "ashtami", free: 4 },
+  { key: "breakfast", label: "breakfast", category: "breakfast", free: 3, per_day: true },
+];
+const DEFAULT_FREE_RULES = [
+  { key: "ashtami_lunch", label: "Ashtami lunch", category: "lunch", day_code: "ashtami", free: 4, group: "ashtami_lunch", group_label: "Ashtami lunch" },
+  ...["sasthi", "saptami", "saptami_ashtami", "ashtami", "nabami", "dashami"].map((d) => ({
+    key: `breakfast_${d}`, label: "breakfast", category: "breakfast", day_code: d, free: 3, group: "breakfast", group_label: "breakfast",
+  })),
+];
+
+/** "3 free breakfasts daily + 4 free Ashtami lunches" */
+function describePolicy(policy) {
+  return [...policy].reverse()
+    .map((p) => `${p.free} free ${pluralMeal(p.label, p.free)}${p.per_day ? " daily" : ""}`)
+    .join(" + ");
+}
+
+function freeKeyFor(rules, category, dayCode) {
+  const rule = rules.find((r) => r.category === category && (!r.day_code || r.day_code === dayCode));
+  return rule ? rule.key : "";
+}
+
+function pluralMeal(label, n) {
+  if (n === 1) return label;
+  return /(ch|sh)$/.test(label) ? `${label}es` : `${label}s`;
+}
+
+/** "5 breakfasts + 4 Ashtami lunches" from per-rule counts, summed per group (e.g. all days' breakfasts). */
+function describeFree(rules, counts) {
+  const groups = [];
+  rules.forEach((r) => {
+    const n = counts?.[r.key] || 0;
+    if (!n) return;
+    const label = r.group_label || r.label;
+    const g = groups.find((x) => x.label === label);
+    if (g) g.n += n;
+    else groups.push({ label, n });
+  });
+  return groups.map((g) => `${g.n} ${pluralMeal(g.label, g.n)}`).join(" + ");
+}
+
+/** "For everyone" plates (same for veg and non-veg) show under both diet filters. */
+function dietMatches(item, diet) {
+  return !diet || item.diet === diet || !!item.for_all_diets || item.category === "breakfast_packet";
+}
+
+function dietTag(item) {
+  if (!item.diet_label) return "";
+  return item.for_all_diets ? `${item.diet_label} · For everyone` : item.diet_label;
 }
 
 const MEAL_ICON = {
@@ -66,6 +119,63 @@ function formatMenuDate(isoDate) {
   } catch {
     return isoDate;
   }
+}
+
+function shortDate(isoDate) {
+  const [y, m, d] = String(isoDate || "").split("-").map(Number);
+  if (!y || !m || !d) return "";
+  return new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+const DIET_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "veg", label: "Veg", dot: "bg-emerald-600" },
+  { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
+];
+
+function DietToggle({ value, onChange }) {
+  return (
+    <div role="radiogroup" aria-label="Veg or non-veg" className="inline-flex w-full rounded-full border border-sun-400/40 bg-sun-50/60 p-1 sm:w-auto" data-testid="food-diet-toggle">
+      {DIET_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value || "all"}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(opt.value)}
+            className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition sm:flex-none ${
+              active ? "bg-white text-brown-900 shadow-sm ring-1 ring-sun-400/40" : "text-brown-800/60 hover:text-brown-900"
+            }`}
+            data-testid={`food-diet-${opt.value || "all"}`}
+          >
+            {opt.dot ? <span className={`h-2.5 w-2.5 rounded-sm ${opt.dot}`} /> : null}
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Chip({ active, onClick, children, testId }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={`inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition ${
+        active
+          ? "border-vermilion-500 bg-vermilion-500 text-white"
+          : "border-brown-800/15 bg-white text-brown-800/75 hover:border-vermilion-500/50"
+      }`}
+      data-testid={testId}
+    >
+      {active ? <Check className="h-3.5 w-3.5" /> : null}
+      {children}
+    </button>
+  );
 }
 
 function StepBar({ current, paymentEnabled }) {
@@ -161,7 +271,16 @@ export default function Food() {
   const [screenshot, setScreenshot] = useState(null);
   const [cart, setCart] = useState({});
   const [menuDetail, setMenuDetail] = useState(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [dayFilter, setDayFilter] = useState("");
+  const [dietFilter, setDietFilter] = useState("");
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quick, setQuick] = useState({
+    diet: "veg",
+    days: [],
+    meals: ["breakfast", "lunch", "dinner"],
+    people: 1,
+  });
   const [form, setForm] = useState({
     name: "",
     mobile: "",
@@ -207,7 +326,44 @@ export default function Food() {
     return map;
   }, [menu, days]);
 
-  const cartLines = useMemo(() => {
+  const [flatFree, setFlatFree] = useState(null);
+  const [flatSubscribed, setFlatSubscribed] = useState(null);
+  const [mobileOk, setMobileOk] = useState(null);
+  const checkMobile = form.mobile.length === 10 ? form.mobile : "";
+  useEffect(() => {
+    setFlatFree(null);
+    setFlatSubscribed(null);
+    setMobileOk(null);
+    if (!form.flat_id) return;
+    let live = true;
+    api.get("/food/complimentary", { params: { flat_id: form.flat_id, mobile: checkMobile } })
+      .then((r) => {
+        if (!live) return;
+        setFlatFree(r.data.remaining || {});
+        setFlatSubscribed(r.data.subscribed !== false);
+        setMobileOk(r.data.mobile_ok ?? null);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [form.flat_id, checkMobile]);
+  const noFreeMeals = flatSubscribed === false || (flatSubscribed && mobileOk === false);
+
+  const freeRules = useMemo(
+    () => (menu?.menu_meta?.complimentary_policy ? menu.menu_meta.complimentary_rules : null) || DEFAULT_FREE_RULES,
+    [menu],
+  );
+  const freePolicy = menu?.menu_meta?.complimentary_policy || DEFAULT_FREE_POLICY;
+  const fullQuota = useMemo(
+    () => Object.fromEntries(freeRules.map((r) => [r.key, r.free])),
+    [freeRules],
+  );
+  // Until a flat is chosen, show the standard per-flat allowance; the server has the final say.
+  const freeQuota = useMemo(
+    () => flatFree || fullQuota,
+    [flatFree, fullQuota],
+  );
+
+  const rawCartLines = useMemo(() => {
     const lines = [];
     if (catalogMode) {
       for (const item of catalogItems) {
@@ -218,8 +374,10 @@ export default function Food() {
         lines.push({
           key,
           item_id: item.id,
+          category: item.category || "",
+          item_day_code: item.day_code || "",
           meal_label: item.name || "Item",
-          day_label: [item.menu_date, item.category_label || item.category, item.diet_label]
+          day_label: [item.menu_date, item.category_label || item.category, dietTag(item)]
             .filter(Boolean)
             .join(" · ") || "Menu",
           description: item.description || "",
@@ -253,6 +411,39 @@ export default function Food() {
     }
     return lines;
   }, [cart, catalogItems, catalogMode, days, priceByMeal]);
+
+  // Mirrors the server: first N units of quota meals (breakfast, Ashtami lunch) are ₹0, in cart order.
+  const cartLines = useMemo(() => {
+    const remaining = { ...freeQuota };
+    return rawCartLines.map((line) => {
+      const freeKey = freeKeyFor(freeRules, line.category || line.meal_code, line.item_day_code || line.day_code);
+      const free = freeKey ? Math.min(remaining[freeKey] || 0, line.quantity) : 0;
+      if (free) remaining[freeKey] -= free;
+      return {
+        ...line,
+        free_key: freeKey,
+        free_qty: free,
+        line_total_paise: line.unit_paise != null ? line.unit_paise * (line.quantity - free) : null,
+      };
+    });
+  }, [rawCartLines, freeQuota, freeRules]);
+
+  const cartLineByKey = useMemo(
+    () => Object.fromEntries(cartLines.map((l) => [l.key, l])),
+    [cartLines],
+  );
+  const freeSavedPaise = useMemo(
+    () => cartLines.reduce((sum, l) => sum + (l.free_qty || 0) * (Number(l.unit_paise) || 0), 0),
+    [cartLines],
+  );
+  const freeInCart = useMemo(() => {
+    const counts = {};
+    for (const l of cartLines) {
+      if (l.free_key && l.free_qty) counts[l.free_key] = (counts[l.free_key] || 0) + l.free_qty;
+    }
+    return counts;
+  }, [cartLines]);
+  const freeRulesInCart = freeRules.filter((r) => cartLines.some((l) => l.free_key === r.key));
 
   const cartCount = useMemo(() => cartLines.reduce((n, l) => n + l.quantity, 0), [cartLines]);
   const cartTotalPaise = useMemo(() => {
@@ -325,27 +516,69 @@ export default function Food() {
     return [...seen.entries()].map(([value, label]) => ({ value, label }));
   }, [catalogItems]);
 
-  const filteredCatalogItems = useMemo(() => {
-    if (!dayFilter) return catalogItems;
-    return catalogItems.filter((item) => (item.menu_date || item.day_code || "") === dayFilter);
-  }, [catalogItems, dayFilter]);
+  const filteredCatalogItems = useMemo(() => catalogItems.filter((item) => {
+    if (dayFilter && (item.menu_date || item.day_code || "") !== dayFilter) return false;
+    if (!dietMatches(item, dietFilter)) return false;
+    return true;
+  }), [catalogItems, dayFilter, dietFilter]);
 
-  const quickAddFilteredCatalog = () => {
-    if (!filteredCatalogItems.length) {
-      toast.message("No menu items match this filter");
+  const quickMatches = useMemo(() => {
+    const days = new Set(quick.days);
+    const meals = new Set(quick.meals);
+    return catalogItems.filter((item) => {
+      const dayKey = item.menu_date || item.day_code || "";
+      if (!days.has(dayKey)) return false;
+      if (!meals.has(item.category)) return false;
+      return dietMatches(item, quick.diet);
+    });
+  }, [catalogItems, quick]);
+
+  // Same quota rule as the cart: free units the cart hasn't used yet come off first.
+  const quickTotalPaise = useMemo(() => {
+    const left = Object.fromEntries(
+      Object.entries(freeQuota).map(([k, n]) => [k, Math.max(0, n - (freeInCart[k] || 0))]),
+    );
+    return quickMatches.reduce((sum, item) => {
+      const freeKey = freeKeyFor(freeRules, item.category, item.day_code);
+      const free = freeKey ? Math.min(left[freeKey] || 0, quick.people) : 0;
+      if (free) left[freeKey] -= free;
+      return sum + (Number(item.amount_paise) || 0) * (quick.people - free);
+    }, 0);
+  }, [quickMatches, quick.people, freeInCart, freeQuota, freeRules]);
+
+  const openQuickAdd = () => {
+    const allDays = catalogDayOptions.map((d) => d.value);
+    setQuick((q) => ({
+      ...q,
+      diet: dietFilter || q.diet,
+      days: dayFilter ? [dayFilter] : (q.days.length ? q.days : allDays),
+    }));
+    setQuickOpen(true);
+  };
+
+  const toggleQuickList = (field, value) => setQuick((q) => {
+    const list = q[field].includes(value) ? q[field].filter((v) => v !== value) : [...q[field], value];
+    return { ...q, [field]: list };
+  });
+
+  const applyQuickAdd = () => {
+    if (!quickMatches.length) {
+      toast.message("Pick at least one day and meal");
       return;
     }
     setCart((prev) => {
       const next = { ...prev };
-      for (const item of filteredCatalogItems) {
-        next[item.id] = Math.min(MAX_QTY, (next[item.id] || 0) + 1);
+      for (const item of quickMatches) {
+        next[item.id] = Math.min(MAX_QTY, (next[item.id] || 0) + quick.people);
       }
       return next;
     });
-    const label = dayFilter
-      ? (catalogDayOptions.find((d) => d.value === dayFilter)?.label || "selected day")
-      : "all days";
-    toast.success(`Quick add: +1 for each item (${label})`);
+    const dietLabel = quick.diet === "veg" ? "Veg" : "Non-veg";
+    const dayLabel = quick.days.length === catalogDayOptions.length
+      ? "all days"
+      : quick.days.map((d) => catalogDayOptions.find((o) => o.value === d)?.label || d).join(", ");
+    toast.success(`Added ${dietLabel} · ${dayLabel} for ${quick.people} ${quick.people === 1 ? "person" : "people"}`);
+    setQuickOpen(false);
   };
 
   const copyText = async (text, label) => {
@@ -372,6 +605,7 @@ export default function Food() {
     if (!/^[6-9]\d{9}$/.test(form.mobile)) {
       return toast.error("Enter a valid 10-digit mobile number");
     }
+    if (!form.tower_id || !form.flat_id) return toast.error("Select your tower and flat");
     setBusy(true);
     try {
       const tower = towers.find((t) => t.id === form.tower_id);
@@ -484,9 +718,17 @@ export default function Food() {
                   <div>
                     <div className="font-medium text-brown-900">{line.meal_label}</div>
                     <div className="text-xs text-brown-800/55">{line.day_label} · {line.amount_label} each</div>
+                    {line.free_qty > 0 ? (
+                      <div className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                        {line.free_qty} complimentary
+                        {line.quantity > line.free_qty ? ` · ${line.quantity - line.free_qty} charged` : ""}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="text-right font-semibold text-vermilion-600">
-                    {line.line_total_paise != null ? formatPaise(line.line_total_paise) : "TBC"}
+                    {line.line_total_paise != null
+                      ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Free" : formatPaise(line.line_total_paise))
+                      : "TBC"}
                   </div>
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2">
@@ -517,6 +759,29 @@ export default function Food() {
               {mealTypeSummary.dinner > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Dinner × {mealTypeSummary.dinner}</span>}
             </div>
           )}
+
+          {freeRulesInCart.length ? (
+            <div className="mt-3 rounded-xl bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900/85 ring-1 ring-emerald-600/15" data-testid="food-cart-complimentary">
+              {freeSavedPaise > 0 ? (
+                <div className="flex items-center justify-between gap-2 font-semibold">
+                  <span>Complimentary: {describeFree(freeRules, freeInCart)}</span>
+                  <span>−{formatPaise(freeSavedPaise)}</span>
+                </div>
+              ) : null}
+              <p className={`mt-0.5 flex items-center justify-between gap-2 ${noFreeMeals ? "font-medium text-amber-900" : ""}`}>
+                <span>
+                  {flatSubscribed === false
+                    ? "No free meals — this flat hasn't subscribed or donated."
+                    : mobileOk === false
+                      ? "No free meals — use the mobile registered with this flat's subscription."
+                      : "Free for subscribers & donors · No take-aways"}
+                </span>
+                <button type="button" onClick={() => setInfoOpen(true)} className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="Free meal rules">
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </p>
+            </div>
+          ) : null}
 
           <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
             <div className="text-sm text-brown-800/60">{cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}</div>
@@ -575,7 +840,7 @@ export default function Food() {
           </h1>
           <p className="mt-2 max-w-xl text-brown-800/70">
             {catalogMode
-              ? "Pick any items you like, set quantities, and checkout for the total."
+              ? "Add items, set quantities, then check out."
               : "Pick how many breakfasts, lunches and dinners you need. Your total updates as you add."}
           </p>
 
@@ -597,56 +862,38 @@ export default function Food() {
 
           {menu && <StepBar current={stepForBar} paymentEnabled={paymentEnabled} />}
 
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-50 px-3 py-2.5 text-sm text-amber-900/90">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              {menu?.payment_note
-                || (paymentEnabled
-                  ? "After checkout, pay by scanning the UPI QR and upload your payment screenshot."
-                  : "You can place your order now. Payment will open soon.")}
-            </span>
-          </div>
-
-          {menu?.overall_menu_url ? (
-            <a
-              href={mediaUrl(menu.overall_menu_url)}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 inline-flex items-center gap-2 rounded-xl border border-sun-400/35 bg-white px-4 py-2.5 text-sm font-medium text-brown-900 shadow-sm transition hover:border-vermilion-500/40 hover:text-vermilion-600"
-              data-testid="food-overall-menu-link"
-            >
-              <ExternalLink className="h-4 w-4 text-vermilion-500" />
-              View full Pujo food menu
-              {menu.overall_menu_filename ? (
-                <span className="hidden text-xs font-normal text-brown-800/45 sm:inline">
-                  ({menu.overall_menu_filename})
-                </span>
+          {menu ? (
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+              {catalogMode ? (
+                <button
+                  type="button"
+                  onClick={() => setInfoOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 font-medium text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100"
+                  data-testid="food-free-chip"
+                >
+                  <Check className="h-4 w-4" />
+                  {describePolicy(freePolicy)}
+                  <Info className="h-3.5 w-3.5 opacity-70" />
+                </button>
               ) : null}
-            </a>
-          ) : null}
-
-          {(menu?.kids_note || (menu?.timings && Object.keys(menu.timings).length)) ? (
-            <div className="mt-3 space-y-1.5 text-sm text-brown-800/70">
-              {menu?.timings?.breakfast ? (
-                <p>
-                  <span className="font-medium text-brown-900">Timings:</span>{" "}
-                  Breakfast {menu.timings.breakfast}
-                  {menu.timings.lunch ? ` · Lunch ${menu.timings.lunch}` : ""}
-                  {menu.timings.dinner ? ` · Dinner ${menu.timings.dinner}` : ""}
-                </p>
-              ) : null}
-              {menu?.kids_note ? (
-                <p className="text-amber-900/80">{menu.kids_note}</p>
-              ) : null}
-              {(menu?.menu_meta?.notes || []).length ? (
-                <ul className="mt-2 space-y-1 rounded-lg border border-sun-400/30 bg-white/80 px-3 py-2.5 text-[13px] text-brown-800/75" data-testid="food-menu-notes">
-                  {menu.menu_meta.notes.map((note) => (
-                    <li key={note} className="flex gap-2">
-                      <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                      <span>{note}</span>
-                    </li>
-                  ))}
-                </ul>
+              <button
+                type="button"
+                onClick={() => setInfoOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-sun-400/35 bg-white px-3 py-1.5 font-medium text-brown-900 hover:border-vermilion-500/40 hover:text-vermilion-600"
+                data-testid="food-info-btn"
+              >
+                <Info className="h-4 w-4 text-vermilion-500" /> Timings &amp; rules
+              </button>
+              {menu.overall_menu_url ? (
+                <a
+                  href={mediaUrl(menu.overall_menu_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-sun-400/35 bg-white px-3 py-1.5 font-medium text-brown-900 hover:border-vermilion-500/40 hover:text-vermilion-600"
+                  data-testid="food-overall-menu-link"
+                >
+                  <ExternalLink className="h-4 w-4 text-vermilion-500" /> Full menu
+                </a>
               ) : null}
             </div>
           ) : null}
@@ -664,6 +911,27 @@ export default function Food() {
               <p className="mt-2 font-display text-4xl text-vermilion-600">
                 {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
               </p>
+              {describeFree(freeRules, intent.complimentary) ? (
+                <p className="mt-1 text-sm font-medium text-emerald-700">
+                  Includes complimentary {describeFree(freeRules, intent.complimentary)}
+                </p>
+              ) : null}
+              {intent.flat_subscribed === false ? (
+                <p className="mt-1 text-xs text-amber-800/80">
+                  No complimentary meals applied — this flat has not paid the Puja subscription or a donation.
+                </p>
+              ) : intent.free_mobile_ok === false ? (
+                <p className="mt-1 text-xs text-amber-800/80">
+                  No complimentary meals applied — this mobile is not the one registered with the flat&apos;s subscription.
+                </p>
+              ) : null}
+              {freeRules
+                .filter((r) => (intent.complimentary_used_before?.[r.key] || 0) > 0)
+                .map((r) => (
+                  <p key={r.key} className="mt-1 text-xs text-amber-800/80">
+                    Your flat already used {Math.min(r.free, intent.complimentary_used_before[r.key])} of its {r.free} free {pluralMeal(r.label, r.free)} on an earlier order.
+                  </p>
+                ))}
               <p className="mt-1 text-sm text-brown-800/55">
                 {intent.selection_count || cartCount} {unitLabel}{(intent.selection_count || cartCount) === 1 ? "" : "s"} · Order {intent.id}
               </p>
@@ -744,13 +1012,24 @@ export default function Food() {
             <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-50 text-emerald-700">
               <Check className="h-7 w-7" />
             </div>
-            <h2 className="mt-4 font-display text-3xl text-brown-900">Order saved</h2>
+            <h2 className="mt-4 font-display text-3xl text-brown-900">
+              {done.payment_status === "complimentary" ? "Meals confirmed" : "Order saved"}
+            </h2>
             <p className="mt-2 text-brown-800/70">{done.message || "Thank you — your meal order is with the committee."}</p>
             <p className="mt-3 text-sm text-brown-800/50">Reference: <span className="font-medium text-brown-900">{done.id}</span></p>
-            {done.total_amount_paise != null && (
+            {done.payment_status === "complimentary" ? (
+              <p className="mt-1 text-lg font-semibold text-emerald-700">
+                Complimentary {describeFree(freeRules, done.complimentary)} · Nothing to pay
+              </p>
+            ) : done.total_amount_paise != null && (
               <p className="mt-1 text-lg font-semibold text-vermilion-600">Total {formatPaise(done.total_amount_paise)}</p>
             )}
             <div className="mt-6 flex flex-wrap justify-center gap-3">
+              {done.voucher_token ? (
+                <a href={`${API}/food/voucher/${done.voucher_token}/pdf`} target="_blank" rel="noreferrer">
+                  <Button variant="primary" data-testid="food-done-voucher-btn">Download food voucher</Button>
+                </a>
+              ) : null}
               <Button variant="outline" onClick={resetAll}>{catalogMode ? "Order more" : "Order more meals"}</Button>
               <Link to="/"><Button variant="subtle">Back home</Button></Link>
             </div>
@@ -778,8 +1057,9 @@ export default function Food() {
                   />
                 </div>
                 <div>
-                  <Label>Tower</Label>
+                  <Label required>Tower</Label>
                   <Select
+                    required
                     data-testid="food-tower"
                     value={form.tower_id}
                     onChange={(e) => setForm({ ...form, tower_id: e.target.value, flat_id: "", flat_number: "" })}
@@ -789,8 +1069,9 @@ export default function Food() {
                   </Select>
                 </div>
                 <div>
-                  <Label>Flat</Label>
+                  <Label required>Flat</Label>
                   <Select
+                    required
                     data-testid="food-flat"
                     value={form.flat_id}
                     onChange={(e) => setForm({ ...form, flat_id: e.target.value })}
@@ -798,6 +1079,29 @@ export default function Food() {
                     <option value="">Select flat</option>
                     {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
                   </Select>
+                  {form.flat_id && flatSubscribed === false ? (
+                    <p className="mt-1 text-xs text-amber-900/85" data-testid="food-flat-not-subscribed">
+                      This flat has not paid the Puja subscription or a donation yet, so all meals are charged.{" "}
+                      <Link to="/subscribe" className="font-semibold text-vermilion-600 underline">Subscribe &amp; Pay</Link>
+                      {" or "}
+                      <Link to="/donate" className="font-semibold text-vermilion-600 underline">Donate</Link>
+                      {" "}to unlock {describePolicy(freePolicy)}.
+                    </p>
+                  ) : form.flat_id && mobileOk === false ? (
+                    <p className="mt-1 text-xs text-amber-900/85" data-testid="food-mobile-not-registered">
+                      Free meals go only to the mobile number registered with this flat&apos;s Puja subscription or donation.
+                      Enter that number to get them — otherwise all meals are charged.
+                    </p>
+                  ) : form.flat_id && flatFree ? (
+                    <p className="mt-1 text-xs text-emerald-800/80" data-testid="food-flat-free">
+                      {freeRules.some((r) => (flatFree[r.key] ?? 0) < r.free)
+                        ? `Already used on earlier orders: ${freeRules
+                          .filter((r) => (flatFree[r.key] ?? 0) < r.free)
+                          .map((r) => `${r.free - (flatFree[r.key] ?? 0)} of ${r.free} free ${pluralMeal(r.label, r.free)}`)
+                          .join(", ")}.`
+                        : `This flat gets ${describePolicy(freePolicy)}.`}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="sm:col-span-2">
                   <Label>Notes <span className="font-normal text-brown-800/45">(optional)</span></Label>
@@ -828,9 +1132,6 @@ export default function Food() {
                         <h2 className="flex items-center gap-2 font-display text-2xl text-brown-900">
                           <UtensilsCrossed className="h-5 w-5 text-vermilion-500" /> Menu
                         </h2>
-                        <p className="mt-1 text-sm text-brown-800/60">
-                          Filter by day, or Quick add +1 to every visible item. Adjust quantities on each card anytime.
-                        </p>
                       </div>
                       {cartCount > 0 && (
                         <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-reset-btn">
@@ -839,27 +1140,27 @@ export default function Food() {
                       )}
                     </div>
                     {catalogItems.length > 0 && (
-                      <div className="mt-4 flex flex-wrap items-end gap-3">
-                        <div className="min-w-[12rem] flex-1 sm:flex-none sm:w-56">
-                          <Label htmlFor="food-day-filter">Day</Label>
-                          <Select
-                            id="food-day-filter"
-                            value={dayFilter}
-                            onChange={(e) => setDayFilter(e.target.value)}
-                            data-testid="food-day-filter"
-                          >
-                            <option value="">All days</option>
-                            {catalogDayOptions.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </Select>
-                        </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-3">
+                        <DietToggle value={dietFilter} onChange={setDietFilter} />
+                        <Select
+                          id="food-day-filter"
+                          aria-label="Day"
+                          value={dayFilter}
+                          onChange={(e) => setDayFilter(e.target.value)}
+                          className="min-h-11 w-full sm:w-48"
+                          data-testid="food-day-filter"
+                        >
+                          <option value="">All days</option>
+                          {catalogDayOptions.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label} · {shortDate(opt.value)}</option>
+                          ))}
+                        </Select>
                         <Button
                           type="button"
                           variant="primary"
                           size="sm"
-                          className="min-h-11"
-                          onClick={quickAddFilteredCatalog}
+                          className="min-h-11 w-full sm:ml-auto sm:w-auto"
+                          onClick={openQuickAdd}
                           data-testid="food-quick-add"
                         >
                           <Plus className="h-4 w-4" /> Quick add
@@ -874,7 +1175,7 @@ export default function Food() {
                     </div>
                   ) : filteredCatalogItems.length === 0 ? (
                     <div className="rounded-2xl border border-sun-400/30 bg-white p-8 text-center text-sm text-brown-800/55">
-                      No items for this day. Choose another day from the filter.
+                      No items match. Try another day or switch Veg / Non-veg.
                     </div>
                   ) : (
                     <div className="space-y-6" data-testid="food-catalog-grid">
@@ -948,7 +1249,7 @@ export default function Food() {
                                               ? "bg-emerald-600 text-white"
                                               : "bg-vermilion-600 text-white"
                                           }`}>
-                                            {item.diet_label}
+                                            {dietTag(item)}
                                           </span>
                                         ) : null}
                                         {item.badge || item.is_complimentary ? (
@@ -974,23 +1275,20 @@ export default function Food() {
                                           </button>
                                         ) : null}
                                       </div>
-                                      {item.complimentary_note || item.price_note ? (
-                                        <p className="mt-2 text-xs leading-relaxed text-amber-900/80">
-                                          {item.complimentary_note || item.price_note}
-                                        </p>
-                                      ) : null}
                                       <div className="mt-4 flex items-center justify-between gap-3 border-t border-sun-400/20 pt-3">
                                         <div>
                                           <div className="text-[10px] uppercase tracking-wide text-brown-800/45">
-                                            {item.is_complimentary
-                                              ? (item.category === "lunch" ? "Extra head" : "Extra plate")
-                                              : "Price"}
+                                            {freeKeyFor(freeRules, item.category, item.day_code)
+                                              ? `First ${fullQuota[freeKeyFor(freeRules, item.category, item.day_code)]} free · then`
+                                              : item.is_complimentary ? "Extra head" : "Price"}
                                           </div>
                                           <div className="font-display text-2xl text-vermilion-600">
                                             {item.amount_label || formatPaise(unit)}
-                                            {qty > 1 ? (
+                                            {qty > 1 || cartLineByKey[item.id]?.free_qty ? (
                                               <span className="ml-1 text-sm font-normal text-brown-800/45">
-                                                · {formatPaise(unit * qty)}
+                                                · {cartLineByKey[item.id]?.line_total_paise === 0
+                                                  ? "free"
+                                                  : formatPaise(cartLineByKey[item.id]?.line_total_paise ?? unit * qty)}
                                               </span>
                                             ) : null}
                                           </div>
@@ -1171,7 +1469,7 @@ export default function Food() {
                 <span className={`rounded-full px-2.5 py-1 font-semibold uppercase tracking-wide ${
                   menuDetail.diet === "veg" ? "bg-emerald-100 text-emerald-800" : "bg-vermilion-100 text-vermilion-700"
                 }`}>
-                  {menuDetail.diet_label}
+                  {dietTag(menuDetail)}
                 </span>
               ) : null}
               {menuDetail.day_label || menuDetail.menu_date ? (
@@ -1198,6 +1496,186 @@ export default function Food() {
             ) : null}
           </div>
         ) : null}
+      </Dialog>
+
+      <Dialog
+        open={infoOpen}
+        onClose={() => setInfoOpen(false)}
+        title="Timings & rules"
+        size="md"
+        footer={
+          <Button type="button" variant="primary" onClick={() => setInfoOpen(false)} data-testid="food-info-close">
+            Got it
+          </Button>
+        }
+      >
+        <div className="space-y-5 text-sm text-brown-800/80" data-testid="food-info-dialog">
+          {menu?.timings && Object.keys(menu.timings).length ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Meal timings</p>
+              <dl className="mt-2 divide-y divide-sun-400/20 rounded-xl border border-sun-400/25">
+                {[["Breakfast", menu.timings.breakfast, Coffee], ["Lunch", menu.timings.lunch, Sun], ["Dinner", menu.timings.dinner, Moon]]
+                  .filter(([, t]) => t)
+                  .map(([label, t, Icon]) => (
+                    <div key={label} className="flex items-center justify-between gap-3 px-3 py-2">
+                      <dt className="flex items-center gap-2 font-medium text-brown-900"><Icon className="h-4 w-4 text-vermilion-500" />{label}</dt>
+                      <dd>{t}</dd>
+                    </div>
+                  ))}
+              </dl>
+            </div>
+          ) : null}
+          {catalogMode ? (
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Free meals</p>
+              <ul className="mt-2 space-y-1.5">
+                {freePolicy.slice().reverse().map((r) => (
+                  <li key={r.key} className="flex gap-2">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>First {r.free} {pluralMeal(r.label, r.free)}{r.per_day ? " each day" : ""} per flat are free — applied automatically in your cart.</span>
+                  </li>
+                ))}
+                <li className="flex gap-2">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>Only for flats that have paid the Puja subscription or a donation.</span>
+                </li>
+              </ul>
+            </div>
+          ) : null}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Good to know</p>
+            <ul className="mt-2 space-y-1.5">
+              {menu?.kids_note ? <li>• {menu.kids_note}</li> : null}
+              <li>• No take-aways for breakfast and Ashtami lunch.</li>
+              <li>• Pure veg breakfast packet available every day.</li>
+              <li>
+                • {menu?.payment_note
+                  || (paymentEnabled
+                    ? "After checkout, pay by scanning the UPI QR and upload your payment screenshot."
+                    : "You can place your order now. Payment will open soon.")}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        title="Quick add"
+        footer={(
+          <div className="flex w-full items-center justify-between gap-3">
+            <div className="text-xs text-brown-800/55">
+              {quickMatches.length * quick.people} plate{quickMatches.length * quick.people === 1 ? "" : "s"}
+            </div>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={!quickMatches.length}
+              onClick={applyQuickAdd}
+              data-testid="food-quick-apply"
+            >
+              <Plus className="h-4 w-4" /> Add to cart · {formatPaise(quickTotalPaise)}
+            </Button>
+          </div>
+        )}
+      >
+        <div className="space-y-5" data-testid="food-quick-dialog">
+          <section>
+            <p className="text-sm font-semibold text-brown-900">1. Veg or non-veg?</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {[
+                ["veg", "Veg", "bg-emerald-600", "border-emerald-600 bg-emerald-50"],
+                ["non_veg", "Non-veg", "bg-vermilion-600", "border-vermilion-500 bg-vermilion-500/10"],
+              ].map(([value, label, dot, activeCls]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={quick.diet === value}
+                  onClick={() => setQuick((q) => ({ ...q, diet: value }))}
+                  className={`flex min-h-12 items-center justify-center gap-2 rounded-xl border-2 text-sm font-semibold text-brown-900 transition ${
+                    quick.diet === value ? activeCls : "border-brown-800/10 bg-white hover:border-brown-800/25"
+                  }`}
+                  data-testid={`food-quick-diet-${value}`}
+                >
+                  <span className={`h-3 w-3 rounded-sm ${dot}`} /> {label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <p className="text-sm font-semibold text-brown-900">2. Which days?</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Chip
+                active={quick.days.length === catalogDayOptions.length}
+                onClick={() => setQuick((q) => ({
+                  ...q,
+                  days: q.days.length === catalogDayOptions.length ? [] : catalogDayOptions.map((d) => d.value),
+                }))}
+                testId="food-quick-all-days"
+              >
+                All days
+              </Chip>
+              {catalogDayOptions.map((d) => (
+                <Chip
+                  key={d.value}
+                  active={quick.days.includes(d.value)}
+                  onClick={() => toggleQuickList("days", d.value)}
+                  testId={`food-quick-day-${d.value}`}
+                >
+                  {d.label} <span className="text-xs opacity-70">{shortDate(d.value)}</span>
+                </Chip>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <p className="text-sm font-semibold text-brown-900">3. Which meals?</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {[
+                ["breakfast", "Breakfast"],
+                ["lunch", "Lunch"],
+                ["dinner", "Dinner"],
+                ["breakfast_packet", "Veg breakfast packet"],
+              ].map(([code, label]) => (
+                <Chip
+                  key={code}
+                  active={quick.meals.includes(code)}
+                  onClick={() => toggleQuickList("meals", code)}
+                  testId={`food-quick-meal-${code}`}
+                >
+                  {label}
+                </Chip>
+              ))}
+            </div>
+          </section>
+
+          <section className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-brown-900">4. How many people?</p>
+            <div className="inline-flex items-center rounded-full border border-brown-800/15">
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center text-brown-800/70 disabled:opacity-40"
+                onClick={() => setQuick((q) => ({ ...q, people: Math.max(1, q.people - 1) }))}
+                disabled={quick.people <= 1}
+                aria-label="Fewer people"
+              >
+                <Minus className="h-4 w-4" />
+              </button>
+              <span className="w-8 text-center font-semibold text-brown-900" data-testid="food-quick-people">{quick.people}</span>
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center text-brown-800/70 disabled:opacity-40"
+                onClick={() => setQuick((q) => ({ ...q, people: Math.min(20, q.people + 1) }))}
+                disabled={quick.people >= 20}
+                aria-label="More people"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+          </section>
+        </div>
       </Dialog>
 
     </PublicLayout>

@@ -648,7 +648,14 @@ async def payment_status(token: str):
         "submission_status": submission.get("status") if submission else None,
         "do_not_pay_again": bool(warn) or status in ("paid", "needs_review", "processing"),
         "message": message,
+        "kind": intent.get("kind") or "subscription",
     }
+    if intent.get("kind") == "food_subscription" and intent.get("food_subscription_id"):
+        food = await db.food_subscriptions.find_one(
+            {"id": intent["food_subscription_id"]}, {"_id": 0, "payment_status": 1})
+        if food and food.get("payment_status") == "paid":
+            from tokens import food_voucher_token
+            payload["food_voucher_token"] = food_voucher_token(intent["food_subscription_id"])
     donation_receipt = None
     if receipt and receipt.get("linked_donation_receipt_id"):
         donation_receipt = await db.receipts.find_one(
@@ -794,6 +801,8 @@ async def upi_session(intent_id: str):
         raise HTTPException(status_code=404, detail="Subscription intent not found.")
     if intent["status"] == "paid":
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
+    if intent["status"] == "superseded" and intent.get("kind") == "food_subscription":
+        raise HTTPException(status_code=409, detail="This food order expired without payment. Please place a new order.")
     settings = await get_settings()
     due = _intent_due_paise(intent)
     payload = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
@@ -917,6 +926,8 @@ async def upi_submit(request: Request):
         raise HTTPException(status_code=404, detail="Subscription intent not found.")
     if intent["status"] == "paid":
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
+    if intent["status"] == "superseded" and intent.get("kind") == "food_subscription":
+        raise HTTPException(status_code=409, detail="This food order expired without payment. Please place a new order.")
 
     data = await file.read()
     if not data:
@@ -1422,7 +1433,7 @@ async def _receipts_matching_txn_for_household(household_id: str, txn_norm: str)
         {"_id": 0},
     ).sort("issued_at", -1):
         if _receipt_matches_txn(r, txn_norm):
-            cards.append(_receipt_public_card(r))
+            cards.append(await _receipt_card_with_voucher(r))
 
     if cards:
         return cards
@@ -1439,8 +1450,20 @@ async def _receipts_matching_txn_for_household(household_id: str, txn_norm: str)
                 {"intent_id": intent["id"], "status": {"$in": ["issued", "partially_refunded"]}},
                 {"_id": 0},
             ):
-                cards.append(_receipt_public_card(r))
+                cards.append(await _receipt_card_with_voucher(r))
     return cards
+
+
+async def _receipt_card_with_voucher(r: dict) -> dict:
+    """Public receipt card, plus the food voucher link once that food order is fully paid."""
+    card = _receipt_public_card(r)
+    fid = r.get("food_subscription_id")
+    if r.get("kind") == "food_subscription" and fid:
+        food = await db.food_subscriptions.find_one({"id": fid}, {"_id": 0, "payment_status": 1})
+        if food and food.get("payment_status") == "paid":
+            from tokens import food_voucher_token
+            card["food_voucher_token"] = food_voucher_token(fid)
+    return card
 
 
 def _require_txn_norm(body: dict) -> str:
@@ -1877,9 +1900,16 @@ async def find_receipt(body: dict = Body(...), request: Request = None):
         if not mobile_ok:
             raise HTTPException(status_code=404, detail="No receipt found with those details.")
     await audit("receipt.lookup", entity_type="receipt", entity_id=r["id"], request=request)
-    return {"receipt_no": r["receipt_no"], "verify_token": r["verify_token"],
-            "amount": fmt_inr(r["total_amount"]), "issued_at": r["issued_at"],
-            "pdf_url": f"/api/receipt/pdf/{r['verify_token']}"}
+    out = {"receipt_no": r["receipt_no"], "verify_token": r["verify_token"],
+           "amount": fmt_inr(r["total_amount"]), "issued_at": r["issued_at"],
+           "pdf_url": f"/api/receipt/pdf/{r['verify_token']}"}
+    if r.get("kind") == "food_subscription" and r.get("food_subscription_id"):
+        food = await db.food_subscriptions.find_one(
+            {"id": r["food_subscription_id"]}, {"_id": 0, "payment_status": 1})
+        if food and food.get("payment_status") == "paid":
+            from tokens import food_voucher_token
+            out["food_voucher_token"] = food_voucher_token(r["food_subscription_id"])
+    return out
 
 
 @router.get("/receipt/pdf/{token}")

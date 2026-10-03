@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { RefreshCw, Download, Upload, Settings2 } from "lucide-react";
+import { RefreshCw, Download, Upload, Settings2, Ticket, Search } from "lucide-react";
 import api from "../../lib/api";
 import {
   Card, CardBody, Table, THead, TR, TH, TD, Button, StatusBadge, Spinner,
@@ -18,7 +19,9 @@ function selectionSummary(row) {
       const label = s.item_id
         ? (s.meal_label || s.name || "Item")
         : `${s.day_label || s.day_code} ${s.meal_label || s.meal_code}`;
-      return qty > 1 ? `${label} × ${qty}` : label;
+      const free = Number(s.complimentary_qty) || 0;
+      const base = qty > 1 ? `${label} × ${qty}` : label;
+      return free ? `${base} (${free} free)` : base;
     })
     .join("; ");
 }
@@ -38,6 +41,8 @@ const COLS = [
   { key: "selection_count", label: "Meals" },
   { key: "meals_detail", label: "Meal details", exportValue: selectionSummary },
   { key: "payment_status", label: "Payment" },
+  { key: "voucher_no", label: "Voucher" },
+  { key: "coupon_no", label: "Coupons" },
   { key: "status", label: "Status" },
   { key: "created_at", label: "Subscribed at", exportValue: (r) => formatDateIST(r.created_at) },
 ];
@@ -57,6 +62,16 @@ export default function FoodAdmin() {
     payment_enabled: false,
   });
   const fileRef = useRef(null);
+  const [params] = useSearchParams();
+  const [q, setQ] = useState(params.get("q") || "");
+  const [busyId, setBusyId] = useState(null);
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return items;
+    return items.filter((r) => [r.name, r.mobile, r.tower_name, r.flat_number, r.voucher_no, r.coupon_no, r.id]
+      .some((v) => String(v || "").toLowerCase().includes(needle)));
+  }, [items, q]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -104,6 +119,55 @@ export default function FoodAdmin() {
       toast.error(err?.response?.data?.detail || "Could not save prices");
     } finally {
       setSavingPrices(false);
+    }
+  };
+
+  const issueCoupons = async (r, confirmBank = false) => {
+    if (!confirmBank && !window.confirm(`Mark food coupons as given to ${r.name} (${r.tower_name}, ${r.flat_number}), voucher ${r.voucher_no || ""}? This can only be done once per voucher.`)) return;
+    setBusyId(r.id);
+    try {
+      const res = await api.post(`/admin/food-subscriptions/${r.id}/coupon`, { confirm_bank_verified: confirmBank });
+      const coupon = res.data.coupon || {};
+      if (res.data.already_existed) {
+        toast.error(`Coupons were already given for this voucher (${coupon.coupon_no}). Do not hand out again.`);
+      } else {
+        const list = (coupon.lines || [])
+          .map((l) => `• ${l.day_label} ${l.meal_label}${l.diet_label ? ` (${l.diet_label})` : ""}: ${l.heads}`)
+          .join("\n");
+        window.alert(`Recorded ${coupon.coupon_no}. Hand over these coupons:\n\n${list}\n\nTotal: ${coupon.slip_count || 0}`);
+      }
+      load();
+    } catch (err) {
+      const d = err?.response?.data?.detail;
+      if (d?.code === "bank_unverified") {
+        const list = (d.receipts || [])
+          .map((x) => `• ${x.receipt_no}: ₹${Math.round((x.amount_paise || 0) / 100)} · UTR ${x.utr || "—"}`)
+          .join("\n");
+        setBusyId(null);
+        if (window.confirm(`${d.message}\n\n${list}\n\nPress OK only if you have seen these payments in the bank account. Your name is recorded.`)) {
+          issueCoupons(r, true);
+        }
+        return;
+      }
+      toast.error(typeof d === "string" ? d : "Could not mark coupons as given");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const voidCoupons = async (r) => {
+    const reason = window.prompt(`Undo "coupons given" (${r.coupon_no})? Only do this if the coupons were not handed over, or have been collected back.\n\nReason:`);
+    if (!reason) return;
+    setBusyId(r.id);
+    try {
+      const res = await api.post(`/admin/food-coupons/${r.coupon_id}/void`, { reason });
+      toast.success(`Undone (${res.data.coupon_no}) — coupons can be marked as given again`);
+      load();
+    } catch (err) {
+      const d = err?.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Could not undo");
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -162,6 +226,16 @@ export default function FoodAdmin() {
 
       <Card data-testid="food-list-card"><CardBody>
         <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+          <div className="relative mr-auto w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-brown-800/40" />
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search name, flat, voucher or coupon no"
+              className="pl-8"
+              data-testid="food-admin-search"
+            />
+          </div>
           <Button
             variant="subtle"
             size="sm"
@@ -242,11 +316,13 @@ export default function FoodAdmin() {
                   <TH right>People</TH>
                   <TH>Meals</TH>
                   <TH>Payment</TH>
+                  <TH>Voucher</TH>
+                  <TH>Coupons</TH>
                   <TH>Subscribed at</TH>
                 </TR>
               </THead>
               <tbody>
-                {items.map((r) => (
+                {shown.map((r) => (
                   <TR key={r.id}>
                     <TD className="font-medium">{r.name}</TD>
                     <TD>{r.mobile}</TD>
@@ -261,6 +337,31 @@ export default function FoodAdmin() {
                     </TD>
                     <TD>
                       <StatusBadge status={paymentLabel(r.payment_status)} />
+                    </TD>
+                    <TD className="whitespace-nowrap text-xs">
+                      {r.paid_in_full ? (
+                        <Link to={`/food/voucher/${r.voucher_token}`} target="_blank" className="font-medium text-vermilion-600 hover:underline">
+                          {r.voucher_no || "View voucher"}
+                        </Link>
+                      ) : (
+                        <span className="text-brown-800/45">After full payment</span>
+                      )}
+                    </TD>
+                    <TD className="whitespace-nowrap text-xs">
+                      {r.coupon_id ? (
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-emerald-700" title={r.coupon_no}>✓ Given</span>
+                          <Button variant="subtle" size="sm" disabled={busyId === r.id} onClick={() => voidCoupons(r)} data-testid={`food-void-coupons-${r.id}`}>
+                            Undo
+                          </Button>
+                        </div>
+                      ) : r.paid_in_full ? (
+                        <Button variant="admin" size="sm" disabled={busyId === r.id} onClick={() => issueCoupons(r)} data-testid={`food-issue-coupons-${r.id}`}>
+                          <Ticket className="h-3.5 w-3.5" /> {busyId === r.id ? "Saving…" : "Mark coupons given"}
+                        </Button>
+                      ) : (
+                        <span className="text-brown-800/45">—</span>
+                      )}
                     </TD>
                     <TD className="whitespace-nowrap text-xs tabular-nums">{formatDateIST(r.created_at)}</TD>
                   </TR>

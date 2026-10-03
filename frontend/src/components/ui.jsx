@@ -92,6 +92,7 @@ export const Select = React.forwardRef(function Select({ className, children, ..
 const STATUS_MAP = {
   issued: "emerald", paid: "emerald", captured: "emerald", verified: "emerald", valid: "emerald",
   "bank verified": "emerald", bank_verified: "emerald",
+  complimentary: "emerald", confirmed: "emerald",
   approved: "emerald", cleared: "emerald", completed: "emerald", accepted: "emerald", locked: "emerald", active: "emerald",
   payment_pending: "gold", pending: "gold", pending_acceptance: "gold", pending_match: "gold",
   pending_clearing: "gold", processing: "gold", proposed: "gold", submitted: "gold", requested: "gold",

@@ -12,6 +12,7 @@ import Home from "./pages/public/Home";
 import Subscribe from "./pages/public/Subscribe";
 import Donate from "./pages/public/Donate";
 import Food from "./pages/public/Food";
+import FoodVoucher from "./pages/public/FoodVoucher";
 import PaymentStatus from "./pages/public/PaymentStatus";
 import ReceiptFind from "./pages/public/ReceiptFind";
 import ReceiptVerify from "./pages/public/ReceiptVerify";
@@ -55,6 +56,7 @@ function AppRoutes() {
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
       <Route path="/food" element={<Food />} />
+      <Route path="/food/voucher/:token" element={<FoodVoucher />} />
       <Route path="/food-poll" element={<FoodPoll />} />
       <Route path="/food/vote" element={<FoodPoll />} />
       <Route path="/payment/status" element={<PaymentStatus />} />

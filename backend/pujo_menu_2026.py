@@ -11,11 +11,51 @@ BREAKFAST_PRICE = 70
 PACKET_PRICE = 70
 ASHTAMI_BHOG_EXTRA = 170
 
+BREAKFAST_FREE_COUPONS = 3
+ASHTAMI_BHOG_FREE_HEADS = 4
+
+# Free units per flat (tower + flat) with a paid Puja subscription or donation, applied at checkout (first N units are ₹0).
+# A per_day rule gives a separate quota for every Pujo day.
+COMPLIMENTARY_POLICY = [
+    {"key": "ashtami_lunch", "label": "Ashtami lunch", "category": "lunch", "day_code": "ashtami",
+     "free": ASHTAMI_BHOG_FREE_HEADS},
+    {"key": "breakfast", "label": "breakfast", "category": "breakfast", "free": BREAKFAST_FREE_COUPONS,
+     "per_day": True},
+]
+
+
+def _expand_policy(policy: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from food_poll_catalog import DAYS
+    rules = []
+    for p in policy:
+        base = {"group": p["key"], "group_label": p["label"]}
+        if not p.get("per_day"):
+            rules.append({**p, **base})
+            continue
+        for d in sorted(DAYS, key=lambda x: x.get("order", 0)):
+            rules.append({
+                **base, "key": f"{p['key']}_{d['code']}", "label": f"{d['label'].replace('Maha ', '')} {p['label']}",
+                "category": p["category"], "day_code": d["code"], "free": p["free"],
+            })
+    return rules
+
+
+# Rules are matched in order on (category, day_code).
+COMPLIMENTARY_RULES = _expand_policy(COMPLIMENTARY_POLICY)
+COMPLIMENTARY_QUOTAS = {r["key"]: r["free"] for r in COMPLIMENTARY_RULES}
+
+
+def complimentary_key(category: str, day_code: str) -> str:
+    for rule in COMPLIMENTARY_RULES:
+        if rule["category"] == category and (not rule.get("day_code") or rule["day_code"] == day_code):
+            return rule["key"]
+    return ""
+
 BREAKFAST_COUPON_NOTE = (
-    "3 complimentary breakfast coupons per household subscription (no take-aways). "
-    f"Extra breakfasts ₹{BREAKFAST_PRICE} each."
+    f"First {BREAKFAST_FREE_COUPONS} breakfasts each day per flat that has subscribed or donated are complimentary — "
+    f"applied automatically in your cart. From the 4th breakfast that day, ₹{BREAKFAST_PRICE} each. No take-aways."
 )
-BREAKFAST_BADGE = "3 free coupons / subscription"
+BREAKFAST_BADGE = f"{BREAKFAST_FREE_COUPONS} free daily · No take-away"
 
 MENU_META = {
     "title": "Durga Puja Menu 2026",
@@ -27,16 +67,24 @@ MENU_META = {
     },
     "kids_note": "Food is complimentary for kids below 7 years.",
     "notes": [
-        f"Breakfast ₹{BREAKFAST_PRICE} — 3 complimentary coupons per household subscription (no take-aways).",
+        f"{BREAKFAST_FREE_COUPONS} complimentary breakfast coupons every day per flat that has subscribed or donated — "
+        f"your flat's first {BREAKFAST_FREE_COUPONS} breakfasts each day are free in the cart; the 4th onwards that day "
+        f"is ₹{BREAKFAST_PRICE} each.",
+        "Free breakfasts and Ashtami lunches are only for flats that have paid the Puja subscription or a donation.",
+        "No take-aways for breakfast and Ashtami lunch.",
         f"Pure veg breakfast packet ₹{PACKET_PRICE} available every day.",
-        f"Ashtami lunch (khichuri bhog) is complimentary for 4 per subscription; extra ₹{ASHTAMI_BHOG_EXTRA} per head (no take-aways).",
+        f"Ashtami lunch (khichuri bhog): first {ASHTAMI_BHOG_FREE_HEADS} heads per flat that has subscribed or donated are "
+        f"free in the cart; the 5th onwards is ₹{ASHTAMI_BHOG_EXTRA} per head.",
     ],
+    "complimentary_quotas": COMPLIMENTARY_QUOTAS,
+    "complimentary_rules": COMPLIMENTARY_RULES,
+    "complimentary_policy": COMPLIMENTARY_POLICY,
     "poster_note": "Prices and plates from the One 10 Events Organising Committee menu poster (updated Oct 2026).",
 }
 
 
 def _breakfast(day_code: str, diet: str, name: str, description: str, *, active: bool = True,
-               price_note: str = "") -> dict[str, Any]:
+               price_note: str = "", for_all_diets: bool = False) -> dict[str, Any]:
     return {
         "day_code": day_code, "meal": "breakfast", "diet": diet,
         "name": name, "description": description,
@@ -46,7 +94,17 @@ def _breakfast(day_code: str, diet: str, name: str, description: str, *, active:
         "badge": BREAKFAST_BADGE,
         "active": active,
         "price_note": price_note,
+        "for_all_diets": for_all_diets,
     }
+
+
+def _common_breakfast(day_code: str, day_name: str, description: str) -> list[dict[str, Any]]:
+    """One plate for everyone: a single veg card listed under both filters; the non-veg cell stays hidden."""
+    return [
+        _breakfast(day_code, "veg", f"{day_name} Breakfast", description, for_all_diets=True),
+        _breakfast(day_code, "non_veg", f"{day_name} Non-veg Breakfast", description,
+                   active=False, price_note=_SAME_FOR_ALL),
+    ]
 
 
 def _packet(day_code: str, name: str, description: str) -> dict[str, Any]:
@@ -54,18 +112,17 @@ def _packet(day_code: str, name: str, description: str) -> dict[str, Any]:
         "day_code": day_code, "meal": "breakfast_packet", "diet": "veg",
         "name": name, "description": description,
         "amount_rupees": PACKET_PRICE,
-        "badge": "Pure veg",
+        "badge": "",
+        "for_all_diets": True,
     }
 
 
-_SAME_AS_VEG = "Same breakfast plate as veg — hidden on public menu to avoid duplicate"
+_SAME_FOR_ALL = "Same plate as veg — listed once as a 'For everyone' card"
 
 # amount_rupees is the chargeable plate price (extra plate / head for complimentary meals).
 CELLS: list[dict[str, Any]] = [
     # —— Sasthi · 16 Oct (Friday) ——
-    _breakfast("sasthi", "veg", "Sasthi Breakfast", "Luchi, sada aloo tarkari, bode, tea / coffee"),
-    _breakfast("sasthi", "non_veg", "Sasthi Non-veg Breakfast", "Luchi, sada aloo tarkari, bode, tea / coffee",
-               active=False, price_note=_SAME_AS_VEG),
+    *_common_breakfast("sasthi", "Sasthi", "Luchi, sada aloo tarkari, bode, tea / coffee"),
     _packet("sasthi", "Sasthi Breakfast Packet", "Club kachori (5 pcs), jalebi"),
     {
         "day_code": "sasthi", "meal": "lunch", "diet": "veg",
@@ -148,21 +205,20 @@ CELLS: list[dict[str, Any]] = [
         "amount_rupees": 320,
     },
     # —— Ashtami · 19 Oct (Monday) ——
-    _breakfast("ashtami", "veg", "Ashtami Breakfast", "Luchi, cholar dal, kalakand, tea / coffee"),
-    _breakfast("ashtami", "non_veg", "Ashtami Non-veg Breakfast", "Luchi, cholar dal, kalakand, tea / coffee",
-               active=False, price_note=_SAME_AS_VEG),
+    *_common_breakfast("ashtami", "Ashtami", "Luchi, cholar dal, kalakand, tea / coffee"),
     _packet("ashtami", "Ashtami Breakfast Packet", "Dahi vada (2 pcs), gulab jamun"),
     {
         "day_code": "ashtami", "meal": "lunch", "diet": "veg",
         "name": "Ashtami Lunch (Khichuri bhog)",
         "description": "Khichuri, luchi, cholar dal, labra, beguni, aloo dum, chatni, papad, payesh",
         "amount_rupees": ASHTAMI_BHOG_EXTRA,
+        "for_all_diets": True,
         "is_complimentary": True,
         "complimentary_note": (
-            "Complimentary for 4 per household subscription (no take-aways). "
-            f"Extra ₹{ASHTAMI_BHOG_EXTRA} per head."
+            f"First {ASHTAMI_BHOG_FREE_HEADS} heads per flat that has subscribed or donated are complimentary — applied "
+            f"automatically in your cart. From the 5th, ₹{ASHTAMI_BHOG_EXTRA} per head. No take-aways."
         ),
-        "badge": f"Complimentary (4) · Extra ₹{ASHTAMI_BHOG_EXTRA}",
+        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} free · No take-away",
     },
     {
         "day_code": "ashtami", "meal": "lunch", "diet": "non_veg",
@@ -170,12 +226,13 @@ CELLS: list[dict[str, Any]] = [
         "description": "Khichuri, luchi, cholar dal, labra, beguni, aloo dum, chatni, papad, payesh",
         "amount_rupees": ASHTAMI_BHOG_EXTRA,
         "active": False,
+        "price_note": "No non-veg lunch on Ashtami — only the veg khichuri bhog is served",
         "is_complimentary": True,
         "complimentary_note": (
-            f"Same Ashtami bhog as veg — use the veg lunch card (complimentary for 4 / extra ₹{ASHTAMI_BHOG_EXTRA})."
+            f"Same bhog as veg. The {ASHTAMI_BHOG_FREE_HEADS} free heads per flat are shared with the veg card. "
+            f"From the 5th, ₹{ASHTAMI_BHOG_EXTRA} per head. No take-aways."
         ),
-        "badge": f"Complimentary (4) · Extra ₹{ASHTAMI_BHOG_EXTRA}",
-        "price_note": "Duplicate of veg Ashtami bhog — hidden on public menu",
+        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} free · No take-away",
     },
     {
         "day_code": "ashtami", "meal": "dinner", "diet": "veg",
@@ -190,9 +247,7 @@ CELLS: list[dict[str, Any]] = [
         "amount_rupees": 270,
     },
     # —— Nabami · 20 Oct (Tuesday) ——
-    _breakfast("nabami", "veg", "Nabami Breakfast", "Aloo paratha, doi / raita, achar, tea / coffee"),
-    _breakfast("nabami", "non_veg", "Nabami Non-veg Breakfast", "Aloo paratha, doi / raita, achar, tea / coffee",
-               active=False, price_note=_SAME_AS_VEG),
+    *_common_breakfast("nabami", "Nabami", "Aloo paratha, doi / raita, achar, tea / coffee"),
     _packet("nabami", "Nabami Breakfast Packet", "Samosa, khasta kachori, dhokla"),
     {
         "day_code": "nabami", "meal": "lunch", "diet": "veg",
@@ -219,9 +274,7 @@ CELLS: list[dict[str, Any]] = [
         "amount_rupees": 320,
     },
     # —— Dashami · 21 Oct (Wednesday) ——
-    _breakfast("dashami", "veg", "Dashami Breakfast", "Korai shutir kochuri, aloo dum, rosogolla, tea / coffee"),
-    _breakfast("dashami", "non_veg", "Dashami Non-veg Breakfast", "Korai shutir kochuri, aloo dum, rosogolla, tea / coffee",
-               active=False, price_note=_SAME_AS_VEG),
+    *_common_breakfast("dashami", "Dashami", "Korai shutir kochuri, aloo dum, rosogolla, tea / coffee"),
     _packet("dashami", "Dashami Breakfast Packet", "Vada (2 pcs), jalebi"),
     {
         "day_code": "dashami", "meal": "lunch", "diet": "veg",
@@ -292,6 +345,7 @@ def official_cells_for_seed() -> list[dict[str, Any]]:
             "complimentary_note": (raw.get("complimentary_note") or "")[:400],
             "price_note": (raw.get("price_note") or "")[:300],
             "badge": (raw.get("badge") or "")[:120],
+            "for_all_diets": bool(raw.get("for_all_diets")),
             "sort_order": int(day.get("order") or 0) * 100 + _MEAL_SORT.get(meal, 90) + _DIET_SORT.get(diet, 5),
         })
     return out

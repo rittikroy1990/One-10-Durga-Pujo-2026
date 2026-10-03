@@ -34,6 +34,7 @@ function CellEditor({ cell, onClose, onSaved }) {
   const [complimentaryNote, setComplimentaryNote] = useState(cell.complimentary_note || "");
   const [priceNote, setPriceNote] = useState(cell.price_note || "");
   const [badge, setBadge] = useState(cell.badge || "");
+  const [forAllDiets, setForAllDiets] = useState(!!cell.for_all_diets);
   const [imageUrl, setImageUrl] = useState(cell.image_url || "");
   const [image, setImage] = useState(null);
   const [clearImage, setClearImage] = useState(false);
@@ -64,6 +65,7 @@ function CellEditor({ cell, onClose, onSaved }) {
       fd.append("complimentary_note", complimentaryNote.trim());
       fd.append("price_note", priceNote.trim());
       fd.append("badge", badge.trim());
+      if (cell.diet === "veg") fd.append("for_all_diets", forAllDiets ? "true" : "false");
       if (clearImage) fd.append("clear_image", "true");
       else if (image) fd.append("image", image);
       else if (imageUrl.trim() && imageUrl.trim() !== (cell.image_url || "")) {
@@ -202,6 +204,17 @@ function CellEditor({ cell, onClose, onSaved }) {
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4" />
             Active on public Food page
           </label>
+          {cell.diet === "veg" ? (
+            <label className="flex items-start gap-2 text-sm text-brown-800/80">
+              <input type="checkbox" checked={forAllDiets} onChange={(e) => setForAllDiets(e.target.checked)} className="mt-0.5 h-4 w-4" data-testid="matrix-cell-for-all" />
+              <span>
+                For everyone — same plate for veg and non-veg
+                <span className="block text-xs text-brown-800/50">
+                  Shown once under both filters as “Veg · For everyone”. Hide the non-veg cell for this meal so it isn&apos;t listed twice.
+                </span>
+              </span>
+            </label>
+          ) : null}
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
@@ -507,6 +520,9 @@ export default function FoodMenuMatrix() {
                               <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-wide text-amber-800">
                                 {cell.badge || "Complimentary"}
                               </p>
+                            ) : null}
+                            {cell.for_all_diets ? (
+                              <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-emerald-700">For everyone</p>
                             ) : null}
                             <div className="flex items-center gap-1">
                               <span className="text-xs text-brown-800/45">₹</span>

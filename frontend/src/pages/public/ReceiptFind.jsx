@@ -73,6 +73,11 @@ function ReceiptCards({ receipts, household }) {
                   <Button variant="subtle">Verify online</Button>
                 </Link>
               )}
+              {r.food_voucher_token && (
+                <a href={`${API}/food/voucher/${r.food_voucher_token}/pdf`} target="_blank" rel="noreferrer">
+                  <Button variant="primary" data-testid="receipt-food-voucher-btn">Download food voucher</Button>
+                </a>
+              )}
             </div>
           </div>
         );

@@ -174,6 +174,7 @@ def merge_skeleton_with_db(db_items: list[dict]) -> list[dict[str, Any]]:
                 "complimentary_note": existing.get("complimentary_note") or "",
                 "price_note": existing.get("price_note") or "",
                 "badge": existing.get("badge") or "",
+                "for_all_diets": bool(existing.get("for_all_diets")),
             })
         else:
             out.append(cell)

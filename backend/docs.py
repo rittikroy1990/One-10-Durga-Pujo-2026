@@ -262,106 +262,234 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     return buf.getvalue()
 
 
-def food_coupon_pdf(coupon: dict, subscription: dict, settings: dict) -> bytes:
-    """Single A4 food coupon sheet for admin printout."""
+def _rs(paise) -> str:
+    return f"Rs. {fmt_inr(int(paise or 0))}"
+
+
+def _short_date(iso_date: str) -> str:
+    try:
+        return datetime.fromisoformat(iso_date).strftime("%d %b")
+    except Exception:
+        return iso_date or ""
+
+
+def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
+    """Resident's food voucher: every day / meal / head on the order, what was free and what was paid."""
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
+    org = settings.get("organisation", {})
+    camp = settings.get("campaign", {})
+    letterhead = (settings.get("receipt", {}).get("letterhead_title") or org.get("organiser")
+                  or "ONE 10 EVENT ORGANISING COMMITEE")
+    title = camp.get("title") or settings.get("cycle", {}).get("name") or "One 10 Durgotsav 2026"
+
+    base = ParagraphStyle("b", fontName="Helvetica", fontSize=9.5, leading=13, textColor=BROWN)
+    small = ParagraphStyle("s", parent=base, fontSize=8, leading=11, textColor=colors.HexColor("#6B5A4E"))
+    head = ParagraphStyle("h", parent=base, fontName="Helvetica-Bold", fontSize=15, leading=19,
+                          textColor=VERMILION, alignment=1)
+    sub = ParagraphStyle("sub", parent=base, fontName="Helvetica-Bold", fontSize=12, leading=16,
+                         textColor=GOLD, alignment=1)
+    section = ParagraphStyle("sec", parent=base, fontName="Helvetica-Bold", fontSize=10.5, leading=14,
+                             spaceBefore=6, spaceAfter=4)
+
+    buf = io.BytesIO()
+    W, H = A4
+
+    def frame(c, _doc):
+        c.saveState()
+        c.setStrokeColor(GOLD)
+        c.setLineWidth(2)
+        c.rect(10 * mm, 10 * mm, W - 20 * mm, H - 20 * mm)
+        c.setFont("Helvetica", 7)
+        c.setFillColor(colors.HexColor("#6B5A4E"))
+        c.drawCentredString(W / 2, 13 * mm, f"Food voucher {voucher.get('voucher_no') or ''} · {letterhead}")
+        c.restoreState()
+
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=18 * mm, bottomMargin=20 * mm, title=voucher.get("voucher_no") or "Food voucher")
+    story = [
+        Paragraph(letterhead, head),
+        Paragraph(f"{title} — Food Voucher", sub),
+        Spacer(1, 6 * mm),
+    ]
+
+    status = voucher.get("status_label") or ""
+    info_rows = [
+        [Paragraph(f"<b>Voucher No:</b> {voucher.get('voucher_no') or ''}", base),
+         Paragraph(f"<b>Status:</b> <font color='#0f7b45'>{status.upper()}</font>", base)],
+        [Paragraph(f"<b>Name:</b> {voucher.get('name') or ''}", base),
+         Paragraph(f"<b>Mobile:</b> {voucher.get('mobile_masked') or ''}", base)],
+        [Paragraph(f"<b>Tower / Flat:</b> {voucher.get('tower_name') or ''}, Flat {voucher.get('flat_number') or ''}", base),
+         Paragraph(f"<b>Issued:</b> {_ist_str(voucher.get('voucher_issued_at') or '')}", base)],
+        [Paragraph(f"<b>Order ID:</b> {voucher.get('order_id') or ''}", small),
+         Paragraph(f"<b>Ordered:</b> {_ist_str(voucher.get('ordered_at') or '')}", small)],
+    ]
+    info = Table(info_rows, colWidths=[104 * mm, 70 * mm])
+    info.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+    story += [info, Spacer(1, 3 * mm)]
+
+    totals = voucher.get("totals") or {}
+    summary = Table([[
+        Paragraph(f"<b>{totals.get('heads', 0)}</b><br/><font size=8>Total heads / plates</font>", base),
+        Paragraph(f"<b>{totals.get('free', 0)}</b><br/><font size=8>Complimentary</font>", base),
+        Paragraph(f"<b>{totals.get('paid', 0)}</b><br/><font size=8>Paid</font>", base),
+        Paragraph(f"<b>{_rs(voucher.get('amount_paid_paise'))}</b><br/><font size=8>Amount paid</font>", base),
+    ]], colWidths=[43.5 * mm] * 4)
+    summary.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.8, GOLD), ("INNERGRID", (0, 0), (-1, -1), 0.5, GOLD),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF8EC")), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story += [summary, Spacer(1, 2 * mm)]
+
+    story.append(Paragraph("Meals by day", section))
+    rows = [["Day", "Meal", "Item", "Diet", "Heads", "Free", "Paid", "Amount"]]
+    for ln in voucher.get("lines") or []:
+        rows.append([
+            Paragraph(f"<b>{ln.get('day_label')}</b><br/><font size=7>{_short_date(ln.get('date'))} {ln.get('weekday', '')[:3]}</font>", small),
+            ln.get("meal_label") or "",
+            Paragraph(ln.get("item") or "", small),
+            ln.get("diet_label") or "",
+            str(ln.get("heads") or 0),
+            str(ln.get("free") or 0),
+            str(ln.get("paid") or 0),
+            _rs(ln.get("amount_paise")) if ln.get("amount_paise") is not None else "-",
+        ])
+    rows.append(["", "", "Total", "", str(totals.get("heads", 0)), str(totals.get("free", 0)),
+                 str(totals.get("paid", 0)), _rs(voucher.get("total_amount_paise"))])
+    t = Table(rows, colWidths=[24 * mm, 24 * mm, 50 * mm, 16 * mm, 13 * mm, 12 * mm, 12 * mm, 23 * mm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BROWN), ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F5F0E6")),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (4, 0), (-1, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.4, GOLD),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t)
+
+    days = voucher.get("days") or []
+    if days:
+        story.append(Paragraph("Heads per day", section))
+        drows = [["Day", "Meals", "Heads"]]
+        for d in days:
+            meals = ", ".join(f"{m['meal_label']} {m['heads']}" for m in d.get("meals") or [])
+            drows.append([f"{d.get('day_label')} ({_short_date(d.get('date'))})", meals, str(d.get("heads") or 0)])
+        dt = Table(drows, colWidths=[40 * mm, 112 * mm, 22 * mm])
+        dt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BROWN), ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("ALIGN", (2, 0), (2, -1), "RIGHT"), ("GRID", (0, 0), (-1, -1), 0.4, GOLD),
+        ]))
+        story.append(dt)
+
+    story.append(Paragraph("Payment", section))
+    receipts = voucher.get("receipts") or []
+    if receipts:
+        prows = [["Receipt No", "Date", "Amount"]]
+        for r in receipts:
+            prows.append([r.get("receipt_no") or "", _ist_str(r.get("issued_at") or ""), _rs(r.get("amount_paise"))])
+        prows.append(["Total paid", "", _rs(voucher.get("amount_paid_paise"))])
+        pt = Table(prows, colWidths=[60 * mm, 80 * mm, 34 * mm])
+        pt.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BROWN), ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5), ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+            ("GRID", (0, 0), (-1, -1), 0.4, GOLD),
+        ]))
+        story.append(pt)
+    else:
+        story.append(Paragraph("Fully complimentary — nothing to pay.", base))
+
+    story.append(Spacer(1, 4 * mm))
+    coupon = voucher.get("coupon")
+    if coupon:
+        story.append(Paragraph(
+            f"<b>Coupons given:</b> {_ist_str(coupon.get('issued_at') or '')} (ref {coupon.get('coupon_no')})", base))
+    else:
+        story.append(Paragraph("<b>Coupons:</b> not yet collected.", base))
+    story += [
+        Spacer(1, 2 * mm),
+        Paragraph("Download or print this voucher and show it to a committee member to collect your food coupons. "
+                  "Coupons are given once per voucher. No take-aways for breakfast and Ashtami lunch.", small),
+    ]
+    doc.build(story, onFirstPage=frame, onLaterPages=frame)
+    return buf.getvalue()
+
+
+def food_coupon_pdf(coupon: dict, subscription: dict, settings: dict, slips: list) -> bytes:
+    """Committee printout: one cut-out slip per person per meal, each with its own serial number."""
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
-    org = settings.get("organisation", {})
-    food = settings.get("food_subscription", {})
-    letterhead = org.get("organiser") or "ONE 10 EVENT ORGANISING COMMITEE"
-
-    c.setStrokeColor(GOLD)
-    c.setLineWidth(2)
-    c.rect(12 * mm, 12 * mm, W - 24 * mm, H - 24 * mm)
-    c.setLineWidth(0.5)
-    c.rect(15 * mm, 15 * mm, W - 30 * mm, H - 30 * mm)
-
-    y = H - 28 * mm
-    c.setFillColor(VERMILION)
-    c.setFont("Helvetica-Bold", 14)
-    c.drawCentredString(W / 2, y, letterhead)
-    y -= 6 * mm
-    c.setFillColor(GOLD)
-    c.setFont("Helvetica-Bold", 12)
-    c.drawCentredString(W / 2, y, food.get("title") or "Food Subscription Coupon")
-    y -= 5 * mm
-    c.setFillColor(BROWN)
-    c.setFont("Helvetica", 9)
-    c.drawCentredString(W / 2, y, food.get("subtitle") or "Shashthi to Dashami")
-    y -= 10 * mm
-
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(22 * mm, y, f"Coupon No: {coupon.get('coupon_no', '')}")
-    c.setFillColor(colors.HexColor("#0f7b45"))
-    c.drawRightString(W - 22 * mm, y, f"Status: {(coupon.get('status') or 'issued').upper()}")
-    c.setFillColor(BROWN)
-    y -= 7 * mm
-    c.setFont("Helvetica", 10)
-    c.drawString(22 * mm, y, f"Name: {coupon.get('name') or subscription.get('name') or ''}")
-    y -= 5 * mm
-    mobile = coupon.get("mobile") or subscription.get("mobile") or ""
-    c.drawString(22 * mm, y, f"Mobile: {mobile}")
-    y -= 5 * mm
+    title = (settings.get("campaign", {}).get("title") or "One 10 Durgotsav 2026")[:30]
+    name = coupon.get("name") or subscription.get("name") or ""
     tower = coupon.get("tower_name") or subscription.get("tower_name") or ""
     flat = coupon.get("flat_number") or subscription.get("flat_number") or ""
-    c.drawString(22 * mm, y, f"Household: {tower}{', Flat ' + flat if flat else ''}")
-    y -= 5 * mm
-    c.drawString(22 * mm, y, f"Issued: {_ist_str(coupon.get('created_at', ''))}")
-    y -= 5 * mm
-    c.setFont("Helvetica-Oblique", 9)
-    c.drawString(22 * mm, y, "Amounts: TBC · Payment not activated")
-    y -= 8 * mm
+    voucher_no = coupon.get("voucher_no") or subscription.get("voucher_no") or ""
+    coupon_no = coupon.get("coupon_no", "")
 
-    # Meal grid: Day | Breakfast | Lunch | Evening | Dinner
-    meal_codes = ["breakfast", "lunch", "evening", "dinner"]
-    meal_labels = ["Breakfast", "Lunch", "Evening", "Dinner"]
-    selected = {
-        (x.get("day_code"), x.get("meal_code"))
-        for x in (coupon.get("selections") or subscription.get("selections") or [])
-    }
-    days = food.get("days") or []
-    if not days:
-        # fall back from selections
-        day_order = []
-        for x in (coupon.get("selections") or []):
-            if x.get("day_code") not in day_order:
-                day_order.append(x.get("day_code"))
-        days = [{"code": d, "label": (next((s.get("day_label") for s in (coupon.get("selections") or []) if s.get("day_code") == d), d))} for d in day_order]
+    cols, rows_per_page = 3, 7
+    margin_x, margin_y = 10 * mm, 14 * mm
+    cw = (W - 2 * margin_x) / cols
+    ch = (H - 2 * margin_y - 8 * mm) / rows_per_page
+    per_page = cols * rows_per_page
+    pages = max(1, -(-len(slips) // per_page))
+    pad = 3.5 * mm
+    green = colors.HexColor("#0f7b45")
 
-    header = ["Day"] + meal_labels
-    rows = [header]
-    for day in days:
-        row = [day.get("label") or day.get("code")]
-        for mc in meal_codes:
-            row.append("✓" if (day.get("code"), mc) in selected else "—")
-        rows.append(row)
+    for idx, sl in enumerate(slips):
+        slot = idx % per_page
+        if slot == 0:
+            if idx:
+                c.showPage()
+            c.setFont("Helvetica-Bold", 8.5)
+            c.setFillColor(BROWN)
+            c.drawString(margin_x, H - margin_y + 2 * mm,
+                         f"Food coupons {coupon_no} · Voucher {voucher_no} · {name[:30]} · {tower}, Flat {flat}")
+            c.setFont("Helvetica", 7)
+            c.drawCentredString(
+                W / 2, margin_y - 8 * mm,
+                f"{len(slips)} coupons · one per person per meal · counter keeps the slip · "
+                f"page {idx // per_page + 1} of {pages}")
+        col, row = slot % cols, slot // cols
+        x = margin_x + col * cw
+        y = H - margin_y - 4 * mm - (row + 1) * ch
+        c.setDash(3, 3)
+        c.setStrokeColor(GOLD)
+        c.setLineWidth(0.8)
+        c.rect(x + 1.5, y + 1.5, cw - 3, ch - 3)
+        c.setDash()
+        top = y + ch - pad - 1.5
+        right = x + cw - pad
 
-    t = Table(rows, colWidths=[40 * mm, 32 * mm, 32 * mm, 32 * mm, 32 * mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), BROWN),
-        ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.5, GOLD),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#FFF8EC")),
-    ]))
-    tw, th = t.wrapOn(c, W, H)
-    t.drawOn(c, 22 * mm, y - th)
-    y = y - th - 10 * mm
+        c.setFillColor(VERMILION)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(x + pad, top, title)
+        c.setFillColor(BROWN)
+        c.drawRightString(right, top, "1 PERSON")
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x + pad, top - 5.5 * mm, f"{sl.get('day_label', '')} · {sl.get('meal_label', '')}")
+        c.setFont("Helvetica", 6.8)
+        c.drawString(x + pad, top - 8.8 * mm,
+                     f"{_short_date(sl.get('date'))} {(sl.get('weekday') or '')[:3]} · {sl.get('diet_label', '')}")
+        c.drawString(x + pad, top - 12 * mm, (sl.get("item") or "")[:44])
+        c.setFont("Helvetica-Bold", 7.2)
+        c.setFillColor(green if sl.get("is_free") else VERMILION)
+        c.drawString(x + pad, top - 16 * mm, "COMPLIMENTARY" if sl.get("is_free") else "PAID")
+        c.setFillColor(BROWN)
+        c.drawRightString(right, top - 16 * mm, f"{sl.get('n')} of {sl.get('of')}")
 
-    c.setFont("Helvetica", 8)
-    c.drawString(22 * mm, y, f"Issued by: {coupon.get('issued_by_name') or 'EOC Admin'}")
-    y -= 5 * mm
-    c.drawString(22 * mm, y, "Present this coupon for meal entitlement. Valid for selected meals only.")
-    y -= 8 * mm
-    c.setFont("Helvetica", 7)
-    c.setFillColor(colors.HexColor("#6B5A4E"))
-    c.drawCentredString(W / 2, 18 * mm, "Admin printout · One A4 sheet · ONE 10 EVENT ORGANISING COMMITEE")
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(x + pad, y + pad + 3 * mm, f"No. {sl.get('serial', '')}")
+        c.setFont("Helvetica", 6)
+        c.drawString(x + pad, y + pad, f"{name[:28]} · {tower}, Flat {flat}")
 
+    if not slips:
+        c.setFont("Helvetica", 11)
+        c.drawString(margin_x, H / 2, "No meals on this order.")
     c.showPage()
     c.save()
     return buf.getvalue()

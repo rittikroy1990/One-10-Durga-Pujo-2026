@@ -1219,9 +1219,21 @@ export default function Food() {
                         </h2>
                       </div>
                       {cartCount > 0 && (
-                        <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-reset-btn">
-                          <Trash2 className="h-3.5 w-3.5" /> Reset cart
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            className="lg:hidden"
+                            onClick={() => setCartOpen(true)}
+                            data-testid="food-view-cart-header"
+                          >
+                            <ShoppingCart className="h-3.5 w-3.5" /> View cart ({cartCount})
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-reset-btn">
+                            <Trash2 className="h-3.5 w-3.5" /> Reset cart
+                          </Button>
+                        </div>
                       )}
                     </div>
                     {catalogItems.length > 0 && (

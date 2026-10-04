@@ -274,6 +274,7 @@ export default function Food() {
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
   const [cart, setCart] = useState({});
+  const [cartOpen, setCartOpen] = useState(false);
   const [menuDetail, setMenuDetail] = useState(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [dayFilter, setDayFilter] = useState("");
@@ -510,8 +511,13 @@ export default function Food() {
   const clearCart = () => {
     if (Object.keys(cart).length === 0) return;
     setCart({});
+    setCartOpen(false);
     toast.message("Cart cleared");
   };
+
+  useEffect(() => {
+    if (cartCount === 0) setCartOpen(false);
+  }, [cartCount]);
 
 
   const addOneOfMealAcrossDays = (mealCode) => {
@@ -799,6 +805,103 @@ export default function Food() {
 
   const stepForBar = step === "done" ? (paymentEnabled ? "pay" : "checkout") : step;
 
+  const cartBody = cartCount === 0 ? (
+    <div className="rounded-xl bg-sun-50/80 px-3 py-4 text-sm text-brown-800/70">
+      <p className="font-medium text-brown-900">Cart is empty</p>
+      <p className="mt-1">
+        {catalogMode
+          ? <>Tap <span className="font-semibold">Add</span> on any menu item. Choose as many as you like.</>
+          : <>Tap <span className="font-semibold">Add</span> next to any meal. Example: 3 breakfasts + 2 lunches.</>}
+      </p>
+    </div>
+  ) : (
+    <>
+      <ul className="max-h-[50vh] space-y-3 overflow-y-auto sm:max-h-72">
+        {cartLines.map((line) => (
+          <li key={line.key} className="rounded-xl border border-sun-400/20 bg-sun-50/40 p-3" data-testid={`food-cart-line-${line.key}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="font-medium text-brown-900">{line.meal_label}</div>
+                <div className="text-xs text-brown-800/55">{line.day_label} · {line.amount_label} each</div>
+                {line.free_qty > 0 ? (
+                  <div className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
+                    {line.free_qty} complimentary
+                    {line.quantity > line.free_qty ? ` · ${line.quantity - line.free_qty} charged` : ""}
+                  </div>
+                ) : null}
+              </div>
+              <div className="text-right font-semibold text-vermilion-600">
+                {line.line_total_paise != null
+                  ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Complimentary" : formatPaise(line.line_total_paise))
+                  : "TBC"}
+              </div>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <QtyControl
+                value={line.quantity}
+                label={`${line.day_label} ${line.meal_label}`}
+                testId={`food-cart-qty-${line.key}`}
+                onBump={(d) => bump(line.key, d)}
+                onSet={(v) => setQty(line.key, v)}
+              />
+              <button
+                type="button"
+                className="text-xs text-brown-800/45 hover:text-vermilion-600"
+                onClick={() => setQty(line.key, 0)}
+                aria-label={`Remove ${line.meal_label}`}
+              >
+                Remove
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {!catalogMode && (mealTypeSummary.breakfast > 0 || mealTypeSummary.lunch > 0 || mealTypeSummary.dinner > 0) && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-brown-800/65">
+          {mealTypeSummary.breakfast > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Breakfast × {mealTypeSummary.breakfast}</span>}
+          {mealTypeSummary.lunch > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Lunch × {mealTypeSummary.lunch}</span>}
+          {mealTypeSummary.dinner > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Dinner × {mealTypeSummary.dinner}</span>}
+        </div>
+      )}
+
+      {freeRulesInCart.length ? (
+        <div className="mt-3 rounded-xl bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900/85 ring-1 ring-emerald-600/15" data-testid="food-cart-complimentary">
+          {freeSavedPaise > 0 ? (
+            <div className="flex items-center justify-between gap-2 font-semibold">
+              <span>Complimentary: {describeFree(freeRules, freeInCart)}</span>
+              <span>−{formatPaise(freeSavedPaise)}</span>
+            </div>
+          ) : null}
+          <p className={`mt-0.5 flex items-center justify-between gap-2 ${noFreeMeals ? "font-medium text-amber-900" : ""}`}>
+            <span>
+              {!flatReady || flatSubscribed === null
+                ? "Enter your tower, flat & mobile at the top to apply complimentary meals."
+                : flatSubscribed === false
+                ? "No complimentary meals — this flat hasn't paid the Puja subscription."
+                : mobileOk === false
+                  ? "No complimentary meals — use the mobile registered with this flat's subscription."
+                  : "Complimentary for subscribers · No take-aways"}
+            </span>
+            <button type="button" onClick={() => setInfoOpen(true)} className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="Complimentary meal rules">
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
+        <div className="text-sm text-brown-800/60">{cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}</div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wide text-brown-800/45">You pay</div>
+          <div className="font-display text-3xl text-vermilion-600" data-testid="food-cart-total">
+            {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
   const cartPanel = (
     <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card" data-testid="food-cart">
       <div className="flex items-center justify-between gap-2">
@@ -815,103 +918,7 @@ export default function Food() {
           </button>
         )}
       </div>
-
-      {cartCount === 0 ? (
-        <div className="mt-4 rounded-xl bg-sun-50/80 px-3 py-4 text-sm text-brown-800/70">
-          <p className="font-medium text-brown-900">Cart is empty</p>
-          <p className="mt-1">
-            {catalogMode
-              ? <>Tap <span className="font-semibold">Add</span> on any menu item. Choose as many as you like.</>
-              : <>Tap <span className="font-semibold">Add</span> next to any meal. Example: 3 breakfasts + 2 lunches.</>}
-          </p>
-        </div>
-      ) : (
-        <>
-          <ul className="mt-3 max-h-72 space-y-3 overflow-y-auto">
-            {cartLines.map((line) => (
-              <li key={line.key} className="rounded-xl border border-sun-400/20 bg-sun-50/40 p-3" data-testid={`food-cart-line-${line.key}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="font-medium text-brown-900">{line.meal_label}</div>
-                    <div className="text-xs text-brown-800/55">{line.day_label} · {line.amount_label} each</div>
-                    {line.free_qty > 0 ? (
-                      <div className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
-                        {line.free_qty} complimentary
-                        {line.quantity > line.free_qty ? ` · ${line.quantity - line.free_qty} charged` : ""}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="text-right font-semibold text-vermilion-600">
-                    {line.line_total_paise != null
-                      ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Complimentary" : formatPaise(line.line_total_paise))
-                      : "TBC"}
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <QtyControl
-                    value={line.quantity}
-                    label={`${line.day_label} ${line.meal_label}`}
-                    testId={`food-cart-qty-${line.key}`}
-                    onBump={(d) => bump(line.key, d)}
-                    onSet={(v) => setQty(line.key, v)}
-                  />
-                  <button
-                    type="button"
-                    className="text-xs text-brown-800/45 hover:text-vermilion-600"
-                    onClick={() => setQty(line.key, 0)}
-                    aria-label={`Remove ${line.meal_label}`}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          {!catalogMode && (mealTypeSummary.breakfast > 0 || mealTypeSummary.lunch > 0 || mealTypeSummary.dinner > 0) && (
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-brown-800/65">
-              {mealTypeSummary.breakfast > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Breakfast × {mealTypeSummary.breakfast}</span>}
-              {mealTypeSummary.lunch > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Lunch × {mealTypeSummary.lunch}</span>}
-              {mealTypeSummary.dinner > 0 && <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-sun-400/30">Dinner × {mealTypeSummary.dinner}</span>}
-            </div>
-          )}
-
-          {freeRulesInCart.length ? (
-            <div className="mt-3 rounded-xl bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900/85 ring-1 ring-emerald-600/15" data-testid="food-cart-complimentary">
-              {freeSavedPaise > 0 ? (
-                <div className="flex items-center justify-between gap-2 font-semibold">
-                  <span>Complimentary: {describeFree(freeRules, freeInCart)}</span>
-                  <span>−{formatPaise(freeSavedPaise)}</span>
-                </div>
-              ) : null}
-              <p className={`mt-0.5 flex items-center justify-between gap-2 ${noFreeMeals ? "font-medium text-amber-900" : ""}`}>
-                <span>
-                  {!flatReady || flatSubscribed === null
-                    ? "Enter your tower, flat & mobile at the top to apply complimentary meals."
-                    : flatSubscribed === false
-                    ? "No complimentary meals — this flat hasn't paid the Puja subscription."
-                    : mobileOk === false
-                      ? "No complimentary meals — use the mobile registered with this flat's subscription."
-                      : "Complimentary for subscribers · No take-aways"}
-                </span>
-                <button type="button" onClick={() => setInfoOpen(true)} className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="Complimentary meal rules">
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </p>
-            </div>
-          ) : null}
-
-          <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
-            <div className="text-sm text-brown-800/60">{cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}</div>
-            <div className="text-right">
-              <div className="text-[10px] uppercase tracking-wide text-brown-800/45">You pay</div>
-              <div className="font-display text-3xl text-vermilion-600" data-testid="food-cart-total">
-                {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      <div className="mt-3">{cartBody}</div>
     </div>
   );
 
@@ -1212,9 +1219,21 @@ export default function Food() {
                         </h2>
                       </div>
                       {cartCount > 0 && (
-                        <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-reset-btn">
-                          <Trash2 className="h-3.5 w-3.5" /> Reset cart
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            className="lg:hidden"
+                            onClick={() => setCartOpen(true)}
+                            data-testid="food-view-cart-header"
+                          >
+                            <ShoppingCart className="h-3.5 w-3.5" /> View cart ({cartCount})
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-reset-btn">
+                            <Trash2 className="h-3.5 w-3.5" /> Reset cart
+                          </Button>
+                        </div>
                       )}
                     </div>
                     {catalogItems.length > 0 && (
@@ -1496,7 +1515,7 @@ export default function Food() {
         )}
       </section>
 
-      {/* Mobile sticky checkout bar */}
+      {/* Mobile sticky checkout bar — cart sidebar is desktop-only, so buyers need View cart here */}
       {step === "menu" && cartCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-sun-400/30 bg-white/95 p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur lg:hidden" data-testid="food-mobile-checkout-bar">
           <div className="mx-auto flex max-w-5xl items-center gap-2">
@@ -1504,25 +1523,66 @@ export default function Food() {
               type="button"
               variant="outline"
               size="lg"
-              onClick={clearCart}
-              data-testid="food-mobile-reset"
+              onClick={() => setCartOpen(true)}
+              data-testid="food-view-cart"
               className="shrink-0 px-3"
-              aria-label="Reset cart"
+              aria-label={`View cart, ${cartCount} items`}
             >
-              <Trash2 className="h-4 w-4" />
+              <ShoppingCart className="h-4 w-4" />
+              <span className="rounded-full bg-vermilion-500 px-1.5 py-0.5 text-xs font-semibold text-white">{cartCount}</span>
             </Button>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs text-brown-800/55">{cartCount} {unitLabel}{cartCount === 1 ? "" : "s"} in cart</div>
-              <div className="truncate font-display text-xl text-vermilion-600">
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="min-w-0 flex-1 rounded-xl px-1 py-0.5 text-left hover:bg-sun-50/80"
+              data-testid="food-view-cart-summary"
+            >
+              <div className="text-xs font-semibold text-vermilion-600">View cart</div>
+              <div className="truncate font-display text-xl text-brown-900">
                 {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+                <span className="ml-1 text-sm font-normal text-brown-800/45">
+                  · {cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}
+                </span>
               </div>
-            </div>
+            </button>
             <Button type="button" variant="primary" size="lg" onClick={goCheckout} data-testid="food-goto-checkout">
               Checkout <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
       )}
+
+      <Dialog
+        open={cartOpen}
+        onClose={() => setCartOpen(false)}
+        title="Your cart"
+        size="md"
+        footer={
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={clearCart} data-testid="food-cart-dialog-reset">
+              <Trash2 className="h-3.5 w-3.5" /> Reset
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="subtle" onClick={() => setCartOpen(false)} data-testid="food-cart-keep-shopping">
+                Keep shopping
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => {
+                  setCartOpen(false);
+                  goCheckout();
+                }}
+                data-testid="food-cart-dialog-checkout"
+              >
+                Checkout <ArrowRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <div data-testid="food-cart-dialog">{cartBody}</div>
+      </Dialog>
 
       <Dialog
         open={!!menuDetail}

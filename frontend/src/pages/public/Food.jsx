@@ -3,10 +3,11 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   UtensilsCrossed, Info, Clock, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
-  Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon, Package,
+  Minus, Plus, ShoppingCart, Trash2, ArrowRight, ArrowLeft, Check, Coffee, Sun, Moon, Package, ClipboardList,
 } from "lucide-react";
 import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import FoodOrdersList from "../../components/FoodOrdersList";
 import { Button, Input, Label, Select, Spinner, Dialog } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
@@ -24,24 +25,27 @@ function parseMenuDishes(text) {
 // Fallbacks for the server's COMPLIMENTARY_POLICY / COMPLIMENTARY_RULES (menu_meta).
 const DEFAULT_FREE_POLICY = [
   { key: "ashtami_lunch", label: "Ashtami lunch", category: "lunch", day_code: "ashtami", free: 4 },
-  { key: "breakfast", label: "breakfast", category: "breakfast", free: 3, per_day: true },
+  { key: "breakfast", label: "breakfast", category: "breakfast", categories: ["breakfast", "breakfast_packet"], free: 3, per_day: true },
 ];
 const DEFAULT_FREE_RULES = [
   { key: "ashtami_lunch", label: "Ashtami lunch", category: "lunch", day_code: "ashtami", free: 4, group: "ashtami_lunch", group_label: "Ashtami lunch" },
   ...["sasthi", "saptami", "saptami_ashtami", "ashtami", "nabami", "dashami"].map((d) => ({
-    key: `breakfast_${d}`, label: "breakfast", category: "breakfast", day_code: d, free: 3, group: "breakfast", group_label: "breakfast",
+    key: `breakfast_${d}`, label: "breakfast", category: "breakfast", categories: ["breakfast", "breakfast_packet"], day_code: d, free: 3, group: "breakfast", group_label: "breakfast",
   })),
 ];
 
-/** "3 free breakfasts daily + 4 free Ashtami lunches" */
+/** "3 breakfast coupons every day + 4 Ashtami community lunch coupons" */
 function describePolicy(policy) {
   return [...policy].reverse()
-    .map((p) => `${p.free} free ${pluralMeal(p.label, p.free)}${p.per_day ? " daily" : ""}`)
+    .map((p) => {
+      const label = /^ashtami lunch$/i.test(p.label) ? "Ashtami community lunch" : p.label;
+      return `${p.free} ${label} coupon${p.free === 1 ? "" : "s"}${p.per_day ? " every day" : ""}`;
+    })
     .join(" + ");
 }
 
 function freeKeyFor(rules, category, dayCode) {
-  const rule = rules.find((r) => r.category === category && (!r.day_code || r.day_code === dayCode));
+  const rule = rules.find((r) => (r.categories || [r.category]).includes(category) && (!r.day_code || r.day_code === dayCode));
   return rule ? rule.key : "";
 }
 
@@ -329,11 +333,25 @@ export default function Food() {
   const [flatFree, setFlatFree] = useState(null);
   const [flatSubscribed, setFlatSubscribed] = useState(null);
   const [mobileOk, setMobileOk] = useState(null);
+  const [knownName, setKnownName] = useState("");
   const checkMobile = form.mobile.length === 10 ? form.mobile : "";
+  const [ordersTick, setOrdersTick] = useState(0);
+  const [myOrders, setMyOrders] = useState(null);
+  useEffect(() => {
+    setMyOrders(null);
+    if (!form.flat_id || !checkMobile || (step !== "checkout" && step !== "menu")) return;
+    let live = true;
+    api.post("/food/my-orders", { flat_id: form.flat_id, mobile: checkMobile })
+      .then((r) => { if (live) setMyOrders(r.data); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [form.flat_id, checkMobile, step, ordersTick]);
+  const openOrders = (myOrders?.orders || []).filter((o) => o.state !== "cancelled" && o.state !== "expired");
   useEffect(() => {
     setFlatFree(null);
     setFlatSubscribed(null);
     setMobileOk(null);
+    setKnownName("");
     if (!form.flat_id) return;
     let live = true;
     api.get("/food/complimentary", { params: { flat_id: form.flat_id, mobile: checkMobile } })
@@ -342,10 +360,11 @@ export default function Food() {
         setFlatFree(r.data.remaining || {});
         setFlatSubscribed(r.data.subscribed !== false);
         setMobileOk(r.data.mobile_ok ?? null);
+        setKnownName(r.data.known_name || "");
       })
       .catch(() => {});
     return () => { live = false; };
-  }, [form.flat_id, checkMobile]);
+  }, [form.flat_id, checkMobile, ordersTick]);
   const noFreeMeals = flatSubscribed === false || (flatSubscribed && mobileOk === false);
 
   const freeRules = useMemo(
@@ -357,11 +376,13 @@ export default function Food() {
     () => Object.fromEntries(freeRules.map((r) => [r.key, r.free])),
     [freeRules],
   );
-  // Until a flat is chosen, show the standard per-flat allowance; the server has the final say.
+  // Complimentary only once the flat is a verified subscriber with its registered mobile; the server re-checks.
+  const freeEligible = Boolean(flatFree && flatSubscribed && mobileOk === true);
   const freeQuota = useMemo(
-    () => flatFree || fullQuota,
-    [flatFree, fullQuota],
+    () => (freeEligible ? flatFree : Object.fromEntries(freeRules.map((r) => [r.key, 0]))),
+    [freeEligible, flatFree, freeRules],
   );
+  const flatReady = Boolean(form.tower_id && form.flat_id && form.mobile.length === 10);
 
   const rawCartLines = useMemo(() => {
     const lines = [];
@@ -590,9 +611,102 @@ export default function Food() {
     }
   };
 
+  const flatStatus = !flatReady ? (
+    <p className="text-xs text-brown-800/60">
+      Complimentary meals are for subscribed flats. Enter the mobile number used for your Puja subscription.
+    </p>
+  ) : flatSubscribed === null ? (
+    <p className="text-xs text-brown-800/55">Checking your flat…</p>
+  ) : flatSubscribed === false ? (
+    <p className="text-xs font-medium text-amber-900/90" data-testid="food-flat-not-subscribed">
+      This flat has not paid the Puja subscription yet, so all meals are charged.{" "}
+      <Link to="/subscribe" className="font-semibold text-vermilion-600 underline">Subscribe &amp; Pay</Link>
+      {" "}to unlock complimentary {describePolicy(freePolicy)}.
+    </p>
+  ) : mobileOk === false ? (
+    <p className="text-xs font-medium text-amber-900/90" data-testid="food-mobile-not-registered">
+      This mobile is not the one registered with this flat&apos;s Puja subscription, so all meals are charged.
+      Use the registered number to get complimentary meals.
+    </p>
+  ) : flatFree ? (
+    <p className="text-xs font-medium text-emerald-800" data-testid="food-flat-free">
+      <Check className="mr-1 inline h-3.5 w-3.5" />
+      Subscribed flat — complimentary meals apply automatically in your cart.
+      {freeRules.some((r) => (flatFree[r.key] ?? 0) < r.free)
+        ? ` Already used on earlier orders: ${freeRules
+          .filter((r) => (flatFree[r.key] ?? 0) < r.free)
+          .map((r) => `${r.free - (flatFree[r.key] ?? 0)} of ${r.free} ${r.label}`)
+          .join(", ")}.${
+          myOrders?.others_holding?.length
+            ? ` Also used by another order from this flat (mobile ${myOrders.others_holding.map((x) => x.mobile_masked).join(", ")}).`
+            : ""}`
+        : ""}
+    </p>
+  ) : null;
+
+  const flatCard = (
+    <div id="food-flat-card" className="rounded-2xl border border-emerald-600/25 bg-white p-4 shadow-card sm:p-5" data-testid="food-flat-card">
+      <h2 className="font-display text-xl text-brown-900">Start here: your flat</h2>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div>
+          <Label required>Tower</Label>
+          <Select
+            data-testid="food-tower"
+            value={form.tower_id}
+            onChange={(e) => setForm({ ...form, tower_id: e.target.value, flat_id: "", flat_number: "" })}
+          >
+            <option value="">Select tower</option>
+            {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label required>Flat</Label>
+          <Select data-testid="food-flat" value={form.flat_id} onChange={(e) => setForm({ ...form, flat_id: e.target.value })}>
+            <option value="">Select flat</option>
+            {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
+          </Select>
+        </div>
+        <div>
+          <Label required>Mobile</Label>
+          <Input
+            data-testid="food-mobile"
+            value={form.mobile}
+            onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+            placeholder="Subscription mobile"
+            inputMode="numeric"
+          />
+        </div>
+      </div>
+      <div className="mt-2.5">{flatStatus}</div>
+      {flatReady && knownName ? (
+        <p className="mt-1 text-xs text-brown-800/70" data-testid="food-known-name">
+          Ordering as <b className="text-brown-900">{knownName}</b>
+        </p>
+      ) : null}
+      {openOrders.length ? (
+        <details className="mt-3 rounded-xl bg-ivory-200 p-3" data-testid="food-flat-orders">
+          <summary className="cursor-pointer text-sm font-semibold text-brown-900">
+            You have {openOrders.length} earlier order{openOrders.length === 1 ? "" : "s"} — pay balance / download voucher
+          </summary>
+          <div className="mt-2">
+            <FoodOrdersList orders={openOrders} compact />
+          </div>
+        </details>
+      ) : null}
+    </div>
+  );
+
   const goCheckout = () => {
+    if (!flatReady) {
+      window.scrollTo({ top: document.getElementById("food-flat-card")?.offsetTop - 90 || 0, behavior: "smooth" });
+      return toast.error("Start with your tower, flat and mobile at the top");
+    }
     if (cartCount === 0) {
       return toast.error(catalogMode ? "Add at least one item to your cart" : "Tap Add on a meal to start your cart");
+    }
+    if (knownName) {
+      submitCheckout({ preventDefault() {} });
+      return;
     }
     setStep("checkout");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -601,7 +715,8 @@ export default function Food() {
   const submitCheckout = async (e) => {
     e.preventDefault();
     if (cartCount === 0) return toast.error("Your cart is empty");
-    if (!form.name.trim()) return toast.error("Please enter your name");
+    const name = form.name.trim() || knownName;
+    if (!name) return toast.error("Please enter your name");
     if (!/^[6-9]\d{9}$/.test(form.mobile)) {
       return toast.error("Enter a valid 10-digit mobile number");
     }
@@ -619,6 +734,7 @@ export default function Food() {
           }));
       const r = await api.post("/food/register", {
         ...form,
+        name,
         tower_name: tower?.name || form.tower_name,
         flat_number: flat?.number || form.flat_number,
         selections,
@@ -727,7 +843,7 @@ export default function Food() {
                   </div>
                   <div className="text-right font-semibold text-vermilion-600">
                     {line.line_total_paise != null
-                      ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Free" : formatPaise(line.line_total_paise))
+                      ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Complimentary" : formatPaise(line.line_total_paise))
                       : "TBC"}
                   </div>
                 </div>
@@ -770,13 +886,15 @@ export default function Food() {
               ) : null}
               <p className={`mt-0.5 flex items-center justify-between gap-2 ${noFreeMeals ? "font-medium text-amber-900" : ""}`}>
                 <span>
-                  {flatSubscribed === false
-                    ? "No free meals — this flat hasn't subscribed or donated."
+                  {!flatReady || flatSubscribed === null
+                    ? "Enter your tower, flat & mobile at the top to apply complimentary meals."
+                    : flatSubscribed === false
+                    ? "No complimentary meals — this flat hasn't paid the Puja subscription."
                     : mobileOk === false
-                      ? "No free meals — use the mobile registered with this flat's subscription."
-                      : "Free for subscribers & donors · No take-aways"}
+                      ? "No complimentary meals — use the mobile registered with this flat's subscription."
+                      : "Complimentary for subscribers · No take-aways"}
                 </span>
-                <button type="button" onClick={() => setInfoOpen(true)} className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="Free meal rules">
+                <button type="button" onClick={() => setInfoOpen(true)} className="shrink-0 text-emerald-700 hover:text-emerald-900" aria-label="Complimentary meal rules">
                   <Info className="h-3.5 w-3.5" />
                 </button>
               </p>
@@ -864,18 +982,6 @@ export default function Food() {
 
           {menu ? (
             <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
-              {catalogMode ? (
-                <button
-                  type="button"
-                  onClick={() => setInfoOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 font-medium text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100"
-                  data-testid="food-free-chip"
-                >
-                  <Check className="h-4 w-4" />
-                  {describePolicy(freePolicy)}
-                  <Info className="h-3.5 w-3.5 opacity-70" />
-                </button>
-              ) : null}
               <button
                 type="button"
                 onClick={() => setInfoOpen(true)}
@@ -884,6 +990,13 @@ export default function Food() {
               >
                 <Info className="h-4 w-4 text-vermilion-500" /> Timings &amp; rules
               </button>
+              <Link
+                to="/food/orders"
+                className="inline-flex items-center gap-1.5 rounded-full border border-sun-400/35 bg-white px-3 py-1.5 font-medium text-brown-900 hover:border-vermilion-500/40 hover:text-vermilion-600"
+                data-testid="food-my-orders-link"
+              >
+                <ClipboardList className="h-4 w-4 text-vermilion-500" /> My orders
+              </Link>
               {menu.overall_menu_url ? (
                 <a
                   href={mediaUrl(menu.overall_menu_url)}
@@ -918,7 +1031,7 @@ export default function Food() {
               ) : null}
               {intent.flat_subscribed === false ? (
                 <p className="mt-1 text-xs text-amber-800/80">
-                  No complimentary meals applied — this flat has not paid the Puja subscription or a donation.
+                  No complimentary meals applied — this flat has not paid the Puja subscription.
                 </p>
               ) : intent.free_mobile_ok === false ? (
                 <p className="mt-1 text-xs text-amber-800/80">
@@ -929,11 +1042,14 @@ export default function Food() {
                 .filter((r) => (intent.complimentary_used_before?.[r.key] || 0) > 0)
                 .map((r) => (
                   <p key={r.key} className="mt-1 text-xs text-amber-800/80">
-                    Your flat already used {Math.min(r.free, intent.complimentary_used_before[r.key])} of its {r.free} free {pluralMeal(r.label, r.free)} on an earlier order.
+                    Your flat already used {Math.min(r.free, intent.complimentary_used_before[r.key])} of its {r.free} complimentary {pluralMeal(r.label, r.free)} on an earlier order.
                   </p>
                 ))}
               <p className="mt-1 text-sm text-brown-800/55">
-                {intent.selection_count || cartCount} {unitLabel}{(intent.selection_count || cartCount) === 1 ? "" : "s"} · Order {intent.id}
+                {intent.selection_count || cartCount} {unitLabel}{(intent.selection_count || cartCount) === 1 ? "" : "s"} · Order {String(intent.id || "").slice(-6).toUpperCase()}
+              </p>
+              <p className="mt-1 text-xs text-brown-800/50">
+                Paying later or in parts? Come back via <Link to="/food/orders" className="font-semibold text-vermilion-600 underline">My orders</Link> to pay the balance.
               </p>
             </div>
 
@@ -1016,7 +1132,10 @@ export default function Food() {
               {done.payment_status === "complimentary" ? "Meals confirmed" : "Order saved"}
             </h2>
             <p className="mt-2 text-brown-800/70">{done.message || "Thank you — your meal order is with the committee."}</p>
-            <p className="mt-3 text-sm text-brown-800/50">Reference: <span className="font-medium text-brown-900">{done.id}</span></p>
+            <p className="mt-3 text-sm text-brown-800/50">
+              Order <span className="font-medium text-brown-900">{String(done.id || "").slice(-6).toUpperCase()}</span>
+              {" · "}find it any time under <Link to="/food/orders" className="font-semibold text-vermilion-600 underline">My orders</Link>
+            </p>
             {done.payment_status === "complimentary" ? (
               <p className="mt-1 text-lg font-semibold text-emerald-700">
                 Complimentary {describeFree(freeRules, done.complimentary)} · Nothing to pay
@@ -1039,75 +1158,33 @@ export default function Food() {
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
               <p className="text-xs font-semibold uppercase tracking-wide text-vermilion-500">Step 2 of {paymentEnabled ? 3 : 2}</p>
               <h2 className="mt-1 font-display text-2xl text-brown-900">Who is this order for?</h2>
-              <p className="mt-1 text-sm text-brown-800/60">Only your name is required. Tower and flat help the committee find you.</p>
+              <p className="mt-1 text-sm text-brown-800/60">Add your name so the committee can find your order.</p>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <Label required>Your name</Label>
                   <Input data-testid="food-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full name" required autoFocus />
                 </div>
-                <div>
-                  <Label required>Mobile</Label>
-                  <Input
-                    data-testid="food-mobile"
-                    value={form.mobile}
-                    onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
-                    placeholder="10-digit mobile"
-                    inputMode="numeric"
-                  />
-                </div>
-                <div>
-                  <Label required>Tower</Label>
-                  <Select
-                    required
-                    data-testid="food-tower"
-                    value={form.tower_id}
-                    onChange={(e) => setForm({ ...form, tower_id: e.target.value, flat_id: "", flat_number: "" })}
-                  >
-                    <option value="">Select tower</option>
-                    {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </Select>
-                </div>
-                <div>
-                  <Label required>Flat</Label>
-                  <Select
-                    required
-                    data-testid="food-flat"
-                    value={form.flat_id}
-                    onChange={(e) => setForm({ ...form, flat_id: e.target.value })}
-                  >
-                    <option value="">Select flat</option>
-                    {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
-                  </Select>
-                  {form.flat_id && flatSubscribed === false ? (
-                    <p className="mt-1 text-xs text-amber-900/85" data-testid="food-flat-not-subscribed">
-                      This flat has not paid the Puja subscription or a donation yet, so all meals are charged.{" "}
-                      <Link to="/subscribe" className="font-semibold text-vermilion-600 underline">Subscribe &amp; Pay</Link>
-                      {" or "}
-                      <Link to="/donate" className="font-semibold text-vermilion-600 underline">Donate</Link>
-                      {" "}to unlock {describePolicy(freePolicy)}.
-                    </p>
-                  ) : form.flat_id && mobileOk === false ? (
-                    <p className="mt-1 text-xs text-amber-900/85" data-testid="food-mobile-not-registered">
-                      Free meals go only to the mobile number registered with this flat&apos;s Puja subscription or donation.
-                      Enter that number to get them — otherwise all meals are charged.
-                    </p>
-                  ) : form.flat_id && flatFree ? (
-                    <p className="mt-1 text-xs text-emerald-800/80" data-testid="food-flat-free">
-                      {freeRules.some((r) => (flatFree[r.key] ?? 0) < r.free)
-                        ? `Already used on earlier orders: ${freeRules
-                          .filter((r) => (flatFree[r.key] ?? 0) < r.free)
-                          .map((r) => `${r.free - (flatFree[r.key] ?? 0)} of ${r.free} free ${pluralMeal(r.label, r.free)}`)
-                          .join(", ")}.`
-                        : `This flat gets ${describePolicy(freePolicy)}.`}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="sm:col-span-2">
-                  <Label>Notes <span className="font-normal text-brown-800/45">(optional)</span></Label>
-                  <Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Allergy or delivery note" />
+                <div className="sm:col-span-2 rounded-xl bg-ivory-200 px-3.5 py-2.5 text-sm" data-testid="food-flat-summary">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-brown-900">
+                      {towers.find((t) => t.id === form.tower_id)?.name || "Tower"} · Flat {flats.find((f) => f.id === form.flat_id)?.number || ""} · {form.mobile}
+                    </span>
+                    <button type="button" onClick={() => setStep("menu")} className="text-xs font-semibold text-vermilion-600 underline">Change</button>
+                  </div>
+                  <div className="mt-1">{flatStatus}</div>
                 </div>
               </div>
+
+              {openOrders.length ? (
+                <div className="mt-5 rounded-xl bg-ivory-200 p-3.5" data-testid="food-earlier-orders">
+                  <p className="mb-2 text-sm font-semibold text-brown-900">Your earlier orders on this mobile</p>
+                  <FoodOrdersList orders={openOrders} compact />
+                  <p className="mt-2 text-[11px] text-brown-800/55">
+                    This new order is separate and gets its own food voucher.
+                  </p>
+                </div>
+              ) : null}
 
               <div className="mt-6 flex flex-wrap gap-3">
                 <Button type="button" variant="subtle" onClick={() => setStep("menu")}>
@@ -1124,6 +1201,7 @@ export default function Food() {
         ) : (
           <div className="grid gap-6 lg:grid-cols-[1fr_340px]" data-testid="food-menu-cart">
             <div className="space-y-4">
+              {flatCard}
               {catalogMode ? (
                 <>
                   <div className="rounded-2xl border border-sun-400/30 bg-white p-4 shadow-card sm:p-5">
@@ -1279,7 +1357,7 @@ export default function Food() {
                                         <div>
                                           <div className="text-[10px] uppercase tracking-wide text-brown-800/45">
                                             {freeKeyFor(freeRules, item.category, item.day_code)
-                                              ? `First ${fullQuota[freeKeyFor(freeRules, item.category, item.day_code)]} free · then`
+                                              ? `First ${fullQuota[freeKeyFor(freeRules, item.category, item.day_code)]} complimentary · then`
                                               : item.is_complimentary ? "Extra head" : "Price"}
                                           </div>
                                           <div className="font-display text-2xl text-vermilion-600">
@@ -1287,7 +1365,7 @@ export default function Food() {
                                             {qty > 1 || cartLineByKey[item.id]?.free_qty ? (
                                               <span className="ml-1 text-sm font-normal text-brown-800/45">
                                                 · {cartLineByKey[item.id]?.line_total_paise === 0
-                                                  ? "free"
+                                                  ? "complimentary"
                                                   : formatPaise(cartLineByKey[item.id]?.line_total_paise ?? unit * qty)}
                                               </span>
                                             ) : null}
@@ -1527,17 +1605,21 @@ export default function Food() {
           ) : null}
           {catalogMode ? (
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Free meals</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-brown-800/45">Complimentary meals</p>
               <ul className="mt-2 space-y-1.5">
                 {freePolicy.slice().reverse().map((r) => (
                   <li key={r.key} className="flex gap-2">
                     <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                    <span>First {r.free} {pluralMeal(r.label, r.free)}{r.per_day ? " each day" : ""} per flat are free — applied automatically in your cart.</span>
+                    <span>First {r.free} {pluralMeal(r.label, r.free)}{r.per_day ? " each day" : ""} per flat are complimentary — applied automatically in your cart.</span>
                   </li>
                 ))}
                 <li className="flex gap-2">
                   <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                  <span>Only for flats that have paid the Puja subscription or a donation.</span>
+                  <span>Only for flats that have paid the Puja subscription.</span>
+                </li>
+                <li className="flex gap-2">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <span>Complimentary meals must also be booked here — they show as ₹0 in your cart.</span>
                 </li>
               </ul>
             </div>

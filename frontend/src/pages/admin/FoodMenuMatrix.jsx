@@ -44,7 +44,7 @@ function CellEditor({ cell, onClose, onSaved }) {
   const save = async () => {
     const rupees = Number(price);
     if (Number.isNaN(rupees) || rupees < 0) {
-      toast.error("Enter a valid price (0 allowed for free / included plates)");
+      toast.error("Enter a valid price (0 allowed for complimentary / included plates)");
       return;
     }
     if (!name.trim()) {

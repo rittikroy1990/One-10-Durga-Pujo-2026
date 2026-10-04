@@ -345,7 +345,7 @@ def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
     story += [summary, Spacer(1, 2 * mm)]
 
     story.append(Paragraph("Meals by day", section))
-    rows = [["Day", "Meal", "Item", "Diet", "Heads", "Free", "Paid", "Amount"]]
+    rows = [["Day", "Meal", "Item", "Diet", "Heads", "Compl.", "Paid", "Amount"]]
     for ln in voucher.get("lines") or []:
         rows.append([
             Paragraph(f"<b>{ln.get('day_label')}</b><br/><font size=7>{_short_date(ln.get('date'))} {ln.get('weekday', '')[:3]}</font>", small),

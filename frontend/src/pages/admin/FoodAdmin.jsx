@@ -21,7 +21,7 @@ function selectionSummary(row) {
         : `${s.day_label || s.day_code} ${s.meal_label || s.meal_code}`;
       const free = Number(s.complimentary_qty) || 0;
       const base = qty > 1 ? `${label} × ${qty}` : label;
-      return free ? `${base} (${free} free)` : base;
+      return free ? `${base} (${free} complimentary)` : base;
     })
     .join("; ");
 }
@@ -150,6 +150,24 @@ export default function FoodAdmin() {
         return;
       }
       toast.error(typeof d === "string" ? d : "Could not mark coupons as given");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const cancelOrder = async (r) => {
+    const paid = r.paid_in_full ? " It is fully paid — the paid amount stays on its receipts; refund it separately if needed." : "";
+    const reason = window.prompt(`Cancel ${r.name}'s order (${r.tower_name}, ${r.flat_number})? Its complimentary meals go back to the flat and its voucher stops being valid.${paid}\n\nReason:`);
+    if (!reason) return;
+    setBusyId(r.id);
+    try {
+      const res = await api.post(`/admin/food-subscriptions/${r.id}/cancel`, { reason });
+      const amt = res.data.amount_paid_paise || 0;
+      toast.success(amt ? `Order cancelled — ₹${Math.round(amt / 100)} was paid on it; refund or adjust separately` : "Order cancelled");
+      load();
+    } catch (err) {
+      const d = err?.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Could not cancel the order");
     } finally {
       setBusyId(null);
     }
@@ -355,12 +373,21 @@ export default function FoodAdmin() {
                             Undo
                           </Button>
                         </div>
-                      ) : r.paid_in_full ? (
-                        <Button variant="admin" size="sm" disabled={busyId === r.id} onClick={() => issueCoupons(r)} data-testid={`food-issue-coupons-${r.id}`}>
-                          <Ticket className="h-3.5 w-3.5" /> {busyId === r.id ? "Saving…" : "Mark coupons given"}
-                        </Button>
                       ) : (
-                        <span className="text-brown-800/45">—</span>
+                        <div className="flex items-center gap-2">
+                          {r.paid_in_full ? (
+                            <Button variant="admin" size="sm" disabled={busyId === r.id} onClick={() => issueCoupons(r)} data-testid={`food-issue-coupons-${r.id}`}>
+                              <Ticket className="h-3.5 w-3.5" /> {busyId === r.id ? "Saving…" : "Mark coupons given"}
+                            </Button>
+                          ) : null}
+                          {["cancelled", "expired"].includes(r.payment_status) ? (
+                            <span className="text-brown-800/45">—</span>
+                          ) : (
+                            <Button variant="subtle" size="sm" disabled={busyId === r.id} onClick={() => cancelOrder(r)} data-testid={`food-cancel-order-${r.id}`}>
+                              Cancel order
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </TD>
                     <TD className="whitespace-nowrap text-xs tabular-nums">{formatDateIST(r.created_at)}</TD>

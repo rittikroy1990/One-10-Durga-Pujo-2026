@@ -3,11 +3,13 @@ import asyncio
 import csv
 import io
 import re
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Body, Request, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
+from pymongo.errors import DuplicateKeyError
 
 from db import db, new_id, clean, NO_ID
 from config import get_settings, get_active_cycle_id
@@ -181,6 +183,31 @@ def _flat_lock(flat_id: str) -> asyncio.Lock:
     return lock
 
 
+@asynccontextmanager
+async def _flat_guard(flat_id: str):
+    """Serialise free-meal claims for one flat across requests and across server processes."""
+    async with _flat_lock(flat_id):
+        key, token = f"food_free:{flat_id}", new_id("lk")
+        for _ in range(100):
+            now = datetime.now(timezone.utc)
+            try:
+                if await db.food_flat_locks.find_one_and_update(
+                    {"_id": key, "until": {"$lt": now}},
+                    {"$set": {"until": now + timedelta(seconds=20), "token": token}},
+                    upsert=True,
+                ) is not None or await db.food_flat_locks.find_one({"_id": key, "token": token}):
+                    break
+            except DuplicateKeyError:
+                pass
+            await asyncio.sleep(0.1)
+        else:
+            raise HTTPException(status_code=503, detail="Busy saving another order for this flat — please try again.")
+        try:
+            yield
+        finally:
+            await db.food_flat_locks.delete_one({"_id": key, "token": token})
+
+
 async def _expire_abandoned_food_orders(flat_id: str) -> int:
     """Expire this flat's unpaid orders that never got a payment proof, releasing their free units."""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=COMPLIMENTARY_HOLD_HOURS)).isoformat()
@@ -192,6 +219,11 @@ async def _expire_abandoned_food_orders(flat_id: str) -> int:
         intent = await db.subscription_intents.find_one({"id": o.get("intent_id")}, {"_id": 0, "status": 1}) \
             if o.get("intent_id") else None
         if intent and intent.get("status") != "payment_pending":
+            continue
+        if o.get("intent_id") and (
+            await db.upi_submissions.find_one({"intent_id": o["intent_id"], "status": {"$ne": "rejected"}}, {"_id": 1})
+            or await db.receipts.find_one({"intent_id": o["intent_id"]}, {"_id": 1})
+        ):
             continue
         if intent:
             await db.subscription_intents.update_one(
@@ -226,7 +258,10 @@ def _mobile10(value) -> str:
 
 
 async def _flat_free_meal_access(flat_id: str, mobile: str) -> dict:
-    """Free meals need a paid subscription/donation for the flat AND the mobile registered on it.
+    """Free meals need a paid Puja subscription for the flat AND the mobile registered on it.
+
+    A flat whose Puja payment was taken as a donation counts as subscribed once its donations reach the
+    subscription amount.
 
     Registered mobiles come from those receipts and the flat's own household record (not one created
     by a food order), so nobody can claim another flat's free meals by picking its tower and flat.
@@ -243,9 +278,12 @@ async def _flat_free_meal_access(flat_id: str, mobile: str) -> dict:
     receipts = await db.receipts.find(
         {"household_id": {"$in": [h["id"] for h in households]}, "kind": {"$in": ["subscription", "donation"]},
          "status": "issued", "cycle_id": await get_active_cycle_id()},
-        {"_id": 0, "household_id": 1, "payer_mobile": 1},
+        {"_id": 0, "household_id": 1, "payer_mobile": 1, "kind": 1, "total_amount": 1},
     ).to_list(50)
-    if not receipts:
+    s = await get_settings()
+    sub_amount = int((s.get("subscription") or {}).get("base_amount_paise") or 0)
+    donated = sum(int(r.get("total_amount") or 0) for r in receipts if r.get("kind") == "donation")
+    if not any(r.get("kind") == "subscription" for r in receipts) and not (sub_amount and donated >= sub_amount):
         return out
     out["contributed"] = True
     paid_hh = {r["household_id"] for r in receipts}
@@ -256,6 +294,30 @@ async def _flat_free_meal_access(flat_id: str, mobile: str) -> dict:
     registered.discard("")
     out["mobile_ok"] = bool(_mobile10(mobile)) and _mobile10(mobile) in registered
     return out
+
+
+async def _known_name(flat_id: str, mobile: str) -> str:
+    """Name already on record for this flat with this exact mobile (household, receipt or earlier food order)."""
+    m = _mobile10(mobile)
+    if not flat_id or not m:
+        return ""
+    households = [h async for h in db.households.find(
+        {"flat_id": flat_id, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "primary_mobile": 1, "primary_name": 1},
+    )]
+    for h in households:
+        if _mobile10(h.get("primary_mobile")) == m and (h.get("primary_name") or "").strip():
+            return h["primary_name"].strip()
+    if households:
+        async for r in db.receipts.find(
+            {"household_id": {"$in": [h["id"] for h in households]}, "status": "issued"},
+            {"_id": 0, "payer_mobile": 1, "payer_name": 1},
+        ).sort("issued_at", -1):
+            if _mobile10(r.get("payer_mobile")) == m and (r.get("payer_name") or "").strip():
+                return r["payer_name"].strip()
+    async for o in db.food_subscriptions.find({"flat_id": flat_id}, {"_id": 0, "mobile": 1, "name": 1}).sort("created_at", -1):
+        if _mobile10(o.get("mobile")) == m and (o.get("name") or "").strip():
+            return o["name"].strip()
+    return ""
 
 
 async def _complimentary_remaining(flat_id: str, *, eligible: bool = True) -> dict:
@@ -374,6 +436,7 @@ async def food_complimentary_remaining(flat_id: str = "", mobile: str = ""):
         "subscribed": access["contributed"],
         "mobile_checked": mobile_given,
         "mobile_ok": access["mobile_ok"] if mobile_given else None,
+        "known_name": await _known_name(flat_id, mobile) if mobile_given else "",
         "remaining": await _complimentary_remaining(
             flat_id, eligible=access["contributed"] and (access["mobile_ok"] or not mobile_given)),
     }
@@ -417,7 +480,7 @@ async def food_register(body: dict = Body(...), request: Request = None):
     flat_number = flat.get("number") or ""
 
     # One flat's free-unit count and order insert must not interleave with another request.
-    async with _flat_lock(flat_id):
+    async with _flat_guard(flat_id):
         await _expire_abandoned_food_orders(flat_id)
         access = await _flat_free_meal_access(flat_id, mobile)
         subscribed = access["contributed"]
@@ -1803,7 +1866,8 @@ async def _food_voucher_payload(doc: dict, settlement: dict) -> dict:
         coupon = {"coupon_no": c.get("coupon_no") or doc.get("coupon_no"), "issued_at": c.get("created_at"),
                   "issued_by_name": c.get("issued_by_name") or "", "slips": c.get("slip_count") or 0}
     eligible = settlement["settled"]
-    voided = bool(doc.get("voucher_no")) and not eligible
+    released = doc.get("payment_status") in _RELEASED_PAYMENT_STATUSES
+    voided = (bool(doc.get("voucher_no")) or released) and not eligible
     total = settlement["total"]
     paid = settlement["paid"]
     return {
@@ -1815,7 +1879,8 @@ async def _food_voucher_payload(doc: dict, settlement: dict) -> dict:
         "order_id": doc["id"],
         "ordered_at": doc.get("created_at"),
         "payment_status": doc.get("payment_status"),
-        "status_label": "Not valid" if voided else (
+        "status_label": ("Cancelled" if doc.get("payment_status") == "cancelled" else "Expired") if released else
+        "Not valid" if voided else (
             "Complimentary" if doc.get("payment_status") == "complimentary" else (
                 "Paid in full" if eligible else "Payment pending")),
         "bank_verified": settlement["bank_verified"],
@@ -1873,6 +1938,132 @@ async def food_voucher_pdf_public(token: str, request: Request = None):
                     headers={"Content-Disposition": f'inline; filename="{payload["voucher_no"]}.pdf"'})
 
 
+# ---------------------------------------------------------------- MY ORDERS (buyer self-service)
+_OPEN_INTENT_STATUSES = ["payment_pending", "pending", "authorised", "partially_paid"]
+_LIVE_SUBMISSION_STATUSES = ["submitted", "processing", "llm_ok", "needs_review"]
+
+
+async def _payment_under_review(doc: dict) -> bool:
+    if not doc.get("intent_id"):
+        return False
+    return bool(await db.upi_submissions.find_one(
+        {"intent_id": doc["intent_id"], "status": {"$in": _LIVE_SUBMISSION_STATUSES},
+         "receipt_id": {"$in": [None, ""]}},
+        {"_id": 1},
+    ))
+
+
+async def _food_order_card(doc: dict) -> dict:
+    """One order as the buyer sees it: what it holds, what is paid, and the one thing to do next."""
+    from tokens import status_token
+    settlement = await _order_settlement(doc)
+    status = doc.get("payment_status") or ""
+    total = int(doc.get("total_amount_paise") or 0)
+    paid = settlement["paid"]
+    under_review = await _payment_under_review(doc)
+    if status in _RELEASED_PAYMENT_STATUSES:
+        state, label = status, ("Cancelled" if status == "cancelled" else "Expired — not paid")
+    elif settlement["settled"]:
+        state, label = "ready", ("Complimentary — voucher ready" if status == "complimentary" else "Paid — voucher ready")
+    elif under_review:
+        state, label = "under_review", "Payment under review — do not pay again"
+    elif status == "paid" or (status == "complimentary" and not settlement["settled"]):
+        state, label = "problem", "Payment needs a check — contact the committee"
+    elif paid > 0:
+        state, label = "part_paid", f"Part-paid — ₹{(total - paid) / 100:,.0f} left to pay"
+    elif status == "not_open":
+        state, label = "not_open", "Payment not open yet"
+    else:
+        state, label = "awaiting", "Awaiting payment"
+    lines = _voucher_lines(doc)
+    can_pay = state in ("awaiting", "part_paid") and bool(doc.get("intent_id"))
+    return {
+        "id": doc["id"],
+        "ref": doc["id"][-6:].upper(),
+        "created_at": doc.get("created_at"),
+        "name": doc.get("name") or "",
+        "lines": [{"day_label": ln["day_label"], "meal_label": ln["meal_label"], "item": ln["item"],
+                   "diet_label": ln["diet_label"], "heads": ln["heads"], "free": ln["free"]} for ln in lines],
+        "heads": sum(ln["heads"] for ln in lines),
+        "free_heads": sum(ln["free"] for ln in lines),
+        "total_amount_paise": total,
+        "amount_paid_paise": paid,
+        "amount_due_paise": 0 if state in ("ready", "cancelled", "expired") else max(0, total - paid),
+        "state": state,
+        "state_label": label,
+        "voucher_no": doc.get("voucher_no") if state == "ready" else None,
+        "voucher_token": _food_voucher_token(doc["id"]) if state == "ready" else None,
+        "status_token": status_token(doc["intent_id"]) if (can_pay or state == "under_review") else None,
+        "coupons_given": bool(doc.get("coupon_id")),
+    }
+
+
+async def _food_lookup_limit(request: Request, kind: str, flat_id: str) -> None:
+    from routes_collect import _receipt_lookup_rate_limit
+    await _receipt_lookup_rate_limit(request, kind=kind, flat_id=flat_id)
+
+
+@router.post("/food/my-orders")
+async def food_my_orders(body: dict = Body(...), request: Request = None):
+    """Orders placed for this flat from this mobile, with pay-balance / voucher / cancel actions."""
+    flat_id = (body.get("flat_id") or "").strip()
+    mobile = _mobile10(body.get("mobile"))
+    if not flat_id or not mobile:
+        raise HTTPException(status_code=400, detail="Select your flat and enter the 10-digit mobile used on the order.")
+    await _food_lookup_limit(request, "food_my_orders", flat_id)
+    await _expire_abandoned_food_orders(flat_id)
+    docs = await db.food_subscriptions.find({"flat_id": flat_id}, NO_ID).sort("created_at", -1).to_list(100)
+    mine = [d for d in docs if _mobile10(d.get("mobile")) == mobile]
+    others_holding = [
+        {"mobile_masked": _mask_mobile(d.get("mobile")), "free_heads": sum((d.get("complimentary") or {}).values())}
+        for d in docs
+        if _mobile10(d.get("mobile")) != mobile and d.get("complimentary")
+        and d.get("payment_status") not in _RELEASED_PAYMENT_STATUSES
+    ]
+    return {"orders": [await _food_order_card(d) for d in mine], "others_holding": others_holding}
+
+
+async def _cancel_food_order(doc: dict, *, actor, reason: str, request: Request = None) -> None:
+    now = iso()
+    await db.food_subscriptions.update_one({"id": doc["id"]}, {"$set": {
+        "payment_status": "cancelled", "status": "cancelled", "cancelled_at": now,
+        "cancel_reason": reason, "updated_at": now,
+    }})
+    if doc.get("intent_id"):
+        await db.subscription_intents.update_one(
+            {"id": doc["intent_id"], "status": {"$in": _OPEN_INTENT_STATUSES}},
+            {"$set": {"status": "superseded", "superseded_at": now, "supersede_reason": "food_order_cancelled"}},
+        )
+    await audit("food.subscription.cancel", actor=actor, entity_type="food_subscription", entity_id=doc["id"],
+                before={"payment_status": doc.get("payment_status"), "complimentary": doc.get("complimentary")},
+                reason=reason, request=request)
+
+
+@router.post("/admin/food-subscriptions/{sid}/cancel")
+async def admin_cancel_food_order(sid: str, body: dict = Body(default={}), request: Request = None,
+                                  user: dict = Depends(require("receipts:manage"))):
+    """Committee cancels any order (frees its free meals; its voucher stops being valid)."""
+    reason = (body.get("reason") or "").strip()
+    if len(reason) < 4:
+        raise HTTPException(status_code=400, detail="Give a reason for cancelling this order.")
+    doc = await db.food_subscriptions.find_one({"id": sid}, NO_ID)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Food order not found.")
+    if doc.get("payment_status") in _RELEASED_PAYMENT_STATUSES:
+        raise HTTPException(status_code=409, detail="This order is already cancelled or expired.")
+    if doc.get("coupon_id"):
+        raise HTTPException(status_code=409, detail="Coupons were already given for this order. Collect them back and Undo first.")
+    async with _flat_guard(doc.get("flat_id") or sid):
+        doc = await db.food_subscriptions.find_one({"id": sid}, NO_ID)
+        if doc.get("payment_status") in _RELEASED_PAYMENT_STATUSES:
+            raise HTTPException(status_code=409, detail="This order is already cancelled or expired.")
+        if doc.get("coupon_id"):
+            raise HTTPException(status_code=409, detail="Coupons were already given for this order. Collect them back and Undo first.")
+        settlement = await _order_settlement(doc)
+        await _cancel_food_order(doc, actor=user, reason=reason, request=request)
+    return {"ok": True, "amount_paid_paise": settlement["paid"]}
+
+
 async def _mark_receipts_bank_verified(receipts: list, user: dict, request: Request = None) -> None:
     now = iso()
     for r in receipts:
@@ -1886,6 +2077,37 @@ async def _mark_receipts_bank_verified(receipts: list, user: dict, request: Requ
         await audit("receipt.bank_verify", actor=user, entity_type="receipt", entity_id=r["id"],
                     after={"receipt_no": r.get("receipt_no"), "payment_id": r.get("payment_id")},
                     reason="Confirmed on bank statement before issuing food coupons", request=request)
+
+
+async def _complimentary_problem(doc: dict) -> str:
+    """Re-check an order's complimentary meals before coupons go out; '' when all is well.
+
+    The flat must still be a subscriber, the order's free units must match its lines, and the flat's
+    live orders together must stay within each quota (3 breakfasts a day, 4 Ashtami lunches, …).
+    """
+    from pujo_menu_2026 import COMPLIMENTARY_QUOTAS, COMPLIMENTARY_RULES, complimentary_key
+    granted = {k: int(v or 0) for k, v in (doc.get("complimentary") or {}).items() if int(v or 0)}
+    per_line: dict = {}
+    for sel in doc.get("selections") or []:
+        n = int(sel.get("complimentary_qty") or 0)
+        if n:
+            k = complimentary_key(sel.get("category") or sel.get("meal_code") or "",
+                                  sel.get("item_day_code") or sel.get("day_code") or "")
+            per_line[k] = per_line.get(k, 0) + n
+    if not granted and not per_line:
+        return ""
+    if per_line != granted:
+        return "This order's complimentary meals don't add up — check the order with the committee before giving coupons."
+    if not (await _flat_free_meal_access(doc.get("flat_id") or "", doc.get("mobile") or ""))["contributed"]:
+        return ("This flat no longer has a valid Puja subscription receipt, so its complimentary meals can't be given. "
+                "Cancel this order and re-order, or restore the subscription receipt first.")
+    used = await _complimentary_used(doc.get("flat_id") or "")
+    labels = {r["key"]: r["label"] for r in COMPLIMENTARY_RULES}
+    over = [f"{labels.get(k, k)}: {used[k]} of {q}" for k, q in COMPLIMENTARY_QUOTAS.items() if used.get(k, 0) > q]
+    if over:
+        return ("This flat's orders together claim more complimentary meals than allowed (" + "; ".join(over) +
+                "). Cancel the extra order before giving coupons.")
+    return ""
 
 
 def _coupon_slips(coupon: dict) -> list:
@@ -1928,6 +2150,9 @@ async def admin_generate_coupon(sid: str, body: dict = Body(default={}), request
                              for r in settlement["unverified"]],
             })
         await _mark_receipts_bank_verified(settlement["unverified"], user, request)
+    problem = await _complimentary_problem(doc)
+    if problem:
+        raise HTTPException(status_code=409, detail=problem)
     doc = await _ensure_food_voucher(doc, settlement, actor=user, request=request)
     voucher = await _food_voucher_payload(doc, settlement)
 

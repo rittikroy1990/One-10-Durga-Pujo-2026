@@ -43,8 +43,10 @@ export default function FoodVoucher() {
                 <ShieldX className="mx-auto h-14 w-14 text-vermilion-500" />
                 <h1 className="mt-3 font-display text-3xl">Voucher not valid</h1>
                 <p className="mt-1 text-brown-800/70">
-                  Voucher <b>{data.voucher_no}</b> is no longer valid because its payment was cancelled or is incomplete.
-                  Do not issue or serve food against it. Contact the committee.
+                  {data.status_label === "Cancelled" || data.status_label === "Expired"
+                    ? <>This order was {data.status_label.toLowerCase()}{data.voucher_no ? <> — voucher <b>{data.voucher_no}</b> is no longer valid</> : null}.</>
+                    : <>Voucher <b>{data.voucher_no}</b> is no longer valid because its payment was cancelled or is incomplete.</>}
+                  {" "}Do not give coupons against it. Contact the committee.
                 </p>
               </div>
             )}
@@ -81,7 +83,7 @@ export default function FoodVoucher() {
                 </dl>
 
                 <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-                  {[["Total heads", data.totals.heads], ["Free", data.totals.free], ["Paid", data.totals.paid]].map(([label, n]) => (
+                  {[["Total heads", data.totals.heads], ["Complimentary", data.totals.free], ["Paid", data.totals.paid]].map(([label, n]) => (
                     <div key={label} className="rounded-xl border border-sun-400/30 bg-white py-2.5">
                       <div className="font-display text-2xl">{n}</div>
                       <div className="text-[11px] uppercase tracking-wide text-brown-800/50">{label}</div>
@@ -105,7 +107,7 @@ export default function FoodVoucher() {
                             </span>
                             <span className="shrink-0 text-right tabular-nums">
                               <b>{l.heads}</b>
-                              {l.free ? <span className="ml-1 text-xs text-emerald-700">({l.free} free)</span> : null}
+                              {l.free ? <span className="ml-1 text-xs text-emerald-700">({l.free} complimentary)</span> : null}
                             </span>
                           </li>
                         ))}

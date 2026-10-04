@@ -14,13 +14,13 @@ ASHTAMI_BHOG_EXTRA = 170
 BREAKFAST_FREE_COUPONS = 3
 ASHTAMI_BHOG_FREE_HEADS = 4
 
-# Free units per flat (tower + flat) with a paid Puja subscription or donation, applied at checkout (first N units are ₹0).
+# Free units per flat (tower + flat) with a paid Puja subscription, applied at checkout (first N units are ₹0).
 # A per_day rule gives a separate quota for every Pujo day.
 COMPLIMENTARY_POLICY = [
     {"key": "ashtami_lunch", "label": "Ashtami lunch", "category": "lunch", "day_code": "ashtami",
      "free": ASHTAMI_BHOG_FREE_HEADS},
-    {"key": "breakfast", "label": "breakfast", "category": "breakfast", "free": BREAKFAST_FREE_COUPONS,
-     "per_day": True},
+    {"key": "breakfast", "label": "breakfast", "category": "breakfast", "categories": ["breakfast", "breakfast_packet"],
+     "free": BREAKFAST_FREE_COUPONS, "per_day": True},
 ]
 
 
@@ -35,7 +35,8 @@ def _expand_policy(policy: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for d in sorted(DAYS, key=lambda x: x.get("order", 0)):
             rules.append({
                 **base, "key": f"{p['key']}_{d['code']}", "label": f"{d['label'].replace('Maha ', '')} {p['label']}",
-                "category": p["category"], "day_code": d["code"], "free": p["free"],
+                "category": p["category"], "categories": p.get("categories") or [p["category"]],
+                "day_code": d["code"], "free": p["free"],
             })
     return rules
 
@@ -47,15 +48,21 @@ COMPLIMENTARY_QUOTAS = {r["key"]: r["free"] for r in COMPLIMENTARY_RULES}
 
 def complimentary_key(category: str, day_code: str) -> str:
     for rule in COMPLIMENTARY_RULES:
-        if rule["category"] == category and (not rule.get("day_code") or rule["day_code"] == day_code):
+        if category in (rule.get("categories") or [rule["category"]]) and (
+                not rule.get("day_code") or rule["day_code"] == day_code):
             return rule["key"]
     return ""
 
 BREAKFAST_COUPON_NOTE = (
-    f"First {BREAKFAST_FREE_COUPONS} breakfasts each day per flat that has subscribed or donated are complimentary — "
-    f"applied automatically in your cart. From the 4th breakfast that day, ₹{BREAKFAST_PRICE} each. No take-aways."
+    f"First {BREAKFAST_FREE_COUPONS} breakfasts each day per subscribed flat are complimentary — sit-down breakfast "
+    f"and breakfast packet together (e.g. 2 breakfasts + 1 packet). Applied automatically in your cart. "
+    f"From the 4th that day, ₹{BREAKFAST_PRICE} each. No take-aways for sit-down breakfast."
 )
-BREAKFAST_BADGE = f"{BREAKFAST_FREE_COUPONS} free daily · No take-away"
+PACKET_COUPON_NOTE = (
+    f"Counts toward your flat's {BREAKFAST_FREE_COUPONS} complimentary breakfasts each day "
+    f"(e.g. 2 breakfasts + 1 packet). From the 4th that day, ₹{PACKET_PRICE} each."
+)
+BREAKFAST_BADGE = f"{BREAKFAST_FREE_COUPONS} complimentary daily · No take-away"
 
 MENU_META = {
     "title": "Durga Puja Menu 2026",
@@ -67,14 +74,16 @@ MENU_META = {
     },
     "kids_note": "Food is complimentary for kids below 7 years.",
     "notes": [
-        f"{BREAKFAST_FREE_COUPONS} complimentary breakfast coupons every day per flat that has subscribed or donated — "
-        f"your flat's first {BREAKFAST_FREE_COUPONS} breakfasts each day are free in the cart; the 4th onwards that day "
-        f"is ₹{BREAKFAST_PRICE} each.",
-        "Free breakfasts and Ashtami lunches are only for flats that have paid the Puja subscription or a donation.",
+        f"{BREAKFAST_FREE_COUPONS} complimentary breakfast coupons every day per subscribed flat — sit-down breakfast "
+        f"and breakfast packet together (e.g. 2 breakfasts + 1 packet). The first {BREAKFAST_FREE_COUPONS} each day are "
+        f"₹0 in the cart; the 4th onwards that day is ₹{BREAKFAST_PRICE} each.",
+        "Complimentary meals must also be booked here — add them to your cart (they show as ₹0). "
+        "Coupons are given only against a booked order's food voucher.",
+        "Complimentary breakfasts and Ashtami lunches are only for flats that have paid the Puja subscription (a donation of at least the subscription amount also counts).",
         "No take-aways for breakfast and Ashtami lunch.",
         f"Pure veg breakfast packet ₹{PACKET_PRICE} available every day.",
-        f"Ashtami lunch (khichuri bhog): first {ASHTAMI_BHOG_FREE_HEADS} heads per flat that has subscribed or donated are "
-        f"free in the cart; the 5th onwards is ₹{ASHTAMI_BHOG_EXTRA} per head.",
+        f"Ashtami lunch (khichuri bhog): first {ASHTAMI_BHOG_FREE_HEADS} heads per subscribed flat are "
+        f"complimentary in the cart; the 5th onwards is ₹{ASHTAMI_BHOG_EXTRA} per head.",
     ],
     "complimentary_quotas": COMPLIMENTARY_QUOTAS,
     "complimentary_rules": COMPLIMENTARY_RULES,
@@ -112,7 +121,9 @@ def _packet(day_code: str, name: str, description: str) -> dict[str, Any]:
         "day_code": day_code, "meal": "breakfast_packet", "diet": "veg",
         "name": name, "description": description,
         "amount_rupees": PACKET_PRICE,
-        "badge": "",
+        "is_complimentary": True,
+        "complimentary_note": PACKET_COUPON_NOTE,
+        "badge": f"Part of {BREAKFAST_FREE_COUPONS} complimentary daily",
         "for_all_diets": True,
     }
 
@@ -215,10 +226,10 @@ CELLS: list[dict[str, Any]] = [
         "for_all_diets": True,
         "is_complimentary": True,
         "complimentary_note": (
-            f"First {ASHTAMI_BHOG_FREE_HEADS} heads per flat that has subscribed or donated are complimentary — applied "
+            f"First {ASHTAMI_BHOG_FREE_HEADS} heads per subscribed flat are complimentary — applied "
             f"automatically in your cart. From the 5th, ₹{ASHTAMI_BHOG_EXTRA} per head. No take-aways."
         ),
-        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} free · No take-away",
+        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} complimentary · No take-away",
     },
     {
         "day_code": "ashtami", "meal": "lunch", "diet": "non_veg",
@@ -229,10 +240,10 @@ CELLS: list[dict[str, Any]] = [
         "price_note": "No non-veg lunch on Ashtami — only the veg khichuri bhog is served",
         "is_complimentary": True,
         "complimentary_note": (
-            f"Same bhog as veg. The {ASHTAMI_BHOG_FREE_HEADS} free heads per flat are shared with the veg card. "
+            f"Same bhog as veg. The {ASHTAMI_BHOG_FREE_HEADS} complimentary heads per flat are shared with the veg card. "
             f"From the 5th, ₹{ASHTAMI_BHOG_EXTRA} per head. No take-aways."
         ),
-        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} free · No take-away",
+        "badge": f"{ASHTAMI_BHOG_FREE_HEADS} complimentary · No take-away",
     },
     {
         "day_code": "ashtami", "meal": "dinner", "diet": "veg",

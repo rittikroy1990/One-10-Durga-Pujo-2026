@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2, Share2, BadgeCheck, Upload, Ticket } from "lucide-react";
 import api, { API } from "../../lib/api";
@@ -88,7 +88,8 @@ export default function PaymentStatus() {
           }
           return r.data;
         });
-        const done = ["paid", "partially_paid", "needs_review", "error", "reconciliation_required"].includes(r.data.status);
+        const done = ["paid", "partially_paid", "needs_review", "error", "reconciliation_required", "cancelled"].includes(r.data.status)
+          || Boolean(r.data.food_pay_open);
         if (!done && tries < 20) {
           timer.current = setTimeout(() => setTries((t) => t + 1), 3000);
         }
@@ -105,6 +106,8 @@ export default function PaymentStatus() {
   const partial = data?.status === "partially_paid";
   const recon = data?.status === "reconciliation_required" || data?.status === "needs_review";
   const processing = data?.status === "processing";
+  const cancelled = data?.status === "cancelled";
+  const foodPayOpen = Boolean(data?.food_pay_open) && !paid && !partial && !recon && !processing && !cancelled;
   const hasScreenshot = Boolean(paid && (data?.screenshot_url || data?.has_payment_screenshot) && token);
   const canShareWhatsApp = Boolean((paid || partial) && (data?.verify_token || hasScreenshot));
   const canAcknowledge = Boolean(
@@ -238,6 +241,55 @@ export default function PaymentStatus() {
   // Prefer dynamic QR endpoint when available; fall back to static image on error via onError.
   const dynamicQr = data?.intent_id ? `${API}/payments/upi/qr.png?intent_id=${encodeURIComponent(data.intent_id)}` : null;
 
+  const qrBlock = (
+    <div className="mt-4 flex flex-col items-center gap-3">
+      <img
+        src={dynamicQr || qrSrc}
+        alt="UPI QR for remaining balance"
+        className="h-48 w-48 rounded-xl border border-sun-400/30 bg-white object-contain p-2"
+        data-testid="residual-qr"
+        onError={(e) => {
+          if (qrSrc && e.currentTarget.src !== absoluteUrl(qrSrc)) {
+            e.currentTarget.src = absoluteUrl(qrSrc);
+          }
+        }}
+      />
+      {data?.payment?.vpa && (
+        <p className="text-center text-xs text-brown-800/60 break-all">
+          UPI: {data.payment.vpa}
+          {data.payment.payee_name ? ` · ${data.payment.payee_name}` : ""}
+        </p>
+      )}
+    </div>
+  );
+  const uploadForm = (title, hint) => (
+    <form onSubmit={onSubmitResidual} className="mt-6 space-y-3 rounded-2xl border border-sun-400/30 bg-ivory-100 p-5 text-left">
+      <h2 className="font-display text-2xl text-brown-900">{title}</h2>
+      <p className="text-sm text-brown-800/65">{hint}</p>
+      <div>
+        <Label required htmlFor="residual-ref">UTR / UPI reference</Label>
+        <Input
+          id="residual-ref"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+          placeholder="12-digit UPI transaction ID"
+        />
+      </div>
+      <div>
+        <Label required htmlFor="residual-shot">Payment screenshot</Label>
+        <Input
+          id="residual-shot"
+          type="file"
+          accept="image/*,application/pdf"
+          onChange={(e) => setScreenshot(e.target.files?.[0] || null)}
+        />
+      </div>
+      <Button type="submit" variant="primary" className="w-full" disabled={submitBusy} data-testid="submit-residual-btn">
+        {submitBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Upload className="h-4 w-4" /> Submit payment</>}
+      </Button>
+    </form>
+  );
+
   return (
     <PublicLayout>
       <div className="mx-auto max-w-xl px-5 py-16 text-center">
@@ -324,25 +376,7 @@ export default function PaymentStatus() {
                 <p className="mt-1 text-sm text-brown-800/65">
                   Pay this remaining amount via UPI, then upload the new screenshot below.
                 </p>
-                <div className="mt-4 flex flex-col items-center gap-3">
-                  <img
-                    src={dynamicQr || qrSrc}
-                    alt="UPI QR for remaining balance"
-                    className="h-48 w-48 rounded-xl border border-sun-400/30 bg-white object-contain p-2"
-                    data-testid="residual-qr"
-                    onError={(e) => {
-                      if (qrSrc && e.currentTarget.src !== absoluteUrl(qrSrc)) {
-                        e.currentTarget.src = absoluteUrl(qrSrc);
-                      }
-                    }}
-                  />
-                  {data.payment?.vpa && (
-                    <p className="text-center text-xs text-brown-800/60 break-all">
-                      UPI: {data.payment.vpa}
-                      {data.payment.payee_name ? ` · ${data.payment.payee_name}` : ""}
-                    </p>
-                  )}
-                </div>
+                {qrBlock}
               </div>
 
               <div className="mt-5 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -366,33 +400,7 @@ export default function PaymentStatus() {
                 )}
               </div>
 
-              <form onSubmit={onSubmitResidual} className="mt-6 space-y-3 rounded-2xl border border-sun-400/30 bg-ivory-100 p-5 text-left">
-                <h2 className="font-display text-2xl text-brown-900">Upload next payment</h2>
-                <p className="text-sm text-brown-800/65">
-                  After paying the remaining balance, enter the new UTR and screenshot.
-                </p>
-                <div>
-                  <Label required htmlFor="residual-ref">UTR / UPI reference</Label>
-                  <Input
-                    id="residual-ref"
-                    value={reference}
-                    onChange={(e) => setReference(e.target.value)}
-                    placeholder="12-digit UPI transaction ID"
-                  />
-                </div>
-                <div>
-                  <Label required htmlFor="residual-shot">Payment screenshot</Label>
-                  <Input
-                    id="residual-shot"
-                    type="file"
-                    accept="image/*,application/pdf"
-                    onChange={(e) => setScreenshot(e.target.files?.[0] || null)}
-                  />
-                </div>
-                <Button type="submit" variant="primary" className="w-full" disabled={submitBusy} data-testid="submit-residual-btn">
-                  {submitBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Upload className="h-4 w-4" /> Submit &amp; update receipt</>}
-                </Button>
-              </form>
+              {uploadForm("Upload next payment", "After paying the remaining balance, enter the new UTR and screenshot.")}
             </>
           )}
           {processing && (
@@ -406,7 +414,30 @@ export default function PaymentStatus() {
               {acknowledgeButton}
             </>
           )}
-          {data && !paid && !partial && !recon && !processing && data.status !== "error" && (
+          {foodPayOpen && (
+            <>
+              <h1 className="font-display text-4xl">Pay for your food order</h1>
+              <div className="mt-4 rounded-2xl border border-vermilion-500/25 bg-white/70 p-5 text-left">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-vermilion-600">Amount to pay</div>
+                <div className="mt-1 font-display text-3xl text-brown-900">{formatPaise(data.amount_due_paise)}</div>
+                <p className="mt-1 text-sm text-brown-800/65">Scan and pay via UPI, then upload the screenshot below.</p>
+                {qrBlock}
+              </div>
+              {uploadForm("Upload payment", "Enter the UTR from your UPI app and the payment screenshot.")}
+              <p className="mt-3 text-xs text-brown-800/55">
+                Your food voucher (for collecting food coupons) is ready once the full amount is paid.
+              </p>
+            </>
+          )}
+          {cancelled && (
+            <>
+              <AlertTriangle className="mx-auto h-14 w-14 text-amber-500" />
+              <h1 className="mt-3 font-display text-4xl">Order closed</h1>
+              <p className="mt-1 text-brown-800/70">{data.message}</p>
+              <Link to="/food" className="mt-5 inline-flex"><Button variant="primary">Go to Food</Button></Link>
+            </>
+          )}
+          {data && !paid && !partial && !recon && !processing && !cancelled && !foodPayOpen && data.status !== "error" && (
             <>
               <Clock className="mx-auto h-14 w-14 text-gold-500" />
               <h1 className="mt-3 font-display text-4xl">{data.do_not_pay_again ? "Verification in progress" : "Awaiting payment"}</h1>

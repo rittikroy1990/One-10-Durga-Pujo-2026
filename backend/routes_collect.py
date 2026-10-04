@@ -538,6 +538,11 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
                 "updated_at": iso(),
             }},
         )
+    elif kind == "food_subscription" and food_id:
+        await db.food_subscriptions.update_one(
+            {"id": food_id, "payment_status": {"$in": ["pending", "partially_paid"]}},
+            {"$set": {"payment_status": "partially_paid", "status": "registered", "updated_at": iso()}},
+        )
     await audit("receipt.issue", entity_type="receipt", entity_id=rid,
                 correlation_id=intent.get("id") or "",
                 after={"receipt_no": receipt_no, "total": receipt["total_amount"], "kind": kind,
@@ -601,7 +606,11 @@ async def payment_status(token: str):
     due = _intent_due_paise(intent)
     residual_payment = None
 
-    if intent.get("status") == "partially_paid" and due > 0:
+    if intent.get("status") == "superseded" and intent.get("kind") == "food_subscription":
+        status = "cancelled"
+        message = "This food order is closed — do not pay for it. Place a new order on the Food page."
+        warn = True
+    elif intent.get("status") == "partially_paid" and due > 0:
         status = "partially_paid"
         residual_payment = _upi_payload(
             settings, due, note=intent["id"][:20], kind=intent.get("kind"),
@@ -688,6 +697,11 @@ async def payment_status(token: str):
                 f"Subscription receipt {receipt.get('receipt_no')} and donation receipt "
                 f"{donation_receipt.get('receipt_no')} issued."
             )
+    if (intent.get("kind") == "food_subscription" and intent.get("status") == "payment_pending"
+            and status == "payment_pending" and not warn and not receipt):
+        payload["food_pay_open"] = True
+        payload["payment"] = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
+        payload["qr_url"] = f"/api/payments/upi/qr.png?intent_id={intent_id}"
     if residual_payment:
         payload["residual_amount"] = due
         payload["residual_amount_fmt"] = fmt_inr(due)
@@ -802,7 +816,7 @@ async def upi_session(intent_id: str):
     if intent["status"] == "paid":
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
     if intent["status"] == "superseded" and intent.get("kind") == "food_subscription":
-        raise HTTPException(status_code=409, detail="This food order expired without payment. Please place a new order.")
+        raise HTTPException(status_code=409, detail="This food order was cancelled or expired without payment. Please place a new order.")
     settings = await get_settings()
     due = _intent_due_paise(intent)
     payload = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
@@ -927,7 +941,7 @@ async def upi_submit(request: Request):
     if intent["status"] == "paid":
         raise HTTPException(status_code=409, detail="This subscription is already paid.")
     if intent["status"] == "superseded" and intent.get("kind") == "food_subscription":
-        raise HTTPException(status_code=409, detail="This food order expired without payment. Please place a new order.")
+        raise HTTPException(status_code=409, detail="This food order was cancelled or expired without payment. Please place a new order.")
 
     data = await file.read()
     if not data:

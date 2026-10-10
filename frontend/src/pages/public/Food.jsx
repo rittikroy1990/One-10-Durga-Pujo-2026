@@ -507,7 +507,15 @@ export default function Food() {
     });
   };
 
-  const bump = (key, delta) => setQty(key, (cart[key] || 0) + delta);
+  const revealCart = () => {
+    if (step === "menu") setCartOpen(true);
+  };
+
+  /** Menu adds open the consolidated cart popup; in-dialog +/- do not re-trigger. */
+  const bump = (key, delta, { openCart = false } = {}) => {
+    setQty(key, (cart[key] || 0) + delta);
+    if (openCart && delta > 0) revealCart();
+  };
   const clearCart = () => {
     if (Object.keys(cart).length === 0) return;
     setCart({});
@@ -531,6 +539,7 @@ export default function Food() {
       return next;
     });
     toast.success(`Added 1 ${mealCode} for each day`);
+    revealCart();
   };
 
   const catalogDayOptions = useMemo(() => {
@@ -606,6 +615,7 @@ export default function Food() {
       : quick.days.map((d) => catalogDayOptions.find((o) => o.value === d)?.label || d).join(", ");
     toast.success(`Added ${dietLabel} · ${dayLabel} for ${quick.people} ${quick.people === 1 ? "person" : "people"}`);
     setQuickOpen(false);
+    revealCart();
   };
 
   const copyText = async (text, label) => {
@@ -816,21 +826,44 @@ export default function Food() {
     </div>
   ) : (
     <>
-      <ul className="max-h-[50vh] space-y-3 overflow-y-auto sm:max-h-72">
+      <div
+        className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-vermilion-500/25 bg-vermilion-500/[0.06] px-3 py-2.5"
+        data-testid="food-cart-summary-banner"
+      >
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-brown-800/45">Cart summary</div>
+          <div className="text-sm font-semibold text-brown-900">
+            {cartCount} {unitLabel}{cartCount === 1 ? "" : "s"} · {cartLines.length} line{cartLines.length === 1 ? "" : "s"}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[10px] uppercase tracking-wide text-brown-800/45">Total</div>
+          <div className="font-display text-2xl text-vermilion-600" data-testid="food-cart-summary-total">
+            {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+          </div>
+        </div>
+      </div>
+
+      <ul className="max-h-[45vh] space-y-3 overflow-y-auto sm:max-h-80">
         {cartLines.map((line) => (
           <li key={line.key} className="rounded-xl border border-sun-400/20 bg-sun-50/40 p-3" data-testid={`food-cart-line-${line.key}`}>
             <div className="flex items-start justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <div className="font-medium text-brown-900">{line.meal_label}</div>
-                <div className="text-xs text-brown-800/55">{line.day_label} · {line.amount_label} each</div>
-                {line.free_qty > 0 ? (
-                  <div className="mt-1 inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-600/20">
-                    {line.free_qty} complimentary
-                    {line.quantity > line.free_qty ? ` · ${line.quantity - line.free_qty} charged` : ""}
-                  </div>
-                ) : null}
+                <div className="text-xs text-brown-800/55">{line.day_label}</div>
+                <div className="mt-0.5 text-xs text-brown-800/70">
+                  {line.amount_label || (line.unit_paise != null ? formatPaise(line.unit_paise) : "TBC")}
+                  {" × "}
+                  {line.quantity}
+                  {line.free_qty > 0 ? (
+                    <span className="text-emerald-700">
+                      {" "}({line.free_qty} complimentary
+                      {line.quantity > line.free_qty ? ` · ${line.quantity - line.free_qty} charged` : ""})
+                    </span>
+                  ) : null}
+                </div>
               </div>
-              <div className="text-right font-semibold text-vermilion-600">
+              <div className="shrink-0 text-right font-semibold text-vermilion-600">
                 {line.line_total_paise != null
                   ? (line.line_total_paise === 0 && line.free_qty > 0 ? "Complimentary" : formatPaise(line.line_total_paise))
                   : "TBC"}
@@ -1394,8 +1427,12 @@ export default function Food() {
                                           value={qty}
                                           label={item.name}
                                           testId={`food-qty-${item.id}`}
-                                          onBump={(d) => bump(item.id, d)}
-                                          onSet={(v) => setQty(item.id, v)}
+                                          onBump={(d) => bump(item.id, d, { openCart: true })}
+                                          onSet={(v) => {
+                                            const prev = cart[item.id] || 0;
+                                            setQty(item.id, v);
+                                            if (Number(v) > prev) revealCart();
+                                          }}
                                         />
                                       </div>
                                     </div>
@@ -1481,8 +1518,12 @@ export default function Food() {
                                 value={qty}
                                 label={`${day.label} ${meal.label}`}
                                 testId={`food-qty-${key}`}
-                                onBump={(d) => bump(key, d)}
-                                onSet={(v) => setQty(key, v)}
+                                onBump={(d) => bump(key, d, { openCart: true })}
+                                onSet={(v) => {
+                                  const prev = cart[key] || 0;
+                                  setQty(key, v);
+                                  if (Number(v) > prev) revealCart();
+                                }}
                               />
                             </li>
                           );
@@ -1555,7 +1596,20 @@ export default function Food() {
       <Dialog
         open={cartOpen}
         onClose={() => setCartOpen(false)}
-        title="Your cart"
+        title={
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5" data-testid="food-cart-dialog-title">
+            <span>Your cart</span>
+            {cartCount > 0 ? (
+              <span className="font-sans text-sm font-semibold text-brown-800/55">
+                {cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}
+                {" · "}
+                <span className="text-vermilion-600">
+                  {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
+                </span>
+              </span>
+            ) : null}
+          </span>
+        }
         size="md"
         footer={
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -1575,7 +1629,9 @@ export default function Food() {
                 }}
                 data-testid="food-cart-dialog-checkout"
               >
-                Checkout <ArrowRight className="h-4 w-4" />
+                Checkout
+                {cartTotalPaise != null ? ` · ${formatPaise(cartTotalPaise)}` : ""}
+                <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
           </div>

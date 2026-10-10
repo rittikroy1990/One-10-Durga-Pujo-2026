@@ -508,13 +508,25 @@ export default function Food() {
   };
 
   const revealCart = () => {
-    if (step === "menu") setCartOpen(true);
+    if (step === "menu" || step === "checkout") setCartOpen(true);
   };
 
   /** Menu adds open the consolidated cart popup; in-dialog +/- do not re-trigger. */
   const bump = (key, delta, { openCart = false } = {}) => {
     setQty(key, (cart[key] || 0) + delta);
     if (openCart && delta > 0) revealCart();
+  };
+
+  /** Checkout CTAs open the cart review popup first (prices + total). */
+  const openCheckoutReview = () => {
+    if (!flatReady) {
+      window.scrollTo({ top: document.getElementById("food-flat-card")?.offsetTop - 90 || 0, behavior: "smooth" });
+      return toast.error("Start with your tower, flat and mobile at the top");
+    }
+    if (cartCount === 0) {
+      return toast.error(catalogMode ? "Add at least one item to your cart" : "Tap Add on a meal to start your cart");
+    }
+    setCartOpen(true);
   };
   const clearCart = () => {
     if (Object.keys(cart).length === 0) return;
@@ -721,9 +733,11 @@ export default function Food() {
       return toast.error(catalogMode ? "Add at least one item to your cart" : "Tap Add on a meal to start your cart");
     }
     if (knownName) {
+      setCartOpen(false);
       submitCheckout({ preventDefault() {} });
       return;
     }
+    setCartOpen(true);
     setStep("checkout");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1053,7 +1067,7 @@ export default function Food() {
         </div>
       </section>
 
-      <section className={`mx-auto max-w-5xl px-4 py-8 sm:px-5 ${step === "menu" && cartCount > 0 ? "pb-28 lg:pb-8" : ""}`}>
+      <section className={`mx-auto max-w-5xl px-4 py-8 sm:px-5 ${(step === "menu" || step === "checkout") && cartCount > 0 ? "pb-28 lg:pb-8" : ""}`}>
         {!menu ? (
           <Spinner className="text-vermilion-500" />
         ) : step === "pay" && upiSession && intent ? (
@@ -1196,9 +1210,25 @@ export default function Food() {
         ) : step === "checkout" ? (
           <form onSubmit={submitCheckout} className="grid gap-6 lg:grid-cols-[1fr_340px]" data-testid="food-checkout-form">
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
-              <p className="text-xs font-semibold uppercase tracking-wide text-vermilion-500">Step 2 of {paymentEnabled ? 3 : 2}</p>
-              <h2 className="mt-1 font-display text-2xl text-brown-900">Who is this order for?</h2>
-              <p className="mt-1 text-sm text-brown-800/60">Add your name so the committee can find your order.</p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-vermilion-500">Step 2 of {paymentEnabled ? 3 : 2}</p>
+                  <h2 className="mt-1 font-display text-2xl text-brown-900">Who is this order for?</h2>
+                  <p className="mt-1 text-sm text-brown-800/60">Add your name so the committee can find your order.</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCartOpen(true)}
+                  data-testid="food-checkout-open-summary"
+                  className="shrink-0"
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  Order summary
+                  {cartTotalPaise != null ? ` · ${formatPaise(cartTotalPaise)}` : ""}
+                </Button>
+              </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 <div className="sm:col-span-2">
@@ -1543,7 +1573,7 @@ export default function Food() {
                 size="lg"
                 className="mt-3 w-full"
                 disabled={cartCount === 0}
-                onClick={goCheckout}
+                onClick={openCheckoutReview}
                 data-testid="food-goto-checkout-side"
               >
                 {cartCount === 0
@@ -1556,8 +1586,8 @@ export default function Food() {
         )}
       </section>
 
-      {/* Mobile sticky checkout bar — cart sidebar is desktop-only, so buyers need View cart here */}
-      {step === "menu" && cartCount > 0 && (
+      {/* Mobile sticky bar — opens the consolidated cart popup (menu + checkout) */}
+      {(step === "menu" || step === "checkout") && cartCount > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-sun-400/30 bg-white/95 p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur lg:hidden" data-testid="food-mobile-checkout-bar">
           <div className="mx-auto flex max-w-5xl items-center gap-2">
             <Button
@@ -1578,7 +1608,9 @@ export default function Food() {
               className="min-w-0 flex-1 rounded-xl px-1 py-0.5 text-left hover:bg-sun-50/80"
               data-testid="food-view-cart-summary"
             >
-              <div className="text-xs font-semibold text-vermilion-600">View cart</div>
+              <div className="text-xs font-semibold text-vermilion-600">
+                {step === "checkout" ? "Order summary" : "View cart"}
+              </div>
               <div className="truncate font-display text-xl text-brown-900">
                 {cartTotalPaise != null ? formatPaise(cartTotalPaise) : "TBC"}
                 <span className="ml-1 text-sm font-normal text-brown-800/45">
@@ -1586,9 +1618,21 @@ export default function Food() {
                 </span>
               </div>
             </button>
-            <Button type="button" variant="primary" size="lg" onClick={goCheckout} data-testid="food-goto-checkout">
-              Checkout <ArrowRight className="h-4 w-4" />
-            </Button>
+            {step === "menu" ? (
+              <Button type="button" variant="primary" size="lg" onClick={openCheckoutReview} data-testid="food-goto-checkout">
+                Checkout <ArrowRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="primary"
+                size="lg"
+                onClick={() => setCartOpen(true)}
+                data-testid="food-checkout-view-summary"
+              >
+                Review <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -1598,7 +1642,7 @@ export default function Food() {
         onClose={() => setCartOpen(false)}
         title={
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5" data-testid="food-cart-dialog-title">
-            <span>Your cart</span>
+            <span>{step === "checkout" ? "Order summary" : "Your cart"}</span>
             {cartCount > 0 ? (
               <span className="font-sans text-sm font-semibold text-brown-800/55">
                 {cartCount} {unitLabel}{cartCount === 1 ? "" : "s"}
@@ -1617,22 +1661,49 @@ export default function Food() {
               <Trash2 className="h-3.5 w-3.5" /> Reset
             </Button>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="subtle" onClick={() => setCartOpen(false)} data-testid="food-cart-keep-shopping">
-                Keep shopping
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => {
-                  setCartOpen(false);
-                  goCheckout();
-                }}
-                data-testid="food-cart-dialog-checkout"
-              >
-                Checkout
-                {cartTotalPaise != null ? ` · ${formatPaise(cartTotalPaise)}` : ""}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+              {step === "checkout" ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    onClick={() => {
+                      setCartOpen(false);
+                      setStep("menu");
+                    }}
+                    data-testid="food-cart-edit-cart"
+                  >
+                    Edit cart
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => setCartOpen(false)}
+                    data-testid="food-cart-dialog-continue"
+                  >
+                    Continue
+                    {cartTotalPaise != null ? ` · ${formatPaise(cartTotalPaise)}` : ""}
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button type="button" variant="subtle" onClick={() => setCartOpen(false)} data-testid="food-cart-keep-shopping">
+                    Keep shopping
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => {
+                      goCheckout();
+                    }}
+                    data-testid="food-cart-dialog-checkout"
+                  >
+                    Checkout
+                    {cartTotalPaise != null ? ` · ${formatPaise(cartTotalPaise)}` : ""}
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         }

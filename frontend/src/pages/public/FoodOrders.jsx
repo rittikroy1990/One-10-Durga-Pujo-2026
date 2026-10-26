@@ -3,9 +3,11 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Search } from "lucide-react";
 import api from "../../lib/api";
+import { loadFlats, prefetchFlats } from "../../lib/flats";
 import PublicLayout from "../../components/PublicLayout";
 import FoodOrdersList from "../../components/FoodOrdersList";
 import { Button, Input, Label, Select } from "../../components/ui";
+import { normalizeMobile } from "../../lib/food";
 
 export default function FoodOrders() {
   const [towers, setTowers] = useState([]);
@@ -15,12 +17,12 @@ export default function FoodOrders() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.get("/towers").then((r) => setTowers(r.data.items || [])).catch(() => {});
+    api.get("/towers").then((r) => { setTowers(r.data.items || []); prefetchFlats(r.data.items); }).catch(() => {});
   }, []);
   useEffect(() => {
     setFlats([]);
     if (!form.tower_id) return;
-    api.get(`/towers/${form.tower_id}/flats`).then((r) => setFlats(r.data.items || [])).catch(() => {});
+    loadFlats(form.tower_id).then(setFlats).catch(() => {});
   }, [form.tower_id]);
 
   const lookup = async (e) => {
@@ -50,7 +52,7 @@ export default function FoodOrders() {
         </Link>
         <h1 className="mt-3 font-display text-3xl text-brown-900">My food orders</h1>
         <p className="mt-1 text-sm text-brown-800/60">
-          Pay a balance or download your food vouchers.
+          Pay, edit or cancel an unpaid order, or download your food vouchers.
         </p>
 
         <form onSubmit={lookup} className="mt-6 grid gap-3 rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:grid-cols-3">
@@ -72,7 +74,7 @@ export default function FoodOrders() {
             <Label required>Mobile on the order</Label>
             <Input
               value={form.mobile}
-              onChange={(e) => setForm({ ...form, mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })}
+              onChange={(e) => setForm({ ...form, mobile: normalizeMobile(e.target.value) })}
               placeholder="10-digit mobile"
               inputMode="numeric"
               data-testid="orders-mobile"
@@ -88,7 +90,7 @@ export default function FoodOrders() {
         {result ? (
           <div className="mt-6">
             {result.orders.length ? (
-              <FoodOrdersList orders={result.orders} />
+              <FoodOrdersList orders={result.orders} onChanged={lookup} />
             ) : (
               <p className="rounded-xl bg-ivory-200 px-4 py-3 text-sm text-brown-800/70">
                 No food orders for this flat on this mobile.

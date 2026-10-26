@@ -15,9 +15,9 @@ from db import db, new_id, clean, NO_ID
 from config import get_settings, get_active_cycle_id
 from util import iso
 from audit import audit, next_formatted
-from auth import require
+from auth import require, user_permissions, get_optional_user
 from docs import food_coupon_pdf
-from tokens import food_voucher_token as _food_voucher_token, read_food_voucher_token
+from tokens import food_edit_token, food_voucher_token as _food_voucher_token, read_food_edit_token, read_food_voucher_token
 from food_poll_catalog import build_catalog, DISHES, POLL_META, MEALS, DAYS
 
 router = APIRouter(prefix="/api")
@@ -103,7 +103,7 @@ def _normalize_selections(food: dict, selections: list, items_by_id: dict | None
                 "item_id": iid,
                 "name": src.get("name") or "",
                 "description": src.get("description") or "",
-                "image_url": src.get("image_url") or "",
+                "image_url": _light_menu_image(src.get("image_url") or ""),
                 "category": src.get("category") or "",
                 "category_label": MEAL_CATEGORIES.get(src.get("category") or "") or src.get("category") or "",
                 "diet": src.get("diet") or "",
@@ -132,13 +132,19 @@ def _normalize_selections(food: dict, selections: list, items_by_id: dict | None
         if not item or qty < 1:
             continue
         qty = min(qty, 50)
+        try:
+            kids = max(0, min(20, int(raw.get("kid_qty") or 0))) if isinstance(raw, dict) else 0
+        except (TypeError, ValueError):
+            kids = 0
         if key in index_by_key:
             row = cleaned[index_by_key[key]]
             row["quantity"] = min(50, int(row.get("quantity") or 0) + qty)
+            row["kid_qty"] = min(20, int(row.get("kid_qty") or 0) + kids)
             unit = row.get("amount_paise")
             row["line_total_paise"] = (int(unit) * row["quantity"]) if unit not in (None, "") else None
             continue
         item["quantity"] = qty
+        item["kid_qty"] = kids
         unit = item.get("amount_paise")
         item["line_total_paise"] = (int(unit) * qty) if unit not in (None, "") else None
         index_by_key[key] = len(cleaned)
@@ -213,7 +219,7 @@ async def _expire_abandoned_food_orders(flat_id: str) -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=COMPLIMENTARY_HOLD_HOURS)).isoformat()
     expired = 0
     async for o in db.food_subscriptions.find(
-        {"flat_id": flat_id, "payment_status": "pending", "created_at": {"$lt": cutoff}},
+        {"flat_id": flat_id, "payment_status": "pending", "created_at": {"$lt": cutoff}, "whatsapp_posted_at": None},
         {"_id": 0, "id": 1, "intent_id": 1},
     ):
         intent = await db.subscription_intents.find_one({"id": o.get("intent_id")}, {"_id": 0, "status": 1}) \
@@ -257,75 +263,119 @@ def _mobile10(value) -> str:
     return d[-10:] if len(d) >= 10 else ""
 
 
-async def _flat_free_meal_access(flat_id: str, mobile: str) -> dict:
-    """Free meals need a paid Puja subscription for the flat AND the mobile registered on it.
+def _mobile_input(value) -> str:
+    """A typed or autofilled mobile: 10 digits, optionally with a +91 / 0 prefix. Anything else is ''."""
+    d = re.sub(r"\D", "", str(value or ""))
+    if len(d) == 12 and d.startswith("91"):
+        d = d[2:]
+    elif len(d) == 11 and d.startswith("0"):
+        d = d[1:]
+    return d if len(d) == 10 else ""
+
+
+def _cart_signature(selections: list) -> list:
+    return sorted(
+        (s.get("item_id") or f"{s.get('day_code')}|{s.get('meal_code')}", int(s.get("quantity") or 0), int(s.get("kid_qty") or 0))
+        for s in selections or []
+    )
+
+
+async def _flat_subscribed(flat_id: str) -> bool:
+    """Complimentary meals need a paid Puja subscription for the flat (tower + flat).
 
     A flat whose Puja payment was taken as a donation counts as subscribed once its donations reach the
     subscription amount.
-
-    Registered mobiles come from those receipts and the flat's own household record (not one created
-    by a food order), so nobody can claim another flat's free meals by picking its tower and flat.
     """
-    out = {"contributed": False, "mobile_ok": False}
     if not flat_id:
-        return out
-    households = [h async for h in db.households.find(
-        {"flat_id": flat_id, "is_deleted": {"$ne": True}},
-        {"_id": 0, "id": 1, "primary_mobile": 1, "alternate_contact": 1, "source": 1},
+        return False
+    households = [h["id"] async for h in db.households.find(
+        {"flat_id": flat_id, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1},
     )]
     if not households:
-        return out
+        return False
     receipts = await db.receipts.find(
-        {"household_id": {"$in": [h["id"] for h in households]}, "kind": {"$in": ["subscription", "donation"]},
+        {"household_id": {"$in": households}, "kind": {"$in": ["subscription", "donation"]},
          "status": "issued", "cycle_id": await get_active_cycle_id()},
-        {"_id": 0, "household_id": 1, "payer_mobile": 1, "kind": 1, "total_amount": 1},
+        {"_id": 0, "kind": 1, "total_amount": 1},
     ).to_list(50)
+    if any(r.get("kind") == "subscription" for r in receipts):
+        return True
     s = await get_settings()
     sub_amount = int((s.get("subscription") or {}).get("base_amount_paise") or 0)
     donated = sum(int(r.get("total_amount") or 0) for r in receipts if r.get("kind") == "donation")
-    if not any(r.get("kind") == "subscription" for r in receipts) and not (sub_amount and donated >= sub_amount):
-        return out
-    out["contributed"] = True
-    paid_hh = {r["household_id"] for r in receipts}
-    registered = {_mobile10(r.get("payer_mobile")) for r in receipts}
-    for h in households:
-        if h["id"] in paid_hh and h.get("source") != "food_subscription":
-            registered |= {_mobile10(h.get("primary_mobile")), _mobile10(h.get("alternate_contact"))}
-    registered.discard("")
-    out["mobile_ok"] = bool(_mobile10(mobile)) and _mobile10(mobile) in registered
-    return out
+    return bool(sub_amount and donated >= sub_amount)
 
 
-async def _known_name(flat_id: str, mobile: str) -> str:
-    """Name already on record for this flat with this exact mobile (household, receipt or earlier food order)."""
-    m = _mobile10(mobile)
-    if not flat_id or not m:
-        return ""
+_PLACEHOLDER_NAMES = {"check", "test", "example", "n/a", "na", "-", "."}
+_PLACEHOLDER_MOBILES = {"9876543210", "0000000000", "1234567890"}
+
+
+def _real_contact(name, mobile) -> dict:
+    """{name, mobile} when both look like a real person's details (not seed/import placeholders)."""
+    name = (name or "").strip()
+    mobile = _mobile10(mobile)
+    if not name or name.lower() in _PLACEHOLDER_NAMES or not mobile or mobile in _PLACEHOLDER_MOBILES:
+        return {}
+    return {"name": name, "mobile": mobile}
+
+
+async def _flat_contact(flat_id: str) -> dict:
+    """Name and mobile already on record for a flat: its Puja payer first, then its latest food order."""
     households = [h async for h in db.households.find(
-        {"flat_id": flat_id, "is_deleted": {"$ne": True}}, {"_id": 0, "id": 1, "primary_mobile": 1, "primary_name": 1},
+        {"flat_id": flat_id, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "primary_name": 1, "primary_mobile": 1, "source": 1},
     )]
-    for h in households:
-        if _mobile10(h.get("primary_mobile")) == m and (h.get("primary_name") or "").strip():
-            return h["primary_name"].strip()
     if households:
         async for r in db.receipts.find(
-            {"household_id": {"$in": [h["id"] for h in households]}, "status": "issued"},
-            {"_id": 0, "payer_mobile": 1, "payer_name": 1},
+            {"household_id": {"$in": [h["id"] for h in households]}, "status": "issued",
+             "kind": {"$in": ["subscription", "donation"]}},
+            {"_id": 0, "payer_name": 1, "payer_mobile": 1},
         ).sort("issued_at", -1):
-            if _mobile10(r.get("payer_mobile")) == m and (r.get("payer_name") or "").strip():
-                return r["payer_name"].strip()
-    async for o in db.food_subscriptions.find({"flat_id": flat_id}, {"_id": 0, "mobile": 1, "name": 1}).sort("created_at", -1):
-        if _mobile10(o.get("mobile")) == m and (o.get("name") or "").strip():
-            return o["name"].strip()
-    return ""
+            if contact := _real_contact(r.get("payer_name"), r.get("payer_mobile")):
+                return contact
+        for h in sorted(households, key=lambda h: h.get("source") == "food_subscription"):
+            if contact := _real_contact(h.get("primary_name"), h.get("primary_mobile")):
+                return contact
+    async for o in db.food_subscriptions.find({"flat_id": flat_id}, {"_id": 0, "name": 1, "mobile": 1}).sort("created_at", -1):
+        if contact := _real_contact(o.get("name"), o.get("mobile")):
+            return contact
+    return {}
 
 
-async def _complimentary_remaining(flat_id: str, *, eligible: bool = True) -> dict:
+async def _complimentary_remaining(flat_id: str, *, eligible: bool = True, giving_back: dict | None = None) -> dict:
     from pujo_menu_2026 import COMPLIMENTARY_QUOTAS
     if not eligible:
         return {k: 0 for k in COMPLIMENTARY_QUOTAS}
     used = await _complimentary_used(flat_id)
+    for k, v in (giving_back or {}).items():
+        used[k] = max(0, int(used.get(k) or 0) - int(v or 0))
     return {k: max(0, q - int(used.get(k) or 0)) for k, q in COMPLIMENTARY_QUOTAS.items()}
+
+
+def _apply_kid_plates(selections: list, raw_kids) -> tuple[list, int]:
+    """Validate the kids' years of birth and cap each line's ₹0 kid plates.
+
+    Each kid below the age limit may add one plate per paid line; quota meals (breakfast, Ashtami
+    lunch) never take kid plates — kids there are booked like everyone else.
+    """
+    from pujo_menu_2026 import KIDS_FREE_BELOW_AGE, complimentary_key, kid_age
+    kids = []
+    for k in (raw_kids if isinstance(raw_kids, list) else [])[:10]:
+        year = k.get("birth_year") if isinstance(k, dict) else k
+        if year in (None, ""):
+            continue
+        age = kid_age(year)
+        if age is None:
+            raise HTTPException(status_code=400, detail="Enter a valid year of birth for each child.")
+        kids.append({"birth_year": int(year), "age": age})
+    allowed = sum(1 for k in kids if k["age"] < KIDS_FREE_BELOW_AGE)
+    total = 0
+    for sel in selections:
+        quota_meal = complimentary_key(sel.get("category") or sel.get("meal_code") or "",
+                                       sel.get("item_day_code") or sel.get("day_code") or "")
+        sel["kid_qty"] = 0 if quota_meal else min(int(sel.get("kid_qty") or 0), allowed)
+        total += sel["kid_qty"]
+    return kids, total
 
 
 def _selection_totals(selections: list) -> tuple:
@@ -393,11 +443,36 @@ def _food_page_enabled(food: dict) -> bool:
     """Public Food page is coming-soon unless admin explicitly enables it."""
     return bool((food or {}).get("page_enabled"))
 
+
+# Once ordering is closed to the community, only committee members (logged in to the admin) can still order.
+_FOOD_COMMITTEE_PERMS = ("households:write", "ops:manage", "receipts:manage", "expense:create")
+_DEFAULT_CLOSED_MESSAGE = "Food orders for Durgotsav 2026 are now closed. Thank you for ordering with us."
+
+
+def _community_closed(food: dict) -> bool:
+    return bool((food or {}).get("community_closed"))
+
+
+def _closed_message(food: dict) -> str:
+    return ((food or {}).get("closed_message") or "").strip() or _DEFAULT_CLOSED_MESSAGE
+
+
+async def _committee_orderer(request: Request | None) -> dict | None:
+    user = await get_optional_user(request) if request is not None else None
+    if user and any(p in user_permissions(user) for p in _FOOD_COMMITTEE_PERMS):
+        return user
+    return None
+
 @router.get("/food/menu")
-async def food_menu():
+async def food_menu(request: Request):
     s = await get_settings()
     food = _apply_default_prices(s.get("food_subscription") or {})
     page_enabled = _food_page_enabled(food)
+    closed = page_enabled and _community_closed(food)
+    committee = await _committee_orderer(request) if closed else None
+    if closed and not committee:
+        return {"page_enabled": False, "closed": True, "closed_message": _closed_message(food), "items": [],
+                "menu": {"days": []}, "payment_enabled": False, "meal_prices": [], "mode": "items"}
     catalog = []
     if page_enabled:
         catalog = await db.food_menu_items.find(
@@ -419,27 +494,41 @@ async def food_menu():
         "menu_meta": MENU_META if page_enabled else {},
         "kids_note": (food.get("kids_note") or MENU_META.get("kids_note") or "") if page_enabled else "",
         "timings": (food.get("timings") or MENU_META.get("timings") or {}) if page_enabled else {},
+        "committee_mode": bool(committee),
+        "committee_name": (committee.get("name") or "") if committee else "",
     }
 
 
 @router.get("/food/complimentary")
-async def food_complimentary_remaining(flat_id: str = "", mobile: str = ""):
-    """Free units (e.g. breakfasts) this flat can still claim with this mobile."""
+async def food_complimentary_remaining(flat_id: str = "", editing: str = ""):
+    """Free units (e.g. breakfasts) this flat can still claim, and whether its contact is already on record.
+
+    `editing` (an order's edit token) counts that order's free units as available, since checkout replaces it.
+    """
     flat_id = (flat_id or "").strip()
     if not flat_id or not await db.flats.find_one({"id": flat_id}, {"_id": 1}):
         raise HTTPException(status_code=404, detail="Unknown flat.")
     await _expire_abandoned_food_orders(flat_id)
-    access = await _flat_free_meal_access(flat_id, mobile)
-    mobile_given = bool(_mobile10(mobile))
+    subscribed = await _flat_subscribed(flat_id)
+    contact = await _flat_contact(flat_id)
     return {
         "flat_id": flat_id,
-        "subscribed": access["contributed"],
-        "mobile_checked": mobile_given,
-        "mobile_ok": access["mobile_ok"] if mobile_given else None,
-        "known_name": await _known_name(flat_id, mobile) if mobile_given else "",
-        "remaining": await _complimentary_remaining(
-            flat_id, eligible=access["contributed"] and (access["mobile_ok"] or not mobile_given)),
+        "subscribed": subscribed,
+        "known": bool(contact),
+        "known_name": (contact.get("name") or "").split()[0] if contact else "",
+        "known_mobile_masked": _mask_mobile(contact.get("mobile")) if contact else "",
+        "remaining": await _complimentary_remaining(flat_id, eligible=subscribed, giving_back=await _editing_free(editing, flat_id)),
     }
+
+
+async def _editing_free(token: str, flat_id: str) -> dict:
+    sid = read_food_edit_token((token or "").strip()) if token else None
+    doc = await db.food_subscriptions.find_one(
+        {"id": sid, "flat_id": flat_id, "payment_status": {"$nin": _RELEASED_PAYMENT_STATUSES}}, NO_ID,
+    ) if sid else None
+    if not doc or await _resident_change_problem(doc):
+        return {}
+    return doc.get("complimentary") or {}
 
 
 @router.post("/food/register")
@@ -451,20 +540,24 @@ async def food_register(body: dict = Body(...), request: Request = None):
         raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
     if not _food_page_enabled(food):
         raise HTTPException(status_code=403, detail="Food subscriptions are coming soon.")
-
-    name = (body.get("name") or "").strip()
-    mobile_raw = "".join(c for c in str(body.get("mobile") or "") if c.isdigit())
-    mobile = mobile_raw[-10:] if mobile_raw else ""
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required.")
-    if len(mobile) != 10:
-        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number.")
+    committee = await _committee_orderer(request) if _community_closed(food) else None
+    if _community_closed(food) and not committee:
+        raise HTTPException(status_code=403, detail=_closed_message(food))
 
     catalog = await db.food_menu_items.find(
         {"active": True, "is_deleted": {"$ne": True}}, NO_ID
     ).to_list(500)
     items_by_id = {c["id"]: c for c in catalog}
-    selections = _normalize_selections(food, body.get("selections") or [], items_by_id=items_by_id)
+    raw_selections = body.get("selections") or []
+    stale = [str(r.get("item_id") or r.get("id")) for r in raw_selections
+             if isinstance(r, dict) and (r.get("item_id") or r.get("id")) and (r.get("item_id") or r.get("id")) not in items_by_id]
+    if stale:
+        gone = [g["name"] for g in await db.food_menu_items.find({"id": {"$in": stale}}, {"_id": 0, "name": 1}).to_list(50)
+                if g.get("name")]
+        what = f"{', '.join(gone)} {'is' if len(gone) == 1 else 'are'}" if gone else "Some items in your cart are"
+        raise HTTPException(status_code=409, detail=(
+            f"{what} no longer available. Refresh the page, check your cart and place the order again."))
+    selections = _normalize_selections(food, raw_selections, items_by_id=items_by_id)
     if not selections:
         raise HTTPException(status_code=400, detail="Add at least one item to your cart.")
 
@@ -479,13 +572,42 @@ async def food_register(body: dict = Body(...), request: Request = None):
     tower_name = tower.get("name") or ""
     flat_number = flat.get("number") or ""
 
+    name = (body.get("name") or "").strip() or (await _flat_contact(flat_id)).get("name") or ""
+    mobile = _mobile_input(body.get("mobile"))
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+    if not re.fullmatch(r"[6-9]\d{9}", mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number.")
+    kids, kid_heads = _apply_kid_plates(selections, body.get("kids"))
+    replaces_id = None
+    if (body.get("replaces_token") or "").strip():
+        replaces_id = read_food_edit_token(body["replaces_token"].strip())
+        if not replaces_id:
+            raise HTTPException(status_code=400, detail="This edit link has expired — open the order again from My orders.")
+
     # One flat's free-unit count and order insert must not interleave with another request.
     async with _flat_guard(flat_id):
         await _expire_abandoned_food_orders(flat_id)
-        access = await _flat_free_meal_access(flat_id, mobile)
-        subscribed = access["contributed"]
+        old = await db.food_subscriptions.find_one({"id": replaces_id}, NO_ID) if replaces_id else None
+        if replaces_id and (not old or old.get("flat_id") != flat_id):
+            raise HTTPException(status_code=409, detail="The order you are editing belongs to another flat.")
+        if old and old.get("payment_status") in _RELEASED_PAYMENT_STATUSES:
+            if old.get("replaced_by"):
+                raise HTTPException(status_code=409, detail=(
+                    f"Order #{old['id'][-6:].upper()} was already updated (new order "
+                    f"#{old['replaced_by'][-6:].upper()}). Open My orders to see it."))
+            raise HTTPException(status_code=409, detail=(
+                f"Order #{old['id'][-6:].upper()} was cancelled or expired, so it can't be edited. "
+                f"Start a new order instead."))
+        if not old and (repeat := await _recent_identical_order(flat_id, mobile, selections)):
+            return await _register_response(repeat, message="This order was already placed — here it is again.")
+        if old and (problem := await _resident_change_problem(old)):
+            raise HTTPException(status_code=409, detail=problem)
+        subscribed = await _flat_subscribed(flat_id)
         used_before = await _complimentary_used(flat_id)
-        granted = _apply_complimentary(selections, used_before, eligible=subscribed and access["mobile_ok"])
+        for k, v in ((old or {}).get("complimentary") or {}).items():
+            used_before[k] = max(0, used_before.get(k, 0) - int(v or 0))
+        granted = _apply_complimentary(selections, used_before, eligible=subscribed)
         total_paise, item_count = _selection_totals(selections)
         fully_complimentary = bool(granted) and total_paise == 0
 
@@ -505,11 +627,12 @@ async def food_register(body: dict = Body(...), request: Request = None):
             "notes": (body.get("notes") or "").strip()[:500],
             "selections": selections,
             "selection_count": item_count,
+            "kids": kids,
+            "kid_heads": kid_heads,
             "amount_status": "fixed" if total_paise is not None else "TBC",
             "total_amount_paise": total_paise,
             "complimentary": granted,
             "flat_subscribed": subscribed,
-            "free_mobile_ok": access["mobile_ok"],
             "payment_status": "complimentary" if fully_complimentary else ("pending" if payment_enabled else "not_open"),
             "status": "confirmed" if fully_complimentary else "registered",
             "coupon_id": None,
@@ -517,12 +640,15 @@ async def food_register(body: dict = Body(...), request: Request = None):
             "intent_id": None,
             "created_at": iso(),
             "updated_at": iso(),
-            "source": "public",
+            "source": "committee" if committee else "public",
             "order_mode": "items" if any(s.get("item_id") for s in selections) else "meals",
+            "replaces_order_id": old["id"] if old else None,
         }
+        if committee:
+            doc["placed_by"] = committee.get("user_id") or ""
+            doc["placed_by_name"] = committee.get("name") or committee.get("login_id") or ""
 
         intent_id = None
-        status_tok = None
         if payment_enabled:
             # One household per (cycle, tower, flat) is enforced by a unique index.
             existing_hh = await db.households.find_one(
@@ -557,13 +683,15 @@ async def food_register(body: dict = Body(...), request: Request = None):
             }
             await db.subscription_intents.insert_one(dict(intent))
             doc["intent_id"] = intent_id
-            from tokens import status_token as _status_token
-            status_tok = _status_token(intent_id)
 
         await db.food_subscriptions.insert_one(doc)
+        if old:
+            await db.food_subscriptions.update_one({"id": old["id"]}, {"$set": {"replaced_by": sid}})
+            await _cancel_food_order(old, actor="public", reason=f"Replaced by edited order #{sid[-6:].upper()}",
+                                     request=request)
     await audit(
         "food.subscription.register",
-        actor="public",
+        actor=committee or "public",
         entity_type="food_subscription",
         entity_id=sid,
         after={
@@ -573,7 +701,7 @@ async def food_register(body: dict = Body(...), request: Request = None):
             "total_amount_paise": total_paise,
             "payment_enabled": payment_enabled,
         },
-        reason="Public food order",
+        reason="Committee food order (closed to the community)" if committee else "Public food order",
         request=request,
     )
     if fully_complimentary:
@@ -582,22 +710,51 @@ async def food_register(body: dict = Body(...), request: Request = None):
         message = "Order placed. Pay via UPI QR and upload your payment screenshot."
     else:
         message = "Order placed. Payment is not open yet."
+    return await _register_response(doc, message=message, used_before=used_before,
+                                    replaced_ref=old["id"][-6:].upper() if old else None)
+
+
+# A second identical checkout from the same flat and mobile this soon is a double tap or a retry, not a new order.
+_REPEAT_ORDER_WINDOW_SECONDS = 120
+
+
+async def _recent_identical_order(flat_id: str, mobile: str, selections: list) -> dict | None:
+    since = (datetime.now(timezone.utc) - timedelta(seconds=_REPEAT_ORDER_WINDOW_SECONDS)).isoformat()
+    want = _cart_signature(selections)
+    async for o in db.food_subscriptions.find(
+        {"flat_id": flat_id, "mobile": mobile, "created_at": {"$gte": since},
+         "payment_status": {"$in": ["pending", "not_open", "complimentary"]}, "replaced_by": None},
+        NO_ID,
+    ).sort("created_at", -1):
+        if _cart_signature(o.get("selections")) == want:
+            return o
+    return None
+
+
+async def _register_response(doc: dict, *, message: str, used_before: dict | None = None,
+                             replaced_ref: str | None = None) -> dict:
+    from tokens import status_token
+    payment_enabled = bool(doc.get("intent_id"))
+    total_paise = doc.get("total_amount_paise")
     return {
         "ok": True,
-        "id": sid,
+        "id": doc["id"],
+        "ref": doc["id"][-6:].upper(),
         "status": doc["status"],
         "payment_status": doc["payment_status"],
         "payment_enabled": payment_enabled,
         "total_amount_paise": total_paise,
-        "selection_count": item_count,
-        "selections": selections,
-        "complimentary": granted,
-        "complimentary_used_before": used_before,
-        "flat_subscribed": subscribed,
-        "free_mobile_ok": access["mobile_ok"],
-        "intent_id": intent_id,
-        "status_token": status_tok,
-        "voucher_token": _food_voucher_token(sid) if fully_complimentary else None,
+        "selection_count": doc.get("selection_count"),
+        "kid_heads": doc.get("kid_heads") or 0,
+        "selections": doc.get("selections") or [],
+        "complimentary": doc.get("complimentary") or {},
+        "complimentary_used_before": used_before or {},
+        "flat_subscribed": doc.get("flat_subscribed"),
+        "intent_id": doc.get("intent_id"),
+        "status_token": status_token(doc["intent_id"]) if payment_enabled else None,
+        "voucher_token": _food_voucher_token(doc["id"]) if doc.get("payment_status") == "complimentary" else None,
+        "whatsapp_text": _whatsapp_order_text(doc, total_paise) if payment_enabled else None,
+        "replaced_ref": replaced_ref,
         "message": message,
     }
 
@@ -608,6 +765,8 @@ async def admin_food_prices(user: dict = Depends(require("households:read", "ops
     food = _apply_default_prices(s.get("food_subscription") or {})
     return {
         "page_enabled": _food_page_enabled(food),
+        "community_closed": _community_closed(food),
+        "closed_message": _closed_message(food),
         "coming_soon_message": (food.get("coming_soon_message") or "").strip(),
         "payment_enabled": bool(food.get("payment_enabled")),
         "payment_note": food.get("payment_note") or "",
@@ -680,10 +839,17 @@ def _default_menu_image(category: str, diet: str, day_code: str = "") -> str:
     diet_norm = (diet or "").strip().lower()
     diet_key = "nonveg" if diet_norm == "non_veg" else ("veg" if diet_norm == "veg" else "")
     if day and diet_key:
-        return f"/images/food-menu/day/{day}-{cat}-{diet_key}.png"
+        return f"/images/food-menu/day/{day}-{cat}-{diet_key}.jpg"
     if not diet_key:
         return ""
-    return f"/images/food-menu/menu-{diet_key}-{cat}.png"
+    return f"/images/food-menu/menu-{diet_key}-{cat}.jpg"
+
+
+def _light_menu_image(url: str) -> str:
+    # The bundled plate photos also ship as ~80 KB JPEGs; the ~500 KB PNGs fail to load on slow phones.
+    if url.startswith("/images/food-menu/") and url.endswith(".png"):
+        return url[:-4] + ".jpg"
+    return url
 
 
 def _item_public(doc: dict) -> dict:
@@ -691,7 +857,7 @@ def _item_public(doc: dict) -> dict:
     diet = _normalize_diet(doc.get("diet") or doc.get("veg_type") or "")
     menu_date = _normalize_menu_date(doc.get("menu_date") or doc.get("date") or "") or (doc.get("menu_date") or "")
     day_code = (doc.get("day_code") or "").strip()
-    image_url = (doc.get("image_url") or "").strip() or _default_menu_image(category, diet, day_code)
+    image_url = _light_menu_image((doc.get("image_url") or "").strip() or _default_menu_image(category, diet, day_code))
     return clean({
         "id": doc.get("id"),
         "name": doc.get("name") or "",
@@ -942,7 +1108,7 @@ async def admin_seed_official_pujo_menu(
     food["payment_enabled"] = True if food.get("payment_enabled") is None else bool(food.get("payment_enabled"))
     food["kids_note"] = MENU_META.get("kids_note") or food.get("kids_note") or ""
     food["timings"] = MENU_META.get("timings") or food.get("timings") or {}
-    food["overall_menu_url"] = food.get("overall_menu_url") or "/images/food-menu/pujo-menu-poster-2026.jpg"
+    food["overall_menu_url"] = food.get("overall_menu_url") or "/images/food-menu/pujo-menu-poster-2026-v2.jpg"
     food["overall_menu_filename"] = food.get("overall_menu_filename") or "Durga Puja Menu 2026 poster.jpg"
     food["payment_note"] = food.get("payment_note") or (
         "Pay the cart total via UPI QR after checkout, then upload your payment screenshot."
@@ -1329,9 +1495,15 @@ async def admin_set_food_page(
     food = dict(s.get("food_subscription") or {})
     if not food:
         raise HTTPException(status_code=503, detail="Food subscription is not configured yet.")
-    if "page_enabled" not in body:
-        raise HTTPException(status_code=400, detail="page_enabled is required.")
-    food["page_enabled"] = bool(body.get("page_enabled"))
+    if "page_enabled" not in body and "community_closed" not in body:
+        raise HTTPException(status_code=400, detail="page_enabled or community_closed is required.")
+    before = {"page_enabled": _food_page_enabled(food), "community_closed": _community_closed(food)}
+    if "page_enabled" in body:
+        food["page_enabled"] = bool(body.get("page_enabled"))
+    if "community_closed" in body:
+        food["community_closed"] = bool(body.get("community_closed"))
+    if "closed_message" in body:
+        food["closed_message"] = str(body.get("closed_message") or "")[:300]
     if "coming_soon_message" in body:
         food["coming_soon_message"] = str(body.get("coming_soon_message") or "")[:300]
     await db.application_settings.update_one({}, {"$set": {"food_subscription": food}}, upsert=True)
@@ -1340,12 +1512,15 @@ async def admin_set_food_page(
         actor=user,
         entity_type="food_subscription",
         entity_id="page",
-        after={"page_enabled": food.get("page_enabled")},
+        before=before,
+        after={"page_enabled": _food_page_enabled(food), "community_closed": _community_closed(food)},
         request=request,
     )
     return {
         "ok": True,
         "page_enabled": _food_page_enabled(food),
+        "community_closed": _community_closed(food),
+        "closed_message": _closed_message(food),
         "coming_soon_message": (food.get("coming_soon_message") or "").strip(),
     }
 
@@ -1431,13 +1606,442 @@ async def admin_list_food(user: dict = Depends(require("households:read", "ops:r
         settlement = await _order_settlement(it)
         it["paid_in_full"] = settlement["settled"]
         it["bank_verified"] = settlement["bank_verified"]
+        it["ref"] = it["id"][-6:].upper()
+        it["amount_due_paise"] = max(0, int(it.get("total_amount_paise") or 0) - int(settlement["paid"] or 0))
     s = await get_settings()
     food = s.get("food_subscription") or {}
     return {
         "items": items,
         "page_enabled": _food_page_enabled(food),
+        "community_closed": _community_closed(food),
         "payment_enabled": bool(food.get("payment_enabled")),
     }
+
+
+_CONFIRMED_FOOD_STATUSES = ("paid", "complimentary")
+
+
+def _blank_counts() -> dict:
+    return {"heads": 0, "kids": 0, "free": 0, "paid_plates": 0, "amount_paise": 0, "free_value_paise": 0, "flats": 0}
+
+
+@router.get("/admin/food-reports")
+async def admin_food_reports(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
+    """Kitchen headcount per day × meal × diet, one consolidated row per flat, and follow-up lists.
+
+    Every live order counts (cancelled and expired ones don't). An order is "confirmed" once it is paid
+    or fully complimentary; everything else is "awaiting" payment. Heads include the ₹0 kid plates.
+    """
+    from docs import receipt_is_bank_verified
+    orders = await db.food_subscriptions.find(
+        {"payment_status": {"$nin": _RELEASED_PAYMENT_STATUSES}}, NO_ID,
+    ).sort("created_at", 1).to_list(5000)
+    receipts_by: dict = {}
+    async for r in db.receipts.find(
+        {"food_subscription_id": {"$in": [o["id"] for o in orders]}, "status": "issued"},
+        {"_id": 0, "food_subscription_id": 1, "receipt_no": 1, "total_amount": 1, "issued_at": 1,
+         "bank_verified": 1, "issuance_source": 1, "masked_ref": 1},
+    ).sort("issued_at", 1):
+        receipts_by.setdefault(r["food_subscription_id"], []).append({
+            "receipt_no": r.get("receipt_no"), "amount_paise": int(r.get("total_amount") or 0),
+            "issued_at": r.get("issued_at"), "ref": r.get("masked_ref") or "",
+            "bank_verified": receipt_is_bank_verified(r),
+        })
+
+    def stage_of(o):
+        return "confirmed" if o.get("payment_status") in _CONFIRMED_FOOD_STATUSES else "awaiting"
+
+    def flat_key(o):
+        return o.get("flat_id") or f"{o.get('tower_name')}|{o.get('flat_number')}"
+
+    # An unpaid order with exactly the same meals as another live order of the flat is usually a retry:
+    # list it, but keep it out of plates, billed and due.
+    duplicate_of: dict = {}
+    first_seen: dict = {}
+    for o in sorted(orders, key=lambda o: (stage_of(o) != "confirmed", o.get("created_at") or "")):
+        sig = (flat_key(o), tuple(sorted(
+            (s.get("item_id") or f"{s.get('day_code')}|{s.get('meal_code')}",
+             int(s.get("quantity") or 0), int(s.get("kid_qty") or 0))
+            for s in o.get("selections") or []
+        )))
+        if sig in first_seen and stage_of(o) == "awaiting":
+            duplicate_of[o["id"]] = first_seen[sig]
+        else:
+            first_seen.setdefault(sig, o["id"][-6:].upper())
+
+    meals: dict = {}
+    flats: dict = {}
+    for o in orders:
+        stage = stage_of(o)
+        receipts = receipts_by.get(o["id"], [])
+        total = int(o.get("total_amount_paise") or 0)
+        paid = sum(r["amount_paise"] for r in receipts)
+        fkey = flat_key(o)
+        flat = flats.setdefault(fkey, {
+            "flat_id": o.get("flat_id") or "", "tower_id": o.get("tower_id") or "",
+            "tower_name": o.get("tower_name") or "", "flat_number": o.get("flat_number") or "",
+            "names": [], "mobiles": [], "orders": [], "lines": {},
+            "billed_paise": 0, "paid_paise": 0, "due_paise": 0, "duplicate_due_paise": 0,
+            "heads_confirmed": 0, "heads_awaiting": 0, "kids": 0, "complimentary": {},
+            "subscribed": False,
+        })
+        for field, value in (("names", (o.get("name") or "").strip()), ("mobiles", o.get("mobile") or "")):
+            if value and value not in flat[field]:
+                flat[field].append(value)
+        flat["subscribed"] = flat["subscribed"] or bool(o.get("flat_subscribed"))
+        lines = _voucher_lines(o)
+        due = max(0, total - paid) if stage == "awaiting" else 0
+        flat["orders"].append({
+            "id": o["id"], "ref": o["id"][-6:].upper(), "stage": stage, "payment_status": o.get("payment_status"),
+            "name": o.get("name") or "", "created_at": o.get("created_at"),
+            "total_paise": total, "paid_paise": paid, "due_paise": due,
+            "receipts": receipts, "voucher_no": o.get("voucher_no") or "", "coupon_no": o.get("coupon_no") or "",
+            "coupons_given": bool(o.get("coupon_id")), "whatsapp_posted": bool(o.get("whatsapp_posted_at")),
+            "plates": sum(ln["heads"] for ln in lines), "duplicate_of": duplicate_of.get(o["id"], ""),
+        })
+        if o["id"] in duplicate_of:
+            flat["duplicate_due_paise"] += due
+            continue
+        flat["billed_paise"] += total
+        flat["paid_paise"] += paid
+        flat["due_paise"] += due
+        for k, v in (o.get("complimentary") or {}).items():
+            flat["complimentary"][k] = flat["complimentary"].get(k, 0) + int(v or 0)
+        for ln in lines:
+            key = f"{ln['day_code']}|{ln['meal_code']}|{ln['diet']}"
+            cell = meals.setdefault(key, {
+                "day_code": ln["day_code"], "day_label": ln["day_label"], "date": ln["date"],
+                "weekday": ln["weekday"], "day_order": ln["day_order"],
+                "meal_code": ln["meal_code"], "meal_label": ln["meal_label"],
+                "diet": ln["diet"], "diet_label": ln["diet_label"], "unit_paise": int(ln["unit_paise"] or 0),
+                "confirmed": _blank_counts(), "awaiting": _blank_counts(), "_flats": {"confirmed": set(), "awaiting": set()},
+            })
+            c = cell[stage]
+            c["heads"] += ln["heads"]
+            c["kids"] += ln["kids"]
+            c["free"] += ln["free"]
+            c["paid_plates"] += ln["paid"]
+            c["amount_paise"] += int(ln["amount_paise"] or 0)
+            c["free_value_paise"] += ln["free"] * int(ln["unit_paise"] or 0)
+            cell["_flats"][stage].add(fkey)
+            fl = flat["lines"].setdefault(key, {
+                "day_code": ln["day_code"], "day_label": ln["day_label"], "day_order": ln["day_order"],
+                "meal_code": ln["meal_code"], "meal_label": ln["meal_label"],
+                "diet": ln["diet"], "diet_label": ln["diet_label"],
+                "confirmed": 0, "awaiting": 0, "kids": 0, "free": 0,
+            })
+            fl[stage] += ln["heads"]
+            fl["kids"] += ln["kids"]
+            fl["free"] += ln["free"]
+            flat["heads_confirmed" if stage == "confirmed" else "heads_awaiting"] += ln["heads"]
+            flat["kids"] += ln["kids"]
+
+    meal_rows = []
+    for cell in meals.values():
+        for stage, keys in cell.pop("_flats").items():
+            cell[stage]["flats"] = len(keys)
+        meal_rows.append(cell)
+    meal_rows.sort(key=lambda c: (c["day_order"], _VOUCHER_MEAL_ORDER.get(c["meal_code"], 9), c["diet"] != "veg"))
+
+    flat_rows = []
+    for flat in flats.values():
+        flat["lines"] = sorted(flat["lines"].values(),
+                               key=lambda x: (x["day_order"], _VOUCHER_MEAL_ORDER.get(x["meal_code"], 9), x["diet"] != "veg"))
+        live = flat["orders"]
+        flat["order_count"] = len(live)
+        flat["awaiting_orders"] = sum(1 for x in live if x["stage"] == "awaiting" and not x["duplicate_of"])
+        flat["unverified_receipts"] = sum(1 for x in live for r in x["receipts"] if not r["bank_verified"])
+        flat["coupons_pending"] = sum(1 for x in live if x["stage"] == "confirmed" and not x["coupons_given"])
+        flat["free_used"] = sum(flat["complimentary"].values())
+        flat_rows.append(flat)
+    flat_rows.sort(key=lambda f: (f["tower_id"] or "", f["flat_number"]))
+
+    # Flats that paid the Puja subscription (complimentary meals unlocked) but have no live food order.
+    ordered = {f["flat_id"] for f in flat_rows if f["flat_id"]}
+    cycle = await get_active_cycle_id()
+    sub_house = {}
+    async for r in db.receipts.find(
+        {"kind": "subscription", "status": "issued", "cycle_id": cycle},
+        {"_id": 0, "household_id": 1, "payer_name": 1, "payer_mobile": 1},
+    ).sort("issued_at", -1):
+        sub_house.setdefault(r.get("household_id"), r)
+    not_ordered = []
+    async for h in db.households.find(
+        {"id": {"$in": [k for k in sub_house if k]}, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1, "flat_id": 1, "tower_id": 1, "tower_name": 1, "flat_number": 1,
+         "primary_name": 1, "primary_mobile": 1},
+    ):
+        if not h.get("flat_id") or h["flat_id"] in ordered:
+            continue
+        ordered.add(h["flat_id"])
+        r = sub_house[h["id"]]
+        contact = _real_contact(r.get("payer_name"), r.get("payer_mobile")) or \
+            _real_contact(h.get("primary_name"), h.get("primary_mobile"))
+        not_ordered.append({
+            "flat_id": h["flat_id"], "tower_id": h.get("tower_id") or "", "tower_name": h.get("tower_name") or "",
+            "flat_number": h.get("flat_number") or "", "name": contact.get("name") or "",
+            "mobile": contact.get("mobile") or "",
+        })
+    not_ordered.sort(key=lambda f: (f["tower_id"], f["flat_number"]))
+
+    vendor_plates = vendor_value = vendor_entries = 0
+    async for v in db.vendor_meals.find({"status": "active"}, NO_ID):
+        vendor_entries += 1
+        for ln in _voucher_lines(v):
+            key = f"{ln['day_code']}|{ln['meal_code']}|{ln['diet']}"
+            cell = next((c for c in meal_rows if f"{c['day_code']}|{c['meal_code']}|{c['diet']}" == key), None)
+            if cell is None:
+                cell = {
+                    "day_code": ln["day_code"], "day_label": ln["day_label"], "date": ln["date"],
+                    "weekday": ln["weekday"], "day_order": ln["day_order"],
+                    "meal_code": ln["meal_code"], "meal_label": ln["meal_label"],
+                    "diet": ln["diet"], "diet_label": ln["diet_label"], "unit_paise": int(ln["unit_paise"] or 0),
+                    "confirmed": _blank_counts(), "awaiting": _blank_counts(),
+                }
+                meal_rows.append(cell)
+            c = cell.setdefault("vendor", _blank_counts())
+            c["heads"] += ln["heads"]
+            c["amount_paise"] += int(ln["amount_paise"] or 0)
+            vendor_plates += ln["heads"]
+            vendor_value += int(ln["amount_paise"] or 0)
+    for cell in meal_rows:
+        cell.setdefault("vendor", _blank_counts())
+    meal_rows.sort(key=lambda c: (c["day_order"], _VOUCHER_MEAL_ORDER.get(c["meal_code"], 9), c["diet"] != "veg"))
+
+    from pujo_menu_2026 import COMPLIMENTARY_RULES
+    return {
+        "generated_at": iso(),
+        "meals": meal_rows,
+        "flats": flat_rows,
+        "subscribed_not_ordered": not_ordered,
+        "complimentary_rules": [{"key": r["key"], "free": r["free"], "label": r.get("label") or r["key"],
+                                 "day_code": r.get("day_code") or ""} for r in COMPLIMENTARY_RULES],
+        "totals": {
+            "orders": len(orders),
+            "flats": len(flat_rows),
+            "billed_paise": sum(f["billed_paise"] for f in flat_rows),
+            "paid_paise": sum(f["paid_paise"] for f in flat_rows),
+            "due_paise": sum(f["due_paise"] for f in flat_rows),
+            "duplicate_due_paise": sum(f["duplicate_due_paise"] for f in flat_rows),
+            "vendor_entries": vendor_entries,
+            "vendor_plates": vendor_plates,
+            "vendor_value_paise": vendor_value,
+        },
+    }
+
+
+def _cache_food_revenue_files(pdf: bytes, png: bytes) -> None:
+    """Keep /reports/… copies fresh so committee can open them without the API blob path."""
+    from pathlib import Path
+    roots = [
+        Path(__file__).resolve().parent.parent / "frontend" / "build" / "reports",
+        Path(__file__).resolve().parent.parent / "frontend" / "public" / "reports",
+        Path("/var/www/one10events/build/reports"),
+    ]
+    for root in roots:
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "one10_food_revenue.pdf").write_bytes(pdf)
+            (root / "one10_food_revenue.png").write_bytes(png)
+        except OSError:
+            pass
+
+
+async def _food_revenue_payload():
+    from food_revenue_report import (
+        build_food_revenue_report, food_revenue_report_pdf, food_revenue_report_png,
+    )
+    report = await build_food_revenue_report()
+    pdf = food_revenue_report_pdf(report)
+    png = food_revenue_report_png(report)
+    _cache_food_revenue_files(pdf, png)
+    return report, pdf, png
+
+
+def _revenue_filename(ext: str) -> str:
+    """Safe ASCII filename — colons/spaces in Content-Disposition break downloads in some browsers."""
+    from util import to_ist, now_utc
+    stamp = to_ist(now_utc()).strftime("%Y%m%d_%H%M")
+    return f"one10_food_revenue_{stamp}.{ext}"
+
+
+@router.get("/admin/food-reports/revenue-pdf")
+@router.get("/admin/food-reports/revenue.pdf")
+async def admin_food_revenue_pdf(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
+    """Consolidated food coupon revenue PDF — veg breakfast packets excluded (already paid)."""
+    _report, pdf, _png = await _food_revenue_payload()
+    name = _revenue_filename("pdf")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/admin/food-reports/revenue-png")
+@router.get("/admin/food-reports/revenue.png")
+async def admin_food_revenue_png(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
+    """Same consolidated revenue summary as a shareable PNG (packets excluded)."""
+    _report, _pdf, png = await _food_revenue_payload()
+    name = _revenue_filename("png")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/admin/food-reports/cost-revenue-pdf")
+async def admin_food_cost_revenue_pdf(user: dict = Depends(require("households:read", "ops:read", "receipts:read"))):
+    """P&L PDF: revenue vs caterer cost with complimentary plates costed (paid to vendor)."""
+    from food_cost_revenue_report import generate_food_cost_revenue_pdf, publish_pdf
+    pdf, _revenue, _expense = await generate_food_cost_revenue_pdf()
+    publish_pdf(pdf)
+    name = _revenue_filename("pdf").replace("food_revenue", "food_cost_revenue")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# Plates the committee arranges for vendors (dhakis, priests, decorators, security…). Nobody pays for them,
+# so they are a cost to the committee: every entry keeps who added it, and entries are cancelled, never deleted.
+VENDOR_MEAL_TYPES = {
+    "dhaki": "Dhaki / musicians",
+    "priest": "Priest / purohit",
+    "decorator": "Decorator / pandal",
+    "light_sound": "Light & sound",
+    "security": "Security",
+    "housekeeping": "Housekeeping / cleaning",
+    "caterer_staff": "Caterer staff",
+    "other": "Other",
+}
+_VENDOR_MEAL_READ = ("households:read", "ops:read", "receipts:read", "reports:read", "expense:create")
+_VENDOR_MEAL_WRITE = ("households:write", "ops:manage", "receipts:manage", "expense:create")
+
+
+def _vendor_meal_public(doc: dict) -> dict:
+    lines = _voucher_lines(doc)
+    return {
+        **{k: doc.get(k) for k in (
+            "id", "ref", "vendor_name", "vendor_type", "contact_mobile", "purpose", "status",
+            "plates", "value_paise", "created_at", "created_by_name",
+            "cancelled_at", "cancelled_by_name", "cancel_reason",
+        )},
+        "vendor_type_label": VENDOR_MEAL_TYPES.get(doc.get("vendor_type") or "") or doc.get("vendor_type") or "",
+        "lines": lines,
+        "days": _voucher_days(lines),
+    }
+
+
+@router.get("/admin/vendor-meals")
+async def admin_list_vendor_meals(user: dict = Depends(require(*_VENDOR_MEAL_READ))):
+    docs = await db.vendor_meals.find({}, NO_ID).sort("created_at", -1).to_list(2000)
+    active = [d for d in docs if d.get("status") == "active"]
+    return {
+        "items": [_vendor_meal_public(d) for d in docs],
+        "types": [{"value": k, "label": v} for k, v in VENDOR_MEAL_TYPES.items()],
+        "can_edit": any(p in user_permissions(user) for p in _VENDOR_MEAL_WRITE),
+        "totals": {
+            "entries": len(active),
+            "plates": sum(int(d.get("plates") or 0) for d in active),
+            "value_paise": sum(int(d.get("value_paise") or 0) for d in active),
+            "cancelled": len(docs) - len(active),
+        },
+    }
+
+
+@router.post("/admin/vendor-meals")
+async def admin_create_vendor_meal(body: dict = Body(...), request: Request = None,
+                                   user: dict = Depends(require(*_VENDOR_MEAL_WRITE))):
+    vendor_name = (body.get("vendor_name") or "").strip()[:120]
+    vendor_type = (body.get("vendor_type") or "").strip()
+    purpose = (body.get("purpose") or "").strip()[:500]
+    mobile = re.sub(r"\D", "", str(body.get("contact_mobile") or ""))[-10:]
+    if not vendor_name:
+        raise HTTPException(status_code=400, detail="Enter the vendor's name.")
+    if vendor_type not in VENDOR_MEAL_TYPES:
+        raise HTTPException(status_code=400, detail="Choose the vendor type.")
+    if len(purpose) < 3:
+        raise HTTPException(status_code=400, detail="Say why these meals are given (shown in the audit).")
+    if mobile and not re.fullmatch(r"[6-9]\d{9}", mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile, or leave it blank.")
+
+    items = await db.food_menu_items.find({"is_deleted": {"$ne": True}}, NO_ID).to_list(500)
+    items_by_id = {i["id"]: {**i, "active": True} for i in items}
+    s = await get_settings()
+    selections = _normalize_selections(_apply_default_prices(s.get("food_subscription") or {}),
+                                       [r for r in body.get("selections") or [] if isinstance(r, dict) and r.get("item_id")],
+                                       items_by_id=items_by_id)
+    if not selections:
+        raise HTTPException(status_code=400, detail="Add at least one meal.")
+    for sel in selections:
+        sel["kid_qty"] = 0
+        sel["complimentary_qty"] = 0
+        sel["line_total_paise"] = int(sel.get("amount_paise") or 0) * int(sel.get("quantity") or 0)
+
+    _, ref = await next_formatted("vendor_meal", "VM26", 4)
+    doc = {
+        "id": new_id("vmeal"),
+        "ref": ref,
+        "cycle_id": await get_active_cycle_id(),
+        "vendor_name": vendor_name,
+        "vendor_type": vendor_type,
+        "contact_mobile": mobile,
+        "purpose": purpose,
+        "selections": selections,
+        "plates": sum(int(x.get("quantity") or 0) for x in selections),
+        "value_paise": sum(int(x["line_total_paise"]) for x in selections),
+        "status": "active",
+        "created_at": iso(),
+        "created_by": user.get("user_id") or "",
+        "created_by_name": user.get("name") or user.get("login_id") or "",
+    }
+    await db.vendor_meals.insert_one(dict(doc))
+    await audit("food.vendor_meal.create", actor=user, entity_type="vendor_meal", entity_id=doc["id"],
+                reason=purpose,
+                after={"ref": ref, "vendor_name": vendor_name, "vendor_type": vendor_type,
+                       "plates": doc["plates"], "value_paise": doc["value_paise"],
+                       "items": [{"name": x.get("name"), "menu_date": x.get("menu_date"),
+                                  "quantity": x.get("quantity"), "amount_paise": x.get("amount_paise")}
+                                 for x in selections]},
+                request=request)
+    return {"ok": True, "item": _vendor_meal_public(doc)}
+
+
+@router.post("/admin/vendor-meals/{meal_id}/cancel")
+async def admin_cancel_vendor_meal(meal_id: str, body: dict = Body(default={}), request: Request = None,
+                                   user: dict = Depends(require(*_VENDOR_MEAL_WRITE))):
+    reason = (body.get("reason") or "").strip()[:500]
+    if len(reason) < 3:
+        raise HTTPException(status_code=400, detail="Give a reason for cancelling.")
+    doc = await db.vendor_meals.find_one({"id": meal_id}, NO_ID)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Vendor meal entry not found.")
+    if doc.get("status") != "active":
+        raise HTTPException(status_code=409, detail="This entry is already cancelled.")
+    update = {
+        "status": "cancelled",
+        "cancelled_at": iso(),
+        "cancelled_by": user.get("user_id") or "",
+        "cancelled_by_name": user.get("name") or user.get("login_id") or "",
+        "cancel_reason": reason,
+    }
+    await db.vendor_meals.update_one({"id": meal_id, "status": "active"}, {"$set": update})
+    await audit("food.vendor_meal.cancel", actor=user, entity_type="vendor_meal", entity_id=meal_id,
+                reason=reason, before={"status": "active", "plates": doc.get("plates"), "value_paise": doc.get("value_paise")},
+                after={"status": "cancelled"}, request=request)
+    return {"ok": True, "item": _vendor_meal_public({**doc, **update})}
 
 
 _BASE_TEMPLATE_COLS = [
@@ -1768,6 +2372,7 @@ def _voucher_lines(doc: dict) -> list:
         meal = s.get("category") or s.get("meal_code") or ""
         qty = max(1, int(s.get("quantity") or 1))
         free = min(qty, int(s.get("complimentary_qty") or 0))
+        kids = int(s.get("kid_qty") or 0)
         unit = s.get("amount_paise")
         amount = s.get("line_total_paise")
         if amount is None and unit not in (None, ""):
@@ -1781,10 +2386,12 @@ def _voucher_lines(doc: dict) -> list:
             "meal_code": meal,
             "meal_label": _VOUCHER_MEAL_LABEL.get(meal) or s.get("category_label") or meal.title(),
             "item": s.get("name") or s.get("meal_label") or "",
+            "diet": s.get("diet") or "",
             "diet_label": s.get("diet_label") or "",
-            "heads": qty,
+            "heads": qty + kids,
             "free": free,
             "paid": qty - free,
+            "kids": kids,
             "unit_paise": unit,
             "amount_paise": amount,
         })
@@ -1894,6 +2501,7 @@ async def _food_voucher_payload(doc: dict, settlement: dict) -> dict:
             "heads": sum(ln["heads"] for ln in lines),
             "free": sum(ln["free"] for ln in lines),
             "paid": sum(ln["paid"] for ln in lines),
+            "kids": sum(ln["kids"] for ln in lines),
         },
         "total_amount_paise": total,
         "amount_paid_paise": paid,
@@ -1953,6 +2561,168 @@ async def _payment_under_review(doc: dict) -> bool:
     ))
 
 
+async def _resident_change_problem(doc: dict) -> str:
+    """Why a resident can't edit or cancel this order themselves; '' when they can (nothing paid or in flight)."""
+    status = doc.get("payment_status")
+    ask = " Please ask the committee."
+    if status in _RELEASED_PAYMENT_STATUSES:
+        return "This order is already cancelled or expired."
+    if doc.get("coupon_id"):
+        return "Coupons were already given for this order, so it can't be changed here." + ask
+    if status not in ("pending", "not_open", "complimentary") or (
+            doc.get("intent_id") and await db.receipts.find_one({"intent_id": doc["intent_id"]}, {"_id": 1})):
+        return "A payment is recorded on this order, so it can't be changed here." + ask
+    if doc.get("whatsapp_posted_at"):
+        return "You posted a payment for this order on WhatsApp, so it can't be changed here." + ask
+    if await _payment_under_review(doc):
+        return "A payment screenshot for this order is being checked, so it can't be changed here." + ask
+    return ""
+
+
+async def _food_by_edit_token(token: str) -> dict:
+    sid = read_food_edit_token((token or "").strip())
+    doc = await db.food_subscriptions.find_one({"id": sid}, NO_ID) if sid else None
+    if not doc:
+        raise HTTPException(status_code=404, detail="This link has expired — open the order again from My orders.")
+    return doc
+
+
+@router.get("/food/my-orders/edit")
+async def food_order_for_edit(token: str, request: Request):
+    """An unpaid order's cart, so the resident can change it; checking out with replaces_token swaps it."""
+    s = await get_settings()
+    food = s.get("food_subscription") or {}
+    if _community_closed(food) and not await _committee_orderer(request):
+        raise HTTPException(status_code=409, detail=_closed_message(food))
+    doc = await _food_by_edit_token(token)
+    if problem := await _resident_change_problem(doc):
+        raise HTTPException(status_code=409, detail=problem)
+    return {
+        "id": doc["id"], "ref": doc["id"][-6:].upper(), "edit_token": token,
+        "tower_id": doc.get("tower_id"), "flat_id": doc.get("flat_id"),
+        "tower_name": doc.get("tower_name"), "flat_number": doc.get("flat_number"),
+        "name": doc.get("name") or "", "mobile": doc.get("mobile") or "",
+        "selections": [
+            {"item_id": s.get("item_id"), "day_code": s.get("day_code"), "meal_code": s.get("meal_code"),
+             "quantity": int(s.get("quantity") or 0), "kid_qty": int(s.get("kid_qty") or 0)}
+            for s in doc.get("selections") or []
+        ],
+        "kids": [{"birth_year": k.get("birth_year")} for k in doc.get("kids") or [] if k.get("birth_year")],
+    }
+
+
+@router.post("/food/my-orders/cancel")
+async def food_cancel_own_order(body: dict = Body(...), request: Request = None):
+    """Resident cancels their own order while nothing is paid or being checked; frees its complimentary meals."""
+    doc = await _food_by_edit_token(body.get("edit_token"))
+    async with _flat_guard(doc.get("flat_id") or doc["id"]):
+        doc = await db.food_subscriptions.find_one({"id": doc["id"]}, NO_ID)
+        if problem := await _resident_change_problem(doc):
+            raise HTTPException(status_code=409, detail=problem)
+        await _cancel_food_order(doc, actor="public", reason="Cancelled by the resident", request=request)
+    return {"ok": True, "ref": doc["id"][-6:].upper()}
+
+
+def _whatsapp_order_text(doc: dict, amount_paise: int) -> str:
+    """The order summary a resident pastes into the committee WhatsApp group with their payment screenshot."""
+    first_name = ((doc.get("name") or "").split() or [""])[0]
+    out = [
+        f"🍽️ ONE10 FOOD ORDER #{doc['id'][-6:].upper()}",
+        f"{doc.get('tower_name') or ''} · Flat {doc.get('flat_number') or ''} · {first_name} · {_mask_mobile(doc.get('mobile'))}",
+    ]
+    for ln in _voucher_lines(doc):
+        extra = []
+        if ln["free"]:
+            extra.append(f"{ln['free']} complimentary")
+        if ln["kids"]:
+            extra.append(f"+{ln['kids']} kid{'s' if ln['kids'] > 1 else ''} below 7, ₹0")
+        out.append(f"• {ln['item']} × {ln['heads'] - ln['kids']}" + (f" ({', '.join(extra)})" if extra else ""))
+    out.append(f"Amount paid by UPI: ₹{amount_paise / 100:,.0f}")
+    out.append("Payment screenshot attached ✅")
+    return "\n".join(out)
+
+
+@router.post("/food/whatsapp-posted")
+async def food_whatsapp_posted(body: dict = Body(...), request: Request = None):
+    """Resident says they posted the payment screenshot + order message in the committee WhatsApp group.
+
+    The order then never auto-expires and shows "do not pay again" until the committee records the payment.
+    """
+    from tokens import read_status_token
+    intent_id = read_status_token((body.get("status_token") or "").strip())
+    intent = await db.subscription_intents.find_one(
+        {"id": intent_id}, {"_id": 0, "kind": 1, "food_subscription_id": 1}) if intent_id else None
+    if not intent or intent.get("kind") != "food_subscription":
+        raise HTTPException(status_code=404, detail="Order not found — open it again from My orders.")
+    doc = await db.food_subscriptions.find_one_and_update(
+        {"id": intent["food_subscription_id"], "payment_status": {"$in": ["pending", "partially_paid"]}},
+        {"$set": {"whatsapp_posted_at": iso(), "updated_at": iso()}},
+        projection=NO_ID, return_document=True,
+    )
+    if not doc:
+        raise HTTPException(status_code=409, detail="This order is already paid, cancelled or expired.")
+    await audit("food.subscription.whatsapp_posted", actor="public", entity_type="food_subscription",
+                entity_id=doc["id"], request=request)
+    return {"ok": True, "ref": doc["id"][-6:].upper()}
+
+
+@router.post("/admin/food-subscriptions/{sid}/record-payment")
+async def admin_record_food_payment(sid: str, body: dict = Body(default={}), request: Request = None,
+                                    user: dict = Depends(require("receipts:manage"))):
+    """Record a UPI payment the resident posted on WhatsApp (screenshot + order message).
+
+    Never more than the amount due — overpayments are refused. A UTR can pay only one order.
+    """
+    from routes_collect import _insert_upi_payment, _intent_due_paise, _issue_receipt
+    from vision_extract import normalize_ref
+    utr = normalize_ref(body.get("utr") or "")
+    if len(utr) < 6:
+        raise HTTPException(status_code=400, detail="Enter the UTR / UPI reference from the screenshot.")
+    try:
+        amount = int(round(float(body.get("amount_rupees")) * 100))
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Enter the amount shown on the screenshot.")
+    doc = await db.food_subscriptions.find_one({"id": sid}, NO_ID)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Food order not found.")
+    intent = await db.subscription_intents.find_one({"id": doc.get("intent_id")}) if doc.get("intent_id") else None
+    if doc.get("payment_status") not in ("pending", "partially_paid") or not intent or \
+            intent.get("status") not in ("payment_pending", "pending", "authorised", "partially_paid"):
+        raise HTTPException(status_code=409, detail="This order isn't waiting for a payment.")
+    due = _intent_due_paise(intent)
+    if amount > due:
+        raise HTTPException(status_code=409, detail=(
+            f"₹{amount / 100:,.0f} is more than the ₹{due / 100:,.0f} due on this order. Overpayments aren't "
+            f"accepted — check the screenshot again."))
+    if await db.payments.find_one({"provider": "upi_qr", "provider_payment_id": utr}, {"_id": 1}) or \
+            await db.upi_submissions.find_one({"reference_normalized": utr, "intent_id": {"$ne": intent["id"]}}, {"_id": 1}):
+        raise HTTPException(status_code=409, detail="This UTR was already used for another payment.")
+    bank_seen = bool(body.get("bank_verified"))
+    await _insert_upi_payment(intent_id=intent["id"], provider_payment_id=utr, amount_paise=amount,
+                              proof_doc_id=None, kind="food_subscription")
+    receipt = await _issue_receipt(
+        intent, method="upi_qr", masked_ref="UTR-" + utr[-4:], provider_payment_id=utr, debit_account="1001",
+        request=request, paid_amount_paise=amount, bank_verified=bank_seen,
+        issuance_source="collection" if bank_seen else "payment_screenshot",
+    )
+    if not receipt:
+        raise HTTPException(status_code=409, detail="Could not record — this order may have just been paid.")
+    await db.receipts.update_one({"id": receipt["id"]}, {"$set": {"payment_channel": "whatsapp"}})
+    if bank_seen:
+        await _mark_receipts_bank_verified([receipt], user, request)
+    await db.food_subscriptions.update_one({"id": sid}, {
+        "$unset": {"whatsapp_posted_at": ""},
+        "$set": {"whatsapp_recorded_at": iso(), "whatsapp_recorded_by": user.get("name") or user.get("login_id") or ""},
+    })
+    await audit("food.subscription.record_payment", actor=user, entity_type="food_subscription", entity_id=sid,
+                after={"utr_last4": utr[-4:], "amount": amount, "bank_verified": bank_seen,
+                       "receipt_no": receipt.get("receipt_no")}, request=request)
+    return {"ok": True, "receipt_no": receipt.get("receipt_no"), "partial": bool(receipt.get("is_partial")),
+            "amount_due_after_paise": int(receipt.get("amount_due_after") or 0)}
+
+
 async def _food_order_card(doc: dict) -> dict:
     """One order as the buyer sees it: what it holds, what is paid, and the one thing to do next."""
     from tokens import status_token
@@ -1967,6 +2737,8 @@ async def _food_order_card(doc: dict) -> dict:
         state, label = "ready", ("Complimentary — voucher ready" if status == "complimentary" else "Paid — voucher ready")
     elif under_review:
         state, label = "under_review", "Payment under review — do not pay again"
+    elif doc.get("whatsapp_posted_at") and status in ("pending", "partially_paid"):
+        state, label = "whatsapp_posted", "Payment posted on WhatsApp — committee will verify. Do not pay again"
     elif status == "paid" or (status == "complimentary" and not settlement["settled"]):
         state, label = "problem", "Payment needs a check — contact the committee"
     elif paid > 0:
@@ -1983,9 +2755,11 @@ async def _food_order_card(doc: dict) -> dict:
         "created_at": doc.get("created_at"),
         "name": doc.get("name") or "",
         "lines": [{"day_label": ln["day_label"], "meal_label": ln["meal_label"], "item": ln["item"],
-                   "diet_label": ln["diet_label"], "heads": ln["heads"], "free": ln["free"]} for ln in lines],
+                   "diet_label": ln["diet_label"], "heads": ln["heads"], "free": ln["free"],
+                   "kids": ln["kids"]} for ln in lines],
         "heads": sum(ln["heads"] for ln in lines),
         "free_heads": sum(ln["free"] for ln in lines),
+        "kid_heads": sum(ln["kids"] for ln in lines),
         "total_amount_paise": total,
         "amount_paid_paise": paid,
         "amount_due_paise": 0 if state in ("ready", "cancelled", "expired") else max(0, total - paid),
@@ -1993,21 +2767,30 @@ async def _food_order_card(doc: dict) -> dict:
         "state_label": label,
         "voucher_no": doc.get("voucher_no") if state == "ready" else None,
         "voucher_token": _food_voucher_token(doc["id"]) if state == "ready" else None,
-        "status_token": status_token(doc["intent_id"]) if (can_pay or state == "under_review") else None,
+        "status_token": status_token(doc["intent_id"]) if (can_pay or state in ("under_review", "whatsapp_posted")) else None,
         "coupons_given": bool(doc.get("coupon_id")),
+        "whatsapp_text": _whatsapp_order_text(doc, max(0, total - paid)) if (can_pay or state == "whatsapp_posted") else None,
+        "edit_token": None if await _resident_change_problem(doc) else food_edit_token(doc["id"]),
     }
 
 
 async def _food_lookup_limit(request: Request, kind: str, flat_id: str) -> None:
-    from routes_collect import _receipt_lookup_rate_limit
-    await _receipt_lookup_rate_limit(request, kind=kind, flat_id=flat_id)
+    """8 lookups a minute per flat from one IP — residents on a shared Wi-Fi / mobile-carrier IP don't block each other."""
+    from util import now_utc
+    ip = request.client.host if request and request.client else "?"
+    since = now_utc().timestamp() - 60
+    if await db.receipt_lookups.count_documents({"ip": ip, "kind": kind, "flat_id": flat_id, "ts": {"$gt": since}}) >= 8:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute.")
+    if await db.receipt_lookups.count_documents({"ip": ip, "kind": kind, "ts": {"$gt": since}}) >= 60:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute.")
+    await db.receipt_lookups.insert_one({"ip": ip, "ts": now_utc().timestamp(), "kind": kind, "tower_id": "", "flat_id": flat_id or ""})
 
 
 @router.post("/food/my-orders")
 async def food_my_orders(body: dict = Body(...), request: Request = None):
     """Orders placed for this flat from this mobile, with pay-balance / voucher / cancel actions."""
     flat_id = (body.get("flat_id") or "").strip()
-    mobile = _mobile10(body.get("mobile"))
+    mobile = _mobile_input(body.get("mobile"))
     if not flat_id or not mobile:
         raise HTTPException(status_code=400, detail="Select your flat and enter the 10-digit mobile used on the order.")
     await _food_lookup_limit(request, "food_my_orders", flat_id)
@@ -2098,7 +2881,7 @@ async def _complimentary_problem(doc: dict) -> str:
         return ""
     if per_line != granted:
         return "This order's complimentary meals don't add up — check the order with the committee before giving coupons."
-    if not (await _flat_free_meal_access(doc.get("flat_id") or "", doc.get("mobile") or ""))["contributed"]:
+    if not await _flat_subscribed(doc.get("flat_id") or ""):
         return ("This flat no longer has a valid Puja subscription receipt, so its complimentary meals can't be given. "
                 "Cancel this order and re-order, or restore the subscription receipt first.")
     used = await _complimentary_used(doc.get("flat_id") or "")
@@ -2117,9 +2900,11 @@ def _coupon_slips(coupon: dict) -> list:
     for ln in coupon.get("lines") or []:
         heads = int(ln.get("heads") or 0)
         free = int(ln.get("free") or 0)
+        kids = int(ln.get("kids") or 0)
         for i in range(1, heads + 1):
             n += 1
-            slips.append({**ln, "serial": f"{coupon['coupon_no']}-{n:03d}", "n": i, "of": heads, "is_free": i <= free})
+            slips.append({**ln, "serial": f"{coupon['coupon_no']}-{n:03d}", "n": i, "of": heads,
+                          "is_free": i <= free, "is_kid": i > heads - kids})
     return slips
 
 

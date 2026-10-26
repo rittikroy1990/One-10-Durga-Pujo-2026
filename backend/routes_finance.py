@@ -148,7 +148,7 @@ async def recon_import(file: UploadFile = File(...), amount_col: str = Form(...)
 
 @router.get("/recon/lines")
 async def recon_lines(user: dict = Depends(require("recon:read"))):
-    lines = await db.bank_statement_lines.find({}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    lines = await db.bank_statement_lines.find({}, {"_id": 0}).sort([("created_at", -1), ("sno", -1)]).to_list(5000)
     return {"items": lines}
 
 
@@ -157,8 +157,13 @@ async def recon_suggestions(user: dict = Depends(require("recon:read"))):
     """Suggest matches: exact (amount + ref token) vs suggested (amount only)."""
     settings = await get_settings()
     threshold = settings["approval_thresholds_paise"].get("recon_auto_match_confidence", 0.9)
-    lines = await db.bank_statement_lines.find({"matched": False}, {"_id": 0}).to_list(2000)
-    receipts = await db.receipts.find({"status": "issued"}, {"_id": 0}).to_list(5000)
+    lines = await db.bank_statement_lines.find({"matched": False, "type": {"$ne": "debit"}}, {"_id": 0}).to_list(2000)
+    matched_receipts = set()
+    async for m in db.reconciliation_matches.find({}, {"_id": 0, "receipt_id": 1, "receipt_ids": 1}):
+        matched_receipts.update([m.get("receipt_id")] + list(m.get("receipt_ids") or []))
+    receipts = [r for r in await db.receipts.find({"status": "issued"}, {"_id": 0}).to_list(5000)
+                if r["id"] not in matched_receipts and not r.get("bank_statement_ref") and r.get("method") != "cash"
+                and r.get("kind") != "food_subscription"]
     suggestions = []
     for ln in lines:
         for r in receipts:
@@ -217,13 +222,21 @@ async def recon_dashboard(user: dict = Depends(require("recon:read"))):
 @router.get("/recon/balances")
 async def recon_balances(user: dict = Depends(require("recon:read"))):
     out = []
-    names = {"1001": "Bank", "1002": "Cash on hand", "1003": "Gateway clearing"}
-    bank = await db.bank_accounts.find_one({"id": "bank_main"})
-    opening = bank.get("opening_balance_paise", 0) if bank else 0
+    names = {"1001": "Bank — ICICI", "1004": "Bank — YES (food QR)", "1002": "Cash on hand",
+             "1210": "Held by members (to hand over)", "1003": "Gateway clearing"}
+    openings = {}
+    async for b in db.bank_accounts.find({}, {"_id": 0}):
+        code = b.get("account_code") or "1001"
+        openings[code] = openings.get(code, 0) + int(b.get("opening_balance_paise") or 0)
     for code, label in names.items():
         bal = await account_balance(code)
-        out.append({"code": code, "account": label,
-                    "opening": opening if code == "1001" else 0,
-                    "movement": bal, "closing": (opening if code == "1001" else 0) + bal,
-                    "closing_display": fmt_inr((opening if code == "1001" else 0) + bal)})
-    return {"items": out}
+        opening = openings.get(code, 0)
+        out.append({"code": code, "account": label, "opening": opening,
+                    "movement": bal, "closing": opening + bal,
+                    "closing_display": fmt_inr(opening + bal)})
+    suspense = -(await account_balance("2100"))
+    out.append({"code": "2100", "account": "Unidentified deposits (in ICICI, payer unknown)", "opening": 0,
+                "movement": suspense, "closing": suspense, "closing_display": fmt_inr(suspense)})
+    statement = await db.bank_statement_imports.find_one({"bank_account_id": "bank_main", "period_to": {"$exists": True}},
+                                                         {"_id": 0}, sort=[("period_to", -1)])
+    return {"items": out, "statement": statement}

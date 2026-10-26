@@ -228,7 +228,7 @@ export async function buildControlTowerPngBlob(payload) {
     { label: "COLLECTED", value: compactMoney(collected), accent: "#34D399" },
     { label: "PAID HOMES", value: String(paidHouseholds), accent: C.gold },
     { label: "EXPENSES", value: compactMoney(expenses), accent: "#FB7185" },
-    { label: "NET BALANCE", value: compactMoney(netBalance), accent: C.white },
+    { label: "FUNDS IN HAND", value: compactMoney(netBalance), accent: C.white },
   ];
   kpis.forEach((kpi, i) => {
     const col = i % kpiCols;

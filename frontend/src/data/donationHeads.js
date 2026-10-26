@@ -97,20 +97,56 @@ export const DONATION_HEADS = [
     ],
   },
   {
-    id: "lakshmi",
-    title: "Lakshmi Puja",
-    subtitle: "After Bijoya",
-    accent: "#A61B4B",
-    soft: "#F9E6EF",
+    id: "kali",
+    title: "Kali Puja",
+    subtitle: "Deepavali Kali Puja",
+    accent: "#1A1A2E",
+    soft: "#ECEAF2",
     items: [
-      { id: "lakshmi-flower", label: "Lakshmi Puja Flowers", amount: 5000 },
-      { id: "lakshmi-sweets", label: "Lakshmi Puja Sweets", amount: 10000 },
-      { id: "lakshmi-fruits", label: "Lakshmi Puja Fruits", amount: 5000 },
-      { id: "lakshmi-bhog", label: "Lakshmi Puja Bhog", amount: 10000 },
-      { id: "lakshmi-immersion", label: "Lakshmi Idol Immersion", amount: 5000 },
+      { id: "kali-idol", label: "Kali Idol", amount: 5000 },
+      { id: "kali-idol-saree", label: "Kali Idol Saree", amount: 5000 },
+      { id: "kali-mandap", label: "Kali Mandap Sajja", amount: 5000 },
+      { id: "kali-purohit", label: "Kali Puja Purohit", amount: 5000 },
+      { id: "kali-flower", label: "Kali Puja Flower", amount: 5000 },
+      { id: "kali-sweets", label: "Kali Puja Sweets", amount: 5000 },
+      { id: "kali-fruits", label: "Kali Puja Fruits", amount: 5000 },
+      { id: "kali-bhog", label: "Kali Puja Bhog", amount: 5000 },
+      { id: "kali-naivedya", label: "Kali Naivedya", amount: 5000 },
+      { id: "kali-pradeep", label: "Kali Puja Pradeep & Diyas", amount: 5000 },
+      { id: "kali-alpona", label: "Kali Alpona & Decor", amount: 5000 },
+      { id: "kali-prasad", label: "Kali Prasad Packets", amount: 5000 },
+      { id: "kali-immersion", label: "Kali Idol Immersion", amount: 5000 },
+    ],
+  },
+  {
+    id: "bijoya",
+    title: "Bijoya Sammilani",
+    subtitle: "Community gathering",
+    accent: "#8B4513",
+    soft: "#F5EBE0",
+    items: [
+      { id: "bijoya-venue", label: "Venue & Seating", amount: 5000 },
+      { id: "bijoya-stage", label: "Stage & Mandap Decor", amount: 5000 },
+      { id: "bijoya-sound", label: "Sound & Lights", amount: 5000 },
+      { id: "bijoya-cultural", label: "Cultural Programme", amount: 5000 },
+      { id: "bijoya-sweets", label: "Sweets for Guests", amount: 5000 },
+      { id: "bijoya-snacks", label: "Snacks & Refreshments", amount: 5000 },
+      { id: "bijoya-adda", label: "Community Adda Meal", amount: 5000 },
+      { id: "bijoya-prizes", label: "Prizes & Felicitation", amount: 5000 },
+      { id: "bijoya-tokens", label: "Bijoya Tokens & Gifts", amount: 5000 },
+      { id: "bijoya-photo", label: "Photography & Video", amount: 5000 },
+      { id: "bijoya-invite", label: "Invites & Printing", amount: 5000 },
+      { id: "bijoya-volunteer", label: "Volunteer Support Kit", amount: 5000 },
     ],
   },
 ];
+
+/** Open donation categories on /contribute (Kali + Bijoya; custom amount on page). */
+export const REMAINDER_DONATION_CATEGORY_IDS = ["kali", "bijoya"];
+
+export const REMAINDER_DONATION_HEADS = DONATION_HEADS.filter((c) =>
+  REMAINDER_DONATION_CATEGORY_IDS.includes(c.id)
+);
 
 export function formatInr(n) {
   return `₹${Number(n || 0).toLocaleString("en-IN")}`;

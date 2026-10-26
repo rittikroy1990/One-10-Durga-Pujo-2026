@@ -1,7 +1,14 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Share2, X, Sparkles, Users, Gift } from "lucide-react";
 import { useFootfall } from "../context/FootfallContext";
+
+// Pop-ups here would cover the sticky checkout / pay buttons on phones; they show on the next ordinary page instead.
+const CHECKOUT_PATHS = /^\/(food|subscribe|donate|payment|promote\/apply|advertise\/apply)(\/|$)/;
+
+function useOnCheckoutPage() {
+  return CHECKOUT_PATHS.test(useLocation().pathname);
+}
 
 function fmt(n) {
   if (n == null || Number.isNaN(Number(n))) return "—";
@@ -158,7 +165,8 @@ export function FootfallMeter({ variant = "footer", className = "" }) {
 
 export function FootfallWelcomeCard() {
   const { showWelcome, visitNumber, dismissWelcome, stats } = useFootfall();
-  if (!showWelcome || !visitNumber) return null;
+  const onCheckout = useOnCheckoutPage();
+  if (!showWelcome || !visitNumber || onCheckout) return null;
 
   const shareText = encodeURIComponent(buildFootfallShareText(visitNumber, stats));
   const next = nextMilestoneLabel(stats);
@@ -221,7 +229,8 @@ export function FootfallWelcomeCard() {
 
 export function FootfallMilestoneBanner() {
   const { milestoneBanner, dismissMilestone, stats } = useFootfall();
-  if (!milestoneBanner) return null;
+  const onCheckout = useOnCheckoutPage();
+  if (!milestoneBanner || onCheckout) return null;
   const at = typeof milestoneBanner === "object" ? milestoneBanner.at : milestoneBanner;
   const label = fmt(at);
   return (

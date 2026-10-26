@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Ban, CheckCircle2, Plus, Pencil, Trash2, ImagePlus, RefreshCw } from "lucide-react";
+import { Ban, CheckCircle2, Lock, Plus, Pencil, Trash2, ImagePlus, RefreshCw } from "lucide-react";
 import api from "../../lib/api";
 import { Card, CardBody, Button, StatusBadge, Spinner, Input, Label, Select } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
@@ -51,6 +51,7 @@ export default function FoodMenuAdmin() {
   const [togglingPage, setTogglingPage] = useState(false);
   const [savingItem, setSavingItem] = useState(false);
   const [pageEnabled, setPageEnabled] = useState(false);
+  const [communityClosed, setCommunityClosed] = useState(false);
   const [itemForm, setItemForm] = useState(EMPTY_ITEM);
   const [editingId, setEditingId] = useState(null);
   const itemImageRef = useRef(null);
@@ -65,7 +66,10 @@ export default function FoodMenuAdmin() {
 
   const loadPageStatus = useCallback(() => {
     api.get("/admin/food-subscriptions/prices")
-      .then((r) => setPageEnabled(!!r.data.page_enabled))
+      .then((r) => {
+        setPageEnabled(!!r.data.page_enabled);
+        setCommunityClosed(!!r.data.community_closed);
+      })
       .catch(() => {
         api.get("/admin/food-subscriptions")
           .then((r) => {
@@ -166,12 +170,13 @@ export default function FoodMenuAdmin() {
     }
   };
 
-  const setFoodPageEnabled = async (enabled) => {
+  const setFoodPage = async (patch, message) => {
     setTogglingPage(true);
     try {
-      const r = await api.put("/admin/food-subscriptions/page", { page_enabled: enabled });
+      const r = await api.put("/admin/food-subscriptions/page", patch);
       setPageEnabled(!!r.data.page_enabled);
-      toast.success(enabled ? "Food page is open for residents" : "Food page set to Coming soon");
+      setCommunityClosed(!!r.data.community_closed);
+      toast.success(message);
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Could not update Food page status");
     } finally {
@@ -193,19 +198,49 @@ export default function FoodMenuAdmin() {
           <div>
             <div className="font-display text-xl text-brown-900">Public Food page</div>
             <p className="mt-1 text-sm text-brown-800/60">
-              When set to Coming soon, residents see a placeholder instead of the menu cart.
+              When set to Coming soon, residents see a placeholder instead of the menu cart. When closed to the community,
+              residents can't order or change orders, but committee members logged in here can still order on the Food page.
             </p>
             <div className="mt-2">
-              <StatusBadge status={pageEnabled ? "open" : "coming_soon"} />
+              <StatusBadge status={!pageEnabled ? "coming_soon" : communityClosed ? "closed" : "open"} />
+              {pageEnabled && communityClosed ? (
+                <span className="ml-2 text-xs font-semibold text-brown-800/60">Committee only</span>
+              ) : null}
             </div>
           </div>
-          <div>
+          <div className="flex flex-wrap gap-2">
+            {pageEnabled && !communityClosed ? (
+              <Button
+                variant="admin"
+                size="sm"
+                disabled={togglingPage}
+                onClick={() => {
+                  if (window.confirm("Close food orders for the community? Committee members can still order.")) {
+                    setFoodPage({ community_closed: true }, "Food orders closed for the community · committee can still order");
+                  }
+                }}
+                data-testid="food-page-close-community-btn"
+              >
+                <Lock className="h-4 w-4" /> {togglingPage ? "Updating…" : "Close for community"}
+              </Button>
+            ) : null}
+            {pageEnabled && communityClosed ? (
+              <Button
+                variant="admin"
+                size="sm"
+                disabled={togglingPage}
+                onClick={() => setFoodPage({ community_closed: false }, "Food orders reopened for the community")}
+                data-testid="food-page-reopen-community-btn"
+              >
+                <CheckCircle2 className="h-4 w-4" /> {togglingPage ? "Updating…" : "Reopen for community"}
+              </Button>
+            ) : null}
             {pageEnabled ? (
               <Button
                 variant="subtle"
                 size="sm"
                 disabled={togglingPage}
-                onClick={() => setFoodPageEnabled(false)}
+                onClick={() => setFoodPage({ page_enabled: false }, "Food page set to Coming soon")}
                 data-testid="food-page-coming-soon-btn"
               >
                 <Ban className="h-4 w-4" /> {togglingPage ? "Updating…" : "Set coming soon"}
@@ -215,7 +250,7 @@ export default function FoodMenuAdmin() {
                 variant="admin"
                 size="sm"
                 disabled={togglingPage}
-                onClick={() => setFoodPageEnabled(true)}
+                onClick={() => setFoodPage({ page_enabled: true }, "Food page is open")}
                 data-testid="food-page-open-btn"
               >
                 <CheckCircle2 className="h-4 w-4" /> {togglingPage ? "Updating…" : "Open Food page"}

@@ -9,6 +9,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Table, TableStyle
 
+from pujo_menu_2026 import VEG_PROMISE
 from util import fmt_inr, rupees_words, neutralise_cell, to_ist
 from datetime import datetime
 
@@ -82,8 +83,10 @@ def _method_label(method: str) -> str:
 
 def _payment_ref_label(method: str) -> str:
     m = (method or "").strip()
-    if m in ("upi_qr", "bank_transfer"):
+    if m == "upi_qr":
         return "UPI / UTR Reference"
+    if m == "bank_transfer":
+        return "UTR / Bank Reference"
     if m == "cheque":
         return "Cheque No"
     if m == "cash":
@@ -104,6 +107,10 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     bank = org.get("bank_account") or {}
     letterhead = rc.get("letterhead_title") or org.get("organiser") or "ONE 10 EVENT ORGANISING COMMITEE"
     subtitle = rc.get("letterhead_subtitle") or org.get("legal_status") or ""
+    entity_name = org.get("legal_identity") or letterhead
+    if (receipt.get("kind") or "") == "sponsorship":
+        entity_name = receipt.get("receiver_name") or org.get("sponsorship_legal_name") or entity_name
+        letterhead, subtitle = entity_name, ""
     campaign_title = (
         receipt.get("campaign_title")
         or camp.get("title")
@@ -115,6 +122,7 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
         "donation": "Donation Receipt",
         "food_subscription": "Food Subscription Receipt",
         "subscription": "Subscription Receipt",
+        "sponsorship": "Sponsorship Receipt",
     }.get(kind, "Receipt")
 
     # border
@@ -140,6 +148,8 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
     c.drawCentredString(W / 2, y, org.get("address", ""))
     y -= 5 * mm
     pan = (org.get("pan") or "").strip()
+    if kind == "sponsorship":
+        pan = (receipt.get("receiver_pan") or org.get("sponsorship_pan") or pan).strip()
     if pan:
         c.setFont("Helvetica", 8)
         c.drawCentredString(W / 2, y, f"PAN: {pan}")
@@ -174,10 +184,29 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
         c.setFont("Helvetica", 10)
     y -= 8 * mm
 
-    c.drawString(22 * mm, y, f"Payer: {receipt.get('payer_name', '')}")
-    y -= 6 * mm
-    c.drawString(22 * mm, y, f"Household: {receipt.get('tower_name', '')}, Flat {receipt.get('flat_number', '')}")
-    y -= 6 * mm
+    if kind == "sponsorship":
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(22 * mm, y, f"Received with thanks from: {receipt.get('payer_name', '')}")
+        c.setFont("Helvetica", 10)
+        y -= 6 * mm
+        for label, key in (("Sponsor PAN", "sponsor_pan"), ("Sponsor GSTIN", "sponsor_gstin"),
+                           ("Sponsor address", "sponsor_address")):
+            val = (receipt.get(key) or "").strip()
+            if val:
+                c.drawString(22 * mm, y, f"{label}: {val[:95]}")
+                y -= 6 * mm
+        if receipt.get("received_on"):
+            try:
+                recd = datetime.strptime(receipt["received_on"], "%Y-%m-%d").strftime("%d %b %Y")
+            except ValueError:
+                recd = receipt["received_on"]
+            c.drawString(22 * mm, y, f"Funds received on: {recd}")
+            y -= 6 * mm
+    else:
+        c.drawString(22 * mm, y, f"Payer: {receipt.get('payer_name', '')}")
+        y -= 6 * mm
+        c.drawString(22 * mm, y, f"Household: {receipt.get('tower_name', '')}, Flat {receipt.get('flat_number', '')}")
+        y -= 6 * mm
 
     method = receipt.get("method") or ""
     payment_id = (receipt.get("payment_id") or "").strip()
@@ -207,15 +236,35 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
 
     vpa = (upi.get("vpa") or "").strip()
     payee = (upi.get("payee_name") or bank.get("account_name") or "").strip()
-    if method in ("upi_qr", "bank_transfer") and (vpa or payee):
+    acct = (bank.get("account_number") or "").strip()
+    ifsc = (bank.get("ifsc") or "").strip()
+    food_upi = org.get("food_upi") or {}
+    use_yes_upi = (
+        kind == "food_subscription"
+        or (receipt.get("upi_channel") or "").strip().lower() == "yes"
+        or (receipt.get("settlement_bank") or "").strip() == "1004"
+    )
+    if use_yes_upi and method == "upi_qr" and (
+        food_upi.get("enabled") or food_upi.get("vpa") or food_upi.get("static_qr_url")
+    ) and food_upi.get("vpa"):
+        # Food + remainder-season contribute settle on YES Bank merchant QR (not ICICI EasyPay).
+        vpa = food_upi["vpa"].strip()
+        payee = (food_upi.get("payee_name") or payee).strip()
+        acct = ifsc = ""
+    if kind == "sponsorship":
+        acct = (bank.get("account_number") or "").strip()
+        if acct and method != "cash":
+            c.drawString(22 * mm, y, "Credited to: " + " · ".join(p for p in (
+                bank.get("bank"), f"A/c {acct}",
+                f"IFSC {bank.get('ifsc')}" if bank.get("ifsc") else "") if p))
+            y -= 6 * mm
+    elif method in ("upi_qr", "bank_transfer") and (vpa or payee):
         if payee:
             c.drawString(22 * mm, y, f"Paid to: {payee}")
             y -= 6 * mm
         if vpa:
             c.drawString(22 * mm, y, f"Committee UPI ID: {vpa}")
             y -= 6 * mm
-        acct = (bank.get("account_number") or "").strip()
-        ifsc = (bank.get("ifsc") or "").strip()
         if acct:
             c.drawString(22 * mm, y, f"Bank A/c: {acct}" + (f"  IFSC: {ifsc}" if ifsc else ""))
             y -= 6 * mm
@@ -256,6 +305,17 @@ def receipt_pdf(receipt: dict, settings: dict, verify_url: str) -> bytes:
 
     c.setFont("Helvetica-Oblique", 10)
     c.drawString(22 * mm, y, f"Amount in words: {rupees_words(receipt.get('total_amount', 0))}")
+
+    if kind == "sponsorship":
+        y -= 16 * mm
+        c.setFont("Helvetica", 9)
+        c.drawString(22 * mm, y, "Received towards sponsorship of the community Durga Puja celebrations at One10, Newtown.")
+        y -= 5 * mm
+        c.drawString(22 * mm, y, "This is a computer-generated receipt and does not require a physical signature.")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(W - 22 * mm, y - 12 * mm, f"For {entity_name}")
+        c.setFont("Helvetica", 9)
+        c.drawRightString(W - 22 * mm, y - 17 * mm, "Authorised Signatory")
 
     c.showPage()
     c.save()
@@ -331,12 +391,15 @@ def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
     story += [info, Spacer(1, 3 * mm)]
 
     totals = voucher.get("totals") or {}
-    summary = Table([[
+    cells = [
         Paragraph(f"<b>{totals.get('heads', 0)}</b><br/><font size=8>Total heads / plates</font>", base),
         Paragraph(f"<b>{totals.get('free', 0)}</b><br/><font size=8>Complimentary</font>", base),
         Paragraph(f"<b>{totals.get('paid', 0)}</b><br/><font size=8>Paid</font>", base),
-        Paragraph(f"<b>{_rs(voucher.get('amount_paid_paise'))}</b><br/><font size=8>Amount paid</font>", base),
-    ]], colWidths=[43.5 * mm] * 4)
+    ]
+    if totals.get("kids"):
+        cells.append(Paragraph(f"<b>{totals['kids']}</b><br/><font size=8>Kids below 7 (Rs. 0)</font>", base))
+    cells.append(Paragraph(f"<b>{_rs(voucher.get('amount_paid_paise'))}</b><br/><font size=8>Amount paid</font>", base))
+    summary = Table([cells], colWidths=[174 * mm / len(cells)] * len(cells))
     summary.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.8, GOLD), ("INNERGRID", (0, 0), (-1, -1), 0.5, GOLD),
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF8EC")), ("ALIGN", (0, 0), (-1, -1), "CENTER"),
@@ -345,7 +408,7 @@ def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
     story += [summary, Spacer(1, 2 * mm)]
 
     story.append(Paragraph("Meals by day", section))
-    rows = [["Day", "Meal", "Item", "Diet", "Heads", "Compl.", "Paid", "Amount"]]
+    rows = [["Day", "Meal", "Item", "Diet", "Heads", "Compl.", "Paid", "Kids", "Amount"]]
     for ln in voucher.get("lines") or []:
         rows.append([
             Paragraph(f"<b>{ln.get('day_label')}</b><br/><font size=7>{_short_date(ln.get('date'))} {ln.get('weekday', '')[:3]}</font>", small),
@@ -355,11 +418,12 @@ def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
             str(ln.get("heads") or 0),
             str(ln.get("free") or 0),
             str(ln.get("paid") or 0),
+            str(ln.get("kids") or 0),
             _rs(ln.get("amount_paise")) if ln.get("amount_paise") is not None else "-",
         ])
     rows.append(["", "", "Total", "", str(totals.get("heads", 0)), str(totals.get("free", 0)),
-                 str(totals.get("paid", 0)), _rs(voucher.get("total_amount_paise"))])
-    t = Table(rows, colWidths=[24 * mm, 24 * mm, 50 * mm, 16 * mm, 13 * mm, 12 * mm, 12 * mm, 23 * mm], repeatRows=1)
+                 str(totals.get("paid", 0)), str(totals.get("kids", 0)), _rs(voucher.get("total_amount_paise"))])
+    t = Table(rows, colWidths=[24 * mm, 22 * mm, 42 * mm, 14 * mm, 13 * mm, 12 * mm, 12 * mm, 12 * mm, 23 * mm], repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BROWN), ("TEXTCOLOR", (0, 0), (-1, 0), IVORY),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
@@ -414,6 +478,8 @@ def food_voucher_pdf(voucher: dict, settings: dict) -> bytes:
         Spacer(1, 2 * mm),
         Paragraph("Download or print this voucher and show it to a committee member to collect your food coupons. "
                   "Coupons are given once per voucher. No take-aways for breakfast and Ashtami lunch.", small),
+        Spacer(1, 1 * mm),
+        Paragraph(VEG_PROMISE, small),
     ]
     doc.build(story, onFirstPage=frame, onLaterPages=frame)
     return buf.getvalue()
@@ -477,8 +543,9 @@ def food_coupon_pdf(coupon: dict, subscription: dict, settings: dict, slips: lis
                      f"{_short_date(sl.get('date'))} {(sl.get('weekday') or '')[:3]} · {sl.get('diet_label', '')}")
         c.drawString(x + pad, top - 12 * mm, (sl.get("item") or "")[:44])
         c.setFont("Helvetica-Bold", 7.2)
-        c.setFillColor(green if sl.get("is_free") else VERMILION)
-        c.drawString(x + pad, top - 16 * mm, "COMPLIMENTARY" if sl.get("is_free") else "PAID")
+        c.setFillColor(green if sl.get("is_free") or sl.get("is_kid") else VERMILION)
+        c.drawString(x + pad, top - 16 * mm,
+                     "KID BELOW 7" if sl.get("is_kid") else "COMPLIMENTARY" if sl.get("is_free") else "PAID")
         c.setFillColor(BROWN)
         c.drawRightString(right, top - 16 * mm, f"{sl.get('n')} of {sl.get('of')}")
 

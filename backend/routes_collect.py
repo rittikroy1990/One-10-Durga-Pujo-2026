@@ -9,7 +9,7 @@ import json
 from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id
 from util import (now_utc, iso, valid_indian_mobile, mask_mobile, mask_name, fmt_inr,
-                  rupees_to_paise)
+                  rupees_to_paise, to_ist)
 from audit import audit, next_formatted
 from ledger import post_journal, reverse_journal
 from tokens import receipt_token, status_token, read_status_token
@@ -20,6 +20,11 @@ from notify import notify
 router = APIRouter(prefix="/api")
 
 OCCUPANCY = {"owner_resident", "tenant_resident", "owner_non_resident", "other"}
+
+
+# Remainder-season heads open after Durga ₹2,500 (SUB_KDL) closed. Settled on YES Bank.
+REMAINDER_COMPONENT_CODES = frozenset({"SUB_KALI", "SUB_BIJOYA"})
+CLOSED_COMPONENT_CODES = frozenset({"SUB_KDL"})
 
 
 class SubscribeIn(BaseModel):
@@ -43,6 +48,9 @@ class SubscribeIn(BaseModel):
     payer_name: Optional[str] = None
     payer_mobile: Optional[str] = None
     payer_relationship: Optional[str] = None
+    # Remainder season: SUB_KALI / SUB_BIJOYA only. Requires upi_channel="yes".
+    component_codes: Optional[list[str]] = None
+    upi_channel: Optional[str] = None  # "yes" → YES Bank food QR / ledger 1004
 
 
 class DonateIn(BaseModel):
@@ -64,11 +72,60 @@ class DonateIn(BaseModel):
     organisation: Optional[str] = None
     notes: Optional[str] = None
     relation_to_one10: Optional[str] = None
+    # "yes" → YES Bank food QR / ledger 1004 (remainder-season contribute page)
+    upi_channel: Optional[str] = None
 
 
-async def _components(settings, donation_paise):
+def _normalize_upi_channel(raw: Optional[str]) -> Optional[str]:
+    ch = (raw or "").strip().lower()
+    if ch in ("yes", "yes_bank", "1004"):
+        return "yes"
+    return None
+
+
+def _intent_uses_yes_upi(intent: dict | None) -> bool:
+    if not intent:
+        return False
+    if (intent.get("upi_channel") or "").strip().lower() == "yes":
+        return True
+    if (intent.get("settlement_bank") or "").strip() == "1004":
+        return True
+    return (intent.get("kind") or "") == "food_subscription"
+
+
+def _debit_account_for_intent(intent: dict | None, default: str = "1001") -> str:
+    if _intent_uses_yes_upi(intent):
+        return "1004"
+    return default
+
+
+async def _components(settings, donation_paise, component_codes=None):
+    all_comps = settings["subscription"]["components"]
+    if component_codes is None:
+        selected = all_comps
+    else:
+        wanted = {str(c).strip().upper() for c in component_codes if c}
+        by_code = {c["code"]: c for c in all_comps}
+        missing = wanted - set(by_code)
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Unknown subscription component(s): {', '.join(sorted(missing))}")
+        closed = wanted & CLOSED_COMPONENT_CODES
+        if closed:
+            raise HTTPException(
+                status_code=400,
+                detail="Khuti + Durga + Lakshmi (₹2,500) is closed. Choose Kali Puja and/or Bijoya Sammilani.",
+            )
+        not_open = wanted - REMAINDER_COMPONENT_CODES
+        if not_open:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only Kali Puja and Bijoya Sammilani are open: {', '.join(sorted(not_open))}",
+            )
+        if not wanted:
+            raise HTTPException(status_code=400, detail="Select at least one open subscription head.")
+        selected = [by_code[c["code"]] for c in all_comps if c["code"] in wanted]
     comps = [{"code": c["code"], "label": c["label"], "amount_paise": c["amount_paise"],
-              "account_code": c["account_code"]} for c in settings["subscription"]["components"]]
+              "account_code": c["account_code"]} for c in selected]
     return comps
 
 
@@ -105,7 +162,7 @@ def _payable_heads(intent: dict) -> list:
             if kind == "donation":
                 label, acct, code = "Voluntary Donation", "4100", "DONATION"
             elif kind == "food_subscription":
-                label, acct, code = "Food Subscription", "4100", "FOOD"
+                label, acct, code = "Food Subscription", "4400", "FOOD"
             else:
                 label, acct, code = "Subscription", "4001", "SUB"
             heads.append({"code": code, "label": label, "amount_paise": total, "account_code": acct})
@@ -161,10 +218,33 @@ async def subscribe(body: SubscribeIn, request: Request):
     if not tower or not flat:
         raise HTTPException(status_code=400, detail="Invalid tower/flat selection.")
 
-    base = int(settings["subscription"]["base_amount_paise"])  # server-side only
+    full_base = int(settings["subscription"]["base_amount_paise"])
     comp_sum = sum(c["amount_paise"] for c in settings["subscription"]["components"])
-    if comp_sum != base:
+    if comp_sum != full_base:
         raise HTTPException(status_code=500, detail="Component allocation misconfigured.")
+
+    upi_channel = _normalize_upi_channel(body.upi_channel)
+    selected_codes = body.component_codes
+    if selected_codes is None:
+        # Full-season / Durga ₹2,500 package is closed — only Kali + Bijoya remainder is open.
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Durga Pujo household subscription (₹2,500) is closed. "
+                "Open now: Kali Puja ₹300 and Bijoya Sammilani ₹700 on /contribute."
+            ),
+        )
+    # Remainder-season path: Kali / Bijoya only, settled on YES Bank.
+    if upi_channel != "yes":
+        raise HTTPException(
+            status_code=400,
+            detail="Remainder-season subscription must use the YES Bank UPI channel.",
+        )
+    components = await _components(settings, 0, component_codes=selected_codes)
+    base = sum(int(c["amount_paise"]) for c in components)
+    if base <= 0:
+        raise HTTPException(status_code=400, detail="Select at least one open subscription head.")
+
     # Subscription checkout is base-only; voluntary gifts go through /donate.
     donation = 0
 
@@ -204,7 +284,7 @@ async def subscribe(body: SubscribeIn, request: Request):
     intent = {
         "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid, "kind": "subscription",
         "base_amount": base, "donation_amount": donation, "total_amount": base + donation,
-        "components": await _components(settings, donation),
+        "components": components,
         "payer_is_member": body.payer_is_member,
         "payer_name": (body.payer_name if not body.payer_is_member else body.primary_contact_name),
         "payer_mobile": (body.payer_mobile if not body.payer_is_member else body.mobile),
@@ -212,11 +292,16 @@ async def subscribe(body: SubscribeIn, request: Request):
         "status": "payment_pending", "method": "upi_qr",
         "created_at": iso(),
     }
+    if upi_channel == "yes":
+        intent["upi_channel"] = "yes"
+        intent["settlement_bank"] = "1004"
+        intent["package"] = "remainder_season"
     await db.subscription_intents.insert_one(dict(intent))
     await audit("subscription.intent.create", entity_type="subscription_intent",
                 entity_id=intent["id"], correlation_id=intent["id"],
                 after={"total": intent["total_amount"], "household": hid,
-                       "method": intent["method"]},
+                       "method": intent["method"], "upi_channel": upi_channel or "icici",
+                       "components": [c["code"] for c in components]},
                 request=request)
 
     return {
@@ -226,6 +311,7 @@ async def subscribe(body: SubscribeIn, request: Request):
         "components": intent["components"],
         "household": {"tower_name": tower["name"], "flat_number": flat["number"]},
         "payment_method": intent["method"],
+        "upi_channel": upi_channel or "icici",
     }
 
 
@@ -326,6 +412,7 @@ async def donate(body: DonateIn, request: Request):
             "granted": granted, "granted_at": iso(),
         })
 
+    upi_channel = _normalize_upi_channel(body.upi_channel)
     intent = {
         "id": new_id("intent"), "cycle_id": cycle_id, "household_id": hid,
         "kind": "donation",
@@ -338,13 +425,17 @@ async def donate(body: DonateIn, request: Request):
         "notes": body.notes or "",
         "created_at": iso(),
     }
+    if upi_channel == "yes":
+        intent["upi_channel"] = "yes"
+        intent["settlement_bank"] = "1004"
     await db.subscription_intents.insert_one(dict(intent))
     await audit(
         "donation.intent.create",
         entity_type="subscription_intent",
         entity_id=intent["id"],
         correlation_id=intent["id"],
-        after={"total": donation, "donor_type": donor_type, "household": hid},
+        after={"total": donation, "donor_type": donor_type, "household": hid,
+               "upi_channel": upi_channel or "icici"},
         request=request,
     )
     return {
@@ -356,6 +447,7 @@ async def donate(body: DonateIn, request: Request):
         "total_amount": donation,
         "household": {"tower_name": tower_name, "flat_number": flat_number},
         "payment_method": "upi_qr",
+        "upi_channel": upi_channel or "icici",
     }
 
 
@@ -481,6 +573,9 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
     n, receipt_no = await next_formatted("receipt", settings["receipt"]["prefix"], 6)
     rid = new_id("rcpt")
     kind = intent.get("kind") or "subscription"
+    # Food QR and remainder-season contribute (upi_channel=yes) settle into YES Bank (1004).
+    if _intent_uses_yes_upi(intent) and debit_account in ("1001", None, ""):
+        debit_account = "1004"
 
     lines = [{"account_code": debit_account, "debit": paid, "credit": 0}]
     for h in allocated:
@@ -515,6 +610,7 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "bank_verified": bool(bank_verified),
         "issuance_source": issuance_source or ("payment_screenshot" if not bank_verified else "collection"),
         "journal_id": journal["id"], "issued_at": iso(),
+        "paid_on": to_ist(now_utc()).strftime("%Y-%m-%d"),
         "campaign_title": campaign_title,
         "donor_type": intent.get("donor_type") or "",
         "food_subscription_id": intent.get("food_subscription_id") or "",
@@ -522,6 +618,9 @@ async def _issue_receipt(intent, *, method, masked_ref, provider_payment_id, deb
         "amount_due_after": remaining_total,
         "original_total_amount": original_total,
         "amount_paid_to_date": already_paid,
+        "upi_channel": "yes" if _intent_uses_yes_upi(intent) else "icici",
+        "settlement_bank": "1004" if _intent_uses_yes_upi(intent) else "1001",
+        "debit_account": debit_account,
     }
     receipt["verify_token"] = receipt_token(rid)
     await db.receipts.insert_one(dict(receipt))
@@ -606,9 +705,18 @@ async def payment_status(token: str):
     due = _intent_due_paise(intent)
     residual_payment = None
 
+    food_doc = await db.food_subscriptions.find_one(
+        {"id": intent["food_subscription_id"]}, {"_id": 0},
+    ) if intent.get("kind") == "food_subscription" and intent.get("food_subscription_id") else None
+
     if intent.get("status") == "superseded" and intent.get("kind") == "food_subscription":
         status = "cancelled"
         message = "This food order is closed — do not pay for it. Place a new order on the Food page."
+        warn = True
+    elif (food_doc or {}).get("whatsapp_posted_at") and intent.get("status") in ("payment_pending", "partially_paid"):
+        status = "whatsapp_posted"
+        message = ("You posted this payment in the committee WhatsApp group. The committee will verify it — "
+                   "please do not pay again.")
         warn = True
     elif intent.get("status") == "partially_paid" and due > 0:
         status = "partially_paid"
@@ -702,6 +810,9 @@ async def payment_status(token: str):
         payload["food_pay_open"] = True
         payload["payment"] = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
         payload["qr_url"] = f"/api/payments/upi/qr.png?intent_id={intent_id}"
+    if food_doc and (payload.get("food_pay_open") or status in ("whatsapp_posted", "partially_paid")) and due > 0:
+        from routes_food import _whatsapp_order_text
+        payload["whatsapp_text"] = _whatsapp_order_text(food_doc, due)
     if residual_payment:
         payload["residual_amount"] = due
         payload["residual_amount_fmt"] = fmt_inr(due)
@@ -756,9 +867,10 @@ def _upi_app_links(intent_url: str) -> dict:
     }
 
 
-def _upi_block_for_kind(settings: dict, kind: str | None = None) -> dict:
+def _upi_block_for_intent(settings: dict, intent: dict | None = None, kind: str | None = None) -> dict:
     org = settings.get("organisation") or {}
-    if kind == "food_subscription":
+    use_yes = _intent_uses_yes_upi(intent) or kind == "food_subscription"
+    if use_yes:
         food_upi = org.get("food_upi") or {}
         if (
             food_upi.get("qr_locked")
@@ -770,15 +882,22 @@ def _upi_block_for_kind(settings: dict, kind: str | None = None) -> dict:
     return org.get("upi") or {}
 
 
-def _upi_payload(settings: dict, amount_paise: int, note: str = "", *, kind: str | None = None) -> dict:
+def _upi_payload(settings: dict, amount_paise: int, note: str = "", *,
+                 kind: str | None = None, intent: dict | None = None) -> dict:
     org = settings.get("organisation") or {}
-    upi = _upi_block_for_kind(settings, kind)
+    upi = _upi_block_for_intent(settings, intent=intent, kind=kind)
     bank = org.get("bank_account") or {}
     payee = upi.get("payee_name") or bank.get("account_name") or org.get("organiser") or "ONE 10 EVENT ORGANISING COMMITEE"
     vpa = (upi.get("vpa") or "").strip()
     amount_rupees = f"{amount_paise / 100:.2f}"
     merchant_uri = (upi.get("merchant_upi_uri") or "").strip()
-    default_note = "One10 food" if kind == "food_subscription" else "One10 subscription"
+    use_yes = _intent_uses_yes_upi(intent) or kind == "food_subscription"
+    if kind == "food_subscription":
+        default_note = "One10 food"
+    elif kind == "donation":
+        default_note = "One10 donation"
+    else:
+        default_note = "One10 subscription"
     qr_data = ""
     if vpa and not upi.get("qr_locked") and not merchant_uri:
         from urllib.parse import quote
@@ -796,9 +915,10 @@ def _upi_payload(settings: dict, amount_paise: int, note: str = "", *, kind: str
         "upi_intent_url": intent_url,
         "upi_app_links": _upi_app_links(intent_url),
         "static_qr_url": upi.get("static_qr_url") or (
-            "/images/food-payment-qr.png" if kind == "food_subscription" else "/images/payment-qr.png"
+            "/images/food-payment-qr.png" if use_yes else "/images/payment-qr.png"
         ),
         "instructions": upi.get("instructions") or "",
+        "upi_channel": "yes" if use_yes else "icici",
         "bank_account": {
             "account_name": bank.get("account_name"),
             "account_number": bank.get("account_number"),
@@ -819,7 +939,7 @@ async def upi_session(intent_id: str):
         raise HTTPException(status_code=409, detail="This food order was cancelled or expired without payment. Please place a new order.")
     settings = await get_settings()
     due = _intent_due_paise(intent)
-    payload = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"))
+    payload = _upi_payload(settings, due, note=intent["id"][:20], kind=intent.get("kind"), intent=intent)
     return {
         "intent_id": intent_id,
         "status_token": status_token(intent_id),
@@ -831,6 +951,7 @@ async def upi_session(intent_id: str):
         "payment": payload,
         "qr_url": f"/api/payments/upi/qr.png?intent_id={intent_id}",
         "campaign_notice": (settings.get("campaign") or {}).get("important_notice"),
+        "upi_channel": payload.get("upi_channel") or "icici",
     }
 
 
@@ -842,7 +963,8 @@ async def upi_qr_png(intent_id: str):
         raise HTTPException(status_code=404, detail="Not found.")
     settings = await get_settings()
     payload = _upi_payload(
-        settings, _intent_due_paise(intent), note=intent["id"][:20], kind=intent.get("kind"),
+        settings, _intent_due_paise(intent), note=intent["id"][:20],
+        kind=intent.get("kind"), intent=intent,
     )
     qr_source = payload.get("qr_data") or payload.get("upi_intent_url") or ""
     if not qr_source:
@@ -912,6 +1034,9 @@ async def _create_linked_donation_intent(*, parent_intent: dict, donation_paise:
         "source_upi_ref": source_ref,
         "created_at": iso(),
     }
+    if _intent_uses_yes_upi(parent_intent):
+        don_intent["upi_channel"] = "yes"
+        don_intent["settlement_bank"] = "1004"
     await db.subscription_intents.insert_one(dict(don_intent))
     return don_intent
 
@@ -919,7 +1044,7 @@ async def _create_linked_donation_intent(*, parent_intent: dict, donation_paise:
 @router.post("/payments/upi/submit")
 async def upi_submit(request: Request):
     """Resident uploads payment screenshot + reference. LLM extracts details, validates, auto-issues receipt."""
-    from vision_extract import extract_payment_screenshot, normalize_ref
+    from vision_extract import KNOWN_PAYEE_VPAS, extract_payment_screenshot, normalize_ref
     from storage import save_document
 
     form = await request.form()
@@ -1061,7 +1186,12 @@ async def upi_submit(request: Request):
         # Still continue — keep bytes path via LLM only; store failure note
         await db.upi_submissions.update_one({"id": sub_id}, {"$set": {"proof_storage_error": str(e)[:200]}})
 
-    llm = extract_payment_screenshot(data, content_type=content_type)
+    org_settings = (await get_settings()).get("organisation") or {}
+    known_vpas = tuple({
+        v for v in (*KNOWN_PAYEE_VPAS, (org_settings.get("upi") or {}).get("vpa"),
+                    (org_settings.get("food_upi") or {}).get("vpa")) if (v or "").strip()
+    })
+    llm = extract_payment_screenshot(data, content_type=content_type, known_vpas=known_vpas)
     from vision_extract import coerce_amount_paise
 
     # Screenshot OCR rules:
@@ -1091,6 +1221,9 @@ async def upi_submit(request: Request):
 
     if intent_kind == "donation":
         amount_ok = paid_amount is not None and paid_amount >= max(expected - 100, 1)
+    elif intent_kind == "food_subscription":
+        # Food orders never take more than the order total (no excess-to-donation split).
+        amount_ok = bool(amount_exact or amount_partial)
     else:
         # Exact, partial under due, or overpay (excess becomes donation) can auto-issue
         amount_ok = bool(amount_exact or amount_partial or amount_over)
@@ -1157,7 +1290,7 @@ async def upi_submit(request: Request):
                     method="upi_qr",
                     masked_ref="UTR-" + ref_norm[-4:],
                     provider_payment_id=ref_norm,
-                    debit_account="1001",
+                    debit_account=_debit_account_for_intent(intent),
                     request=request,
                     paid_amount_paise=settle,
                     bank_verified=False,
@@ -1166,7 +1299,7 @@ async def upi_submit(request: Request):
                 receipt = await _mark_screenshot_receipt(receipt, proof_doc_id=proof_doc_id)
                 final_status = "issued" if receipt else "needs_review"
             else:
-                # Subscription due (typically ₹3,500); excess OCR amount → donation receipt.
+                # Subscription due; excess OCR amount → donation receipt.
                 sub_due = _intent_due_paise(intent)
                 sub_amt = min(int(sub_due), int(paid_amount))
                 don_amt = max(0, int(paid_amount) - sub_amt)
@@ -1184,7 +1317,7 @@ async def upi_submit(request: Request):
                     method="upi_qr",
                     masked_ref="UTR-" + ref_norm[-4:],
                     provider_payment_id=ref_norm,
-                    debit_account="1001",
+                    debit_account=_debit_account_for_intent(intent),
                     request=request,
                     paid_amount_paise=sub_amt,
                     bank_verified=False,
@@ -1211,7 +1344,7 @@ async def upi_submit(request: Request):
                         method="upi_qr",
                         masked_ref="UTR-" + ref_norm[-4:],
                         provider_payment_id=don_pay_id,
-                        debit_account="1001",
+                        debit_account=_debit_account_for_intent(don_intent),
                         request=request,
                         paid_amount_paise=don_amt,
                         bank_verified=False,
@@ -1287,6 +1420,11 @@ async def upi_submit(request: Request):
                 reasons.append(
                     f"amount on screenshot is less than the pledged donation ({fmt_inr(expected)})"
                 )
+            elif intent_kind == "food_subscription" and amount_over:
+                reasons.append(
+                    f"amount on screenshot ({fmt_inr(int(paid_amount))}) is more than this order's due "
+                    f"({fmt_inr(expected)}) — overpayments aren't accepted for food orders"
+                )
             else:
                 reasons.append(
                     f"amount on screenshot could not be matched to the amount due ({fmt_inr(expected)})"
@@ -1317,7 +1455,7 @@ async def upi_submit(request: Request):
         "proof_doc_id": proof_doc_id,
         "llm": {k: llm.get(k) for k in (
             "ok", "error", "amount_paise", "utr", "utr_candidates", "txn_time", "payer_name", "payee_name",
-            "org_name", "org_match", "status", "confidence", "notes", "model",
+            "org_name", "payee_vpa", "org_match", "status", "confidence", "notes", "model",
         )},
         "validation": validation,
         "review_message": review_message,

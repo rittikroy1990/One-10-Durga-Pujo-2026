@@ -11,6 +11,7 @@ import AdminLayout, { RequireAuth } from "./components/AdminLayout";
 import Home from "./pages/public/Home";
 import Subscribe from "./pages/public/Subscribe";
 import Donate from "./pages/public/Donate";
+import Contribute from "./pages/public/Contribute";
 import Food from "./pages/public/Food";
 import FoodVoucher from "./pages/public/FoodVoucher";
 import FoodOrders from "./pages/public/FoodOrders";
@@ -28,12 +29,19 @@ import UploadPaymentQr from "./pages/public/UploadPaymentQr";
 import FoodPoll from "./pages/public/FoodPoll";
 import UploadPdf from "./pages/public/UploadPdf";
 import Invite from "./pages/public/Invite";
+import Advertise from "./pages/public/Advertise";
+import AdvertiseApply from "./pages/public/AdvertiseApply";
+import AdvertiseStatus from "./pages/public/AdvertiseStatus";
+import LocalBusinesses from "./pages/public/LocalBusinesses";
+import LocalBusinessPage from "./pages/public/LocalBusinessPage";
 
 import Login from "./pages/admin/Login";
 import Dashboard from "./pages/admin/Dashboard";
 import Collection from "./pages/admin/Collection";
 import Expenses from "./pages/admin/Expenses";
 import FoodAdmin from "./pages/admin/FoodAdmin";
+import FoodReports from "./pages/admin/FoodReports";
+import VendorMeals from "./pages/admin/VendorMeals";
 import FoodMenuAdmin from "./pages/admin/FoodMenuAdmin";
 import AdminPortal from "./pages/admin/AdminPortal";
 import PaymentQrs from "./pages/admin/PaymentQrs";
@@ -45,6 +53,7 @@ import Reports from "./pages/admin/Reports";
 import AuditLog from "./pages/admin/AuditLog";
 import Periods from "./pages/admin/Periods";
 import Settings from "./pages/admin/Settings";
+import AdsAdmin from "./pages/admin/AdsAdmin";
 
 function AppRoutes() {
   const location = useLocation();
@@ -54,6 +63,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/contribute" element={<Contribute />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
       <Route path="/food" element={<Food />} />
@@ -69,6 +79,14 @@ function AppRoutes() {
       <Route path="/faq" element={<Faq />} />
       <Route path="/participate" element={<Participate />} />
       <Route path="/sponsors" element={<Sponsors />} />
+      <Route path="/promote" element={<Advertise />} />
+      <Route path="/promote/apply" element={<AdvertiseApply />} />
+      <Route path="/promote/status/:token" element={<AdvertiseStatus />} />
+      <Route path="/advertise" element={<Advertise />} />
+      <Route path="/advertise/apply" element={<AdvertiseApply />} />
+      <Route path="/advertise/status/:token" element={<AdvertiseStatus />} />
+      <Route path="/local-businesses" element={<LocalBusinesses />} />
+      <Route path="/local-businesses/:slug" element={<LocalBusinessPage />} />
       <Route path="/invite" element={<Invite />} />
       <Route path="/transparency" element={<PublicReport />} />
       <Route path="/privacy" element={<Legal type="privacy" />} />
@@ -87,6 +105,8 @@ function AppRoutes() {
         <Route path="collection" element={<Collection />} />
         <Route path="expenses" element={<Expenses />} />
         <Route path="food" element={<FoodAdmin />} />
+        <Route path="food-reports" element={<FoodReports />} />
+        <Route path="vendor-meals" element={<VendorMeals />} />
         <Route path="food-menu" element={<FoodMenuAdmin />} />
         <Route path="payment-qrs" element={<PaymentQrs />} />
         <Route path="portal" element={<AdminPortal />} />
@@ -98,6 +118,7 @@ function AppRoutes() {
         <Route path="audit" element={<AuditLog />} />
         <Route path="periods" element={<Periods />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="ads" element={<AdsAdmin />} />
       </Route>
 
       <Route path="*" element={<Home />} />

@@ -7,9 +7,12 @@ import {
 } from "lucide-react";
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import { LocalAdsRail } from "../../components/LocalAds";
+import { useAdsOpen } from "../../lib/adClicks";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 import {
+  SPONSORS_2026,
   PREVIOUS_SPONSORS,
   SPONSORSHIP_DECK_PAGES,
   SPONSORSHIP_DECK_PDF,
@@ -136,6 +139,7 @@ export default function Sponsors() {
     []
   );
 
+  const adsOpen = useAdsOpen();
   const sp = cfg?.sponsorship || {};
   const org = cfg?.organisation || {};
   const bank = org.bank_account || {};
@@ -171,9 +175,15 @@ export default function Sponsors() {
               >
                 <BookOpen className="h-5 w-5" /> View sponsorship deck
               </Button>
-              <Link to="/donate">
-                <Button variant="outline" size="lg">Donate</Button>
-              </Link>
+              {adsOpen ? (
+                <Link to="/promote">
+                  <Button variant="outline" size="lg" data-testid="sponsors-advertise-cta">Promote your neighbourhood business</Button>
+                </Link>
+              ) : (
+                <Link to="/donate">
+                  <Button variant="outline" size="lg">Donate</Button>
+                </Link>
+              )}
             </div>
           </motion.div>
         </div>
@@ -248,6 +258,33 @@ export default function Sponsors() {
           </p>
         </section>
       )}
+
+      <LocalAdsRail where="sponsors" eyebrow="Local business ads" title="Neighbourhood businesses"
+        blurb="Smaller budget? Shops and services can promote themselves on this site from ₹1,000." />
+
+      {/* 2026 sponsors */}
+      <section id="sponsors-2026" className="scroll-mt-24 border-y border-sun-400/25 bg-white" data-testid="sponsors-2026">
+        <div className="mx-auto max-w-7xl px-5 py-14">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-vermilion-500">Thank you</p>
+          <h2 className="mt-2 font-display text-4xl text-brown-900">Our 2026 sponsors</h2>
+          <p className="mt-2 max-w-2xl text-sm text-brown-800/65">
+            Brands standing with One 10 Durgotsav this year — with heartfelt gratitude from the Event Organising Committee.
+          </p>
+          <div className="mt-8 grid grid-cols-2 items-center gap-x-6 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {SPONSORS_2026.map((s) => (
+              <div key={s.id} className="flex flex-col items-center gap-2 text-center" data-testid={`sponsor-2026-${s.id}`}>
+                <img
+                  src={s.src}
+                  alt={s.name}
+                  className="h-14 w-full max-w-[160px] object-contain sm:h-16"
+                  loading="lazy"
+                />
+                <span className="text-[11px] text-brown-800/55">{s.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* #9 Sponsorship deck */}
       <section id="deck" className="scroll-mt-24 border-y border-sun-400/25 bg-gradient-to-b from-white to-sun-50">

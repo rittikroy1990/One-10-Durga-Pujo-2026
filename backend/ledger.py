@@ -117,3 +117,22 @@ async def account_balance(code: str) -> int:
     async for r in db.journal_entries.aggregate(pipeline):
         return r["debit"] - r["credit"]
     return 0
+
+
+async def fund_balances() -> dict:
+    """Where the money sits, in paise. Bank opening balances live on bank_accounts (no equity account)."""
+    openings = {}
+    async for b in db.bank_accounts.find({}, {"_id": 0}):
+        openings[b.get("account_code") or "1001"] = openings.get(b.get("account_code") or "1001", 0) + \
+            int(b.get("opening_balance_paise") or 0)
+    bal = {c: await account_balance(c) for c in ("1001", "1002", "1003", "1004", "1210", "2100")}
+    icici = openings.get("1001", 0) + bal["1001"]
+    yes = openings.get("1004", 0) + bal["1004"]
+    return {
+        "icici": icici, "yes": yes, "bank": icici + yes,
+        "cash": bal["1002"], "gateway": bal["1003"],
+        "held_by_members": bal["1210"],
+        "unidentified_deposits": -bal["2100"],
+        "opening_bank": openings.get("1001", 0) + openings.get("1004", 0),
+        "total": icici + yes + bal["1002"] + bal["1003"] + bal["1210"],
+    }

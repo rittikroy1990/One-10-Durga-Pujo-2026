@@ -1,7 +1,9 @@
 """Emergent object storage wrapper with DB-backed metadata + versioning + content hashing."""
 import hashlib
+import logging
 import os
 import uuid
+from pathlib import Path
 
 import requests
 
@@ -14,6 +16,12 @@ EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "one10-durgotsav"
 
 _storage_key = None
+logger = logging.getLogger("one10.storage")
+
+# Used when the object store isn't configured or refuses the upload. Must stay outside the web root:
+# these are residents' payment proofs.
+LOCAL_DIR = Path(os.environ.get("PRIVATE_UPLOAD_DIR") or Path(__file__).resolve().parent / "private_uploads")
+LOCAL_PREFIX = "local:"
 
 MIME_TYPES = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif",
@@ -21,9 +29,12 @@ MIME_TYPES = {
     "csv": "text/csv", "txt": "text/plain",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "xls": "application/vnd.ms-excel",
+    "mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
 }
 ALLOWED_EXT = set(MIME_TYPES.keys())
+VIDEO_EXT = {"mp4", "webm", "mov"}
 MAX_SIZE = 15 * 1024 * 1024  # 15 MB
+MAX_VIDEO_SIZE = 50 * 1024 * 1024
 
 
 def init_storage(force: bool = False):
@@ -36,7 +47,31 @@ def init_storage(force: bool = False):
     return _storage_key
 
 
+def _local_file(path: str) -> Path:
+    target = (LOCAL_DIR / path).resolve()
+    if LOCAL_DIR.resolve() not in target.parents:
+        raise ValueError("Invalid storage path")
+    return target
+
+
+def _put_local(path: str, data: bytes) -> dict:
+    target = _local_file(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    return {"path": LOCAL_PREFIX + path, "size": len(data)}
+
+
 def put_object(path: str, data: bytes, content_type: str) -> dict:
+    if not EMERGENT_KEY:
+        return _put_local(path, data)
+    try:
+        return _put_remote(path, data, content_type)
+    except Exception as e:
+        logger.warning("Object store upload failed, saving locally: %s", e)
+        return _put_local(path, data)
+
+
+def _put_remote(path: str, data: bytes, content_type: str) -> dict:
     key = init_storage()
     resp = requests.put(f"{STORAGE_URL}/objects/{path}",
                         headers={"X-Storage-Key": key, "Content-Type": content_type},
@@ -51,6 +86,10 @@ def put_object(path: str, data: bytes, content_type: str) -> dict:
 
 
 def get_object(path: str):
+    if path.startswith(LOCAL_PREFIX):
+        target = _local_file(path[len(LOCAL_PREFIX):])
+        ext = target.suffix.lstrip(".").lower()
+        return target.read_bytes(), MIME_TYPES.get(ext, "application/octet-stream")
     key = init_storage()
     resp = requests.get(f"{STORAGE_URL}/objects/{path}", headers={"X-Storage-Key": key}, timeout=60)
     if resp.status_code == 404:
@@ -66,8 +105,9 @@ async def save_document(*, data: bytes, filename: str, doc_type: str, linked_typ
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "bin"
     if ext not in ALLOWED_EXT:
         raise ValueError(f"File type .{ext} not allowed")
-    if len(data) > MAX_SIZE:
-        raise ValueError("File exceeds maximum size (15 MB)")
+    limit = MAX_VIDEO_SIZE if ext in VIDEO_EXT else MAX_SIZE
+    if len(data) > limit:
+        raise ValueError(f"File exceeds maximum size ({limit // (1024 * 1024)} MB)")
     content_type = content_type or MIME_TYPES.get(ext, "application/octet-stream")
     content_hash = hashlib.sha256(data).hexdigest()
     doc_id = f"doc_{uuid.uuid4().hex[:12]}"

@@ -8,6 +8,7 @@ import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import TechSupportBrand from "../../components/TechSupportBrand";
 import { formatPaise } from "../../lib/utils";
+import { VEG_PROMISE } from "../../lib/food";
 
 const DIRECTORY = [
   { to: "/", label: "Home", blurb: "Campaign overview, venue & how to join", icon: HelpCircle },
@@ -276,6 +277,9 @@ export default function Faq() {
               your tower / flat details. Follow any payment instructions shown on that page.
             </p>
           </FaqItem>
+          <FaqItem q="How is the veg food prepared?" id="faq-food-veg">
+            <p>{VEG_PROMISE}</p>
+          </FaqItem>
         </section>
 
         {/* Participate & sponsors */}
@@ -289,6 +293,16 @@ export default function Faq() {
             </p>
           </FaqItem>
 
+          <FaqItem q="How do I promote my business?" id="faq-advertise">
+            <p>
+              Shops, home kitchens, tutors and services — inside One Ten or from the neighbourhood — can buy a prepaid
+              promotion from ₹1,000 (the Neighbourhood Card is free for flats with a paid 2026 Pujo subscription) on{" "}
+              <PageLink to="/promote">Promote your business</PageLink>. Promotions run till 30 Nov 2026. Apply, pay by UPI, upload your creative,
+              and the committee reviews it before it goes live on the Home page and the{" "}
+              <PageLink to="/local-businesses">Local businesses</PageLink> directory. You get a private status link to
+              track or fix your application.
+            </p>
+          </FaqItem>
           <FaqItem q="Where are sponsorship packages?" id="faq-sponsors">
             <p>
               See <PageLink to="/sponsors">Sponsors</PageLink> for partnership options and committee contact for

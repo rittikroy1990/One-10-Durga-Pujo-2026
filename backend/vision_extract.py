@@ -45,6 +45,16 @@ EXPECTED_ORG_NAMES = (
     "Events Organising Committee of One10",
 )
 
+# Committee UPI IDs (subscription / donation account and food account). A screenshot showing one of these
+# as the payee is accepted even when the app truncates the payee name ("M S One 10 Event Organisi...").
+KNOWN_PAYEE_VPAS = (
+    "8217011245.eazypay@icici",
+    "yespay.bizsbiz290102@yesbankltd",
+)
+
+# A truncated payee name must keep at least this much of a committee name to count.
+TRUNCATED_NAME_MIN_CHARS = 15
+
 # Obvious non-committee merchants — hard reject even before fuzzy match.
 # Protects against LLM hallucinations / partial OCR when the screenshot is clearly
 # a food / shopping / personal payment app receipt.
@@ -78,6 +88,7 @@ Return ONLY valid JSON with these keys:
   "amount_rupees": number or null,
   "payee_name": string or null,
   "org_name": string or null,
+  "payee_vpa": string or null,
   "status": "success" | "failed" | "pending" | "unknown",
   "confidence": number between 0 and 1,
   "notes": string
@@ -91,6 +102,9 @@ Focus on ONLY these two fields (do not invent UTR / UPI reference numbers):
    NEVER invent or substitute our committee name. If the screenshot says Swiggy, Amazon,
    Zomato, a person, or any other merchant, return that exact payee string.
    If misspelled on screen (Organising / Organization / Committte), still return what you see.
+3) payee_vpa — the payee's UPI ID if shown (usually under the payee name, e.g. "8217011245.eazypay@icici").
+   Copy it exactly, keeping any masking stars (e.g. "*****1245.eazypay@icici"). Do not guess it.
+- If the payee name is cut off on screen (e.g. ends with "..."), return it as shown — do not complete it.
 - status: success / failed / pending / unknown from the screenshot.
 - Do NOT extract or invent UTR / UPI / Google transaction IDs — leave them out of notes unless needed.
 - If unclear, use null and lower confidence.
@@ -165,6 +179,7 @@ def _fold(text: str) -> str:
     text = text.lower()
     # Common OCR / spelling variants for our committee name
     replacements = (
+        ("organis", "organiz"),
         ("organisation", "organization"),
         ("organising", "organizing"),
         ("committtee", "committee"),
@@ -205,6 +220,37 @@ def _blocked_merchant(folded: str) -> Optional[str]:
     return None
 
 
+def vpa_match(candidate: str | None, known: tuple[str, ...] | None = None) -> Optional[str]:
+    """The committee UPI ID a screenshot's payee VPA refers to, allowing app masking ("*****1245.eazypay@icici")."""
+    raw = re.sub(r"\s+", "", (candidate or "")).lower()
+    if "@" not in raw:
+        return None
+    for vpa in known or KNOWN_PAYEE_VPAS:
+        target = vpa.lower()
+        if raw == target:
+            return vpa
+        if "*" in raw or "x" in raw.split("@", 1)[0]:
+            visible = re.sub(r"^[*x•]+", "", raw)
+            # Only the start of the handle may be masked; the visible tail must still be specific.
+            if len(visible.split("@", 1)[0]) >= 4 and target.endswith(visible):
+                return vpa
+    return None
+
+
+def _truncated_prefix_match(folded: str, names: tuple[str, ...]) -> Optional[str]:
+    """A payee name cut off by the app is accepted when it is the start of a committee name."""
+    if len(folded) < TRUNCATED_NAME_MIN_CHARS:
+        return None
+    # _fold rewrites whole phrases ("event organizing committee" → "events …") that a cut-off name never reaches.
+    def plain(text: str) -> str:
+        return re.sub(r"\bevents\b", "event", text)
+    head = plain(folded)
+    for name in names:
+        if plain(_fold(name)).startswith(head):
+            return name
+    return None
+
+
 def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None = None) -> dict:
     """Fuzzy spell-check: does candidate look like One10 Events Organising Committee?
 
@@ -223,7 +269,7 @@ def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None
             "blocked": None,
         }
 
-    folded = _fold(raw)
+    folded = _fold(re.sub(r"(\.{2,}|…)\s*$", "", raw))
     blocked = _blocked_merchant(folded)
     if blocked:
         return {
@@ -269,7 +315,14 @@ def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None
     high_confidence = has_one10 and has_event and has_org and best_score >= 0.90
 
     ok = bool((token_gate or high_confidence) and best_score >= ORG_FUZZY_MIN)
-    if not has_one10:
+    truncated_of = None
+    if not ok and (has_one10 and has_event or has_event and has_org):
+        truncated_of = _truncated_prefix_match(folded, names)
+        if truncated_of:
+            ok, best_name = True, truncated_of
+    if truncated_of:
+        reason = "matched (payee name truncated on screenshot)"
+    elif not has_one10 and not ok:
         reason = "screenshot payee is not One10 Events Organising Committee"
     elif not (token_gate or high_confidence):
         reason = "organisation name on screenshot is incomplete or misspelled beyond tolerance"
@@ -289,7 +342,8 @@ def org_name_match(candidate: str | None, expected_names: tuple[str, ...] | None
     }
 
 
-def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jpeg") -> dict:
+def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jpeg",
+                               known_vpas: tuple[str, ...] | None = None) -> dict:
     """Call Emergent or OpenAI vision. Returns structured extract + org match. Never raises for business use."""
     if not EMERGENT_KEY and not OPENAI_KEY:
         return {
@@ -324,6 +378,7 @@ def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jp
         amount_paise = amount_to_paise(parsed.get("amount_rupees"))
         payee_name = (parsed.get("payee_name") or "").strip() or None
         org_name = (parsed.get("org_name") or "").strip() or None
+        payee_vpa = (parsed.get("payee_vpa") or "").strip() or None
         # Prefer payee_name (UPI "Sent to"); also try org_name and the better of both.
         candidates = [c for c in (payee_name, org_name) if c]
         if payee_name and org_name and payee_name != org_name:
@@ -335,6 +390,15 @@ def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jp
                 org_match = m
             if m.get("ok"):
                 break
+        if not org_match.get("ok") and not org_match.get("blocked"):
+            for cand in (payee_vpa, payee_name, org_name):
+                vpa = vpa_match(cand, known_vpas)
+                if vpa:
+                    org_match = {
+                        "ok": True, "score": 1.0, "matched_against": vpa, "normalized": cand,
+                        "reason": "matched committee UPI ID", "token_gate": True, "blocked": None,
+                    }
+                    break
         return {
             "ok": True,
             "error": None,
@@ -345,6 +409,7 @@ def extract_payment_screenshot(image_bytes: bytes, content_type: str = "image/jp
             "payer_name": parsed.get("payer_name"),
             "payee_name": payee_name,
             "org_name": org_name,
+            "payee_vpa": payee_vpa,
             "org_match": org_match,
             "status": parsed.get("status") or "unknown",
             "confidence": float(parsed.get("confidence") or 0),

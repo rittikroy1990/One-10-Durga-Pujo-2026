@@ -11,7 +11,7 @@ from db import db, new_id, clean
 from config import get_settings, get_active_cycle_id, list_campaigns, DEFAULT_SETTINGS
 from util import iso, now_utc, fmt_inr, to_ist
 from audit import audit
-from ledger import trial_balance, account_balance
+from ledger import trial_balance, account_balance, fund_balances
 from auth import (get_current_user, exchange_session, login_with_password, require, ROLES, ROLE_PERMISSIONS,
                   sod_conflicts, user_permissions)
 from docs import export_csv, export_xlsx, export_pdf
@@ -746,22 +746,78 @@ async def evidence_completeness(user: dict = Depends(require("audit:read"))):
 
 
 # =============================================================== DASHBOARDS
+def receipt_buckets(r: dict) -> dict:
+    """Split one receipt into subscription heads / donation / sponsorship / food by account code."""
+    out = {"4001": 0, "4002": 0, "4003": 0, "donation": 0, "sponsorship": 0, "food": 0}
+    comps = r.get("components") or []
+    for c in comps:
+        amt, code = int(c.get("amount_paise") or 0), str(c.get("account_code") or "")
+        if c.get("code") == "FOOD" or code == "4400":
+            out["food"] += amt
+        elif code in ("4001", "4002", "4003"):
+            out[code] += amt
+        elif code == "4200":
+            out["sponsorship"] += amt
+        else:
+            out["donation"] += amt
+    out["donation"] += int(r.get("donation_amount") or 0)
+    if not comps and r.get("sponsorship_amount"):
+        out["sponsorship"] += int(r["sponsorship_amount"])
+    rest = int(r.get("total_amount") or 0) - sum(out.values())
+    if rest:
+        kind = r.get("kind") or "subscription"
+        out["food" if kind == "food_subscription" else "sponsorship" if kind == "sponsorship"
+            else "donation" if kind == "donation" else "4001"] += rest
+    out["subscription"] = out["4001"] + out["4002"] + out["4003"]
+    return out
+
+
+def receipt_paid_on(r: dict) -> str:
+    if r.get("paid_on"):
+        return r["paid_on"]
+    try:
+        return to_ist(datetime.fromisoformat(r["issued_at"])).strftime("%Y-%m-%d")
+    except Exception:
+        return (r.get("issued_at") or "")[:10]
+
+
 @router.get("/dashboards/collection")
 async def dashboard_collection(user: dict = Depends(require("reports:read"))):
     settings = await get_settings()
     eligible = settings["eligibility"]["eligible_occupied_households"]
     registered = await db.households.count_documents({"is_deleted": {"$ne": True}})
-    paid_ids = await db.receipts.distinct("household_id", {"status": "issued"})
-    paid = len(paid_ids)
+    paid_ids = await db.receipts.distinct("household_id", {"status": "issued", "kind": "subscription"})
+    paid = len([h for h in paid_ids if h])
+    donor_count = await db.receipts.count_documents({"status": "issued", "kind": "donation"})
+    sponsor_count = await db.receipts.count_documents({"status": "issued", "kind": "sponsorship"})
+    food_count = await db.receipts.count_documents({"status": "issued", "kind": "food_subscription"})
     pending = await db.subscription_intents.count_documents({"status": "payment_pending"})
+    _buckets, _paid_on = receipt_buckets, receipt_paid_on
 
-    base_total = donation_total = 0
+    heads = {"4001": 0, "4002": 0, "4003": 0}
+    donation_total = sponsorship_total = food_total = 0
     method_totals = {}
-    async for r in db.receipts.find({"status": "issued"}):
-        base_total += r.get("base_amount", 0)
-        donation_total += r.get("donation_amount", 0)
-        m = r.get("method", "other")
-        method_totals[m] = method_totals.get(m, 0) + r.get("total_amount", 0)
+    trend = {}
+    receipts = await db.receipts.find({"status": "issued"}, {"_id": 0}).to_list(5000)
+    for r in receipts:
+        b = _buckets(r)
+        r["_b"] = b
+        for h in heads:
+            heads[h] += b[h]
+        donation_total += b["donation"]
+        sponsorship_total += b["sponsorship"]
+        food_total += b["food"]
+        puja = int(r.get("total_amount") or 0) - b["food"]
+        if puja:
+            m = r.get("method", "other")
+            method_totals[m] = method_totals.get(m, 0) + puja
+        day = _paid_on(r)
+        t = trend.setdefault(day, {"date": day, "subscription": 0, "donation": 0, "sponsorship": 0, "food": 0})
+        t["subscription"] += b["4001"] + b["4002"] + b["4003"]
+        t["donation"] += b["donation"]
+        t["sponsorship"] += b["sponsorship"]
+        t["food"] += b["food"]
+    base_total = sum(heads.values())
 
     # by tower (One10 has Towers 1–11 only)
     towers = await db.towers.find(
@@ -777,26 +833,31 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
     by_tower = []
     for t in towers:
         reg = await db.households.count_documents({"tower_id": t["id"], "is_deleted": {"$ne": True}})
-        hh_ids = await db.households.distinct("id", {"tower_id": t["id"]})
-        pd = 0
-        amount = 0
-        async for r in db.receipts.find({"household_id": {"$in": hh_ids}, "status": "issued"}):
-            pd += 1
-            amount += int(r.get("total_amount") or 0)
+        hh_ids = set(await db.households.distinct("id", {"tower_id": t["id"]}))
+        subscribed, sub_amt, don_amt = set(), 0, 0
+        for r in receipts:
+            if r.get("household_id") not in hh_ids:
+                continue
+            b = r["_b"]
+            if r.get("kind") == "subscription":
+                subscribed.add(r["household_id"])
+            sub_amt += b["4001"] + b["4002"] + b["4003"]
+            don_amt += b["donation"]
         by_tower.append({
             "tower": t["name"],
             "tower_id": t["id"],
             "registered": reg,
-            "paid": pd,
-            "amount": amount,
+            "paid": len(subscribed),
+            "amount": sub_amt + don_amt,
+            "subscription": sub_amt,
+            "donation": don_amt,
         })
 
-    # daily trend
-    trend = {}
-    async for r in db.receipts.find({"status": "issued"}):
-        day = (r.get("issued_at", "") or "")[:10]
-        trend[day] = trend.get(day, 0) + r.get("total_amount", 0)
-    daily = [{"date": k, "amount": v} for k, v in sorted(trend.items())]
+    daily = []
+    for k in sorted(d for d in trend if d):
+        row = trend[k]
+        row["amount"] = row["subscription"] + row["donation"] + row["sponsorship"]
+        daily.append(row)
 
     dup = await db.duplicate_payments.count_documents({})
     refunds = await db.refunds.count_documents({"status": {"$in": ["requested", "processing"]}})
@@ -806,7 +867,15 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
         "unpaid": max(eligible - paid, 0),
         "collection_rate_pct": round((paid / eligible) * 100, 1) if eligible else 0,
         "base_total": base_total, "donation_total": donation_total,
-        "grand_total": base_total + donation_total,
+        "sponsorship_total": sponsorship_total, "food_total": food_total,
+        "grand_total": base_total + donation_total + sponsorship_total,
+        "subscription_heads": [
+            {"code": "4001", "label": "Khuti / Durga / Lakshmi", "amount": heads["4001"]},
+            {"code": "4002", "label": "Kali Puja", "amount": heads["4002"]},
+            {"code": "4003", "label": "Bijoya Sammilani", "amount": heads["4003"]},
+        ],
+        "counts": {"subscriptions": paid, "donations": donor_count, "sponsors": sponsor_count,
+                   "food_subscriptions": food_count},
         "method_totals": method_totals, "by_tower": by_tower, "daily": daily,
         "exceptions": {"duplicate_payments": dup, "refunds_open": refunds, "reconciliation_required": recon},
     }
@@ -814,31 +883,67 @@ async def dashboard_collection(user: dict = Depends(require("reports:read"))):
 
 @router.get("/dashboards/financial")
 async def dashboard_financial(user: dict = Depends(require("reports:read"))):
-    bank = await db.bank_accounts.find_one({"id": "bank_main"})
-    opening = bank.get("opening_balance_paise", 0) if bank else 0
+    funds = await fund_balances()
     receipts_total = 0
     async for r in db.receipts.find({"status": "issued"}):
         receipts_total += r.get("total_amount", 0)
     payments_total = 0
-    async for v in db.payment_vouchers.find({}):
+    async for v in db.payment_vouchers.find({"status": {"$ne": "voided"}}):
         payments_total += v.get("amount_paise", 0)
-    bank_bal = await account_balance("1001")
-    cash_bal = await account_balance("1002")
-    gateway_bal = await account_balance("1003")
+    expenses_by_head = []
+    async for a in db.chart_of_accounts.find({"type": "expense"}, {"_id": 0, "code": 1, "name": 1}):
+        amt = await account_balance(a["code"])
+        if amt:
+            expenses_by_head.append({"code": a["code"], "name": a["name"], "amount": amt})
+    expenses_by_head.sort(key=lambda x: -x["amount"])
+    expenses_paid = sum(x["amount"] for x in expenses_by_head)
     advances_outstanding = 0
     async for a in db.advances.find({"status": "outstanding"}):
         advances_outstanding += a.get("amount_paise", 0)
     payables = 0
     async for inv in db.vendor_invoices.find({"status": {"$in": ["received", "review"]}}):
         payables += inv.get("amount_paise", 0)
+    snap = await db.ledger_snapshots.find_one({}, {"_id": 0}, sort=[("recorded_at", -1)])
+    ledger_check = None
+    if snap:
+        ledger_funds = snap["icici"] + snap["yes"] + snap["cash"]
+        portal_funds = funds["icici"] + funds["yes"] + funds["cash"]
+        rows = [
+            ("icici", "ICICI bank", snap["icici"], funds["icici"]),
+            ("yes", "YES Bank", snap["yes"], funds["yes"]),
+            ("cash", "Cash in hand", snap["cash"], funds["cash"]),
+            ("total_funds", "Total funds", ledger_funds, portal_funds),
+            ("expenses_paid", "Expenses paid", snap["expenses_paid"], expenses_paid),
+        ]
+        notes = snap.get("notes") or {}
+        ledger_check = {
+            "source_file": snap.get("source_file"), "recorded_at": snap.get("recorded_at"),
+            "as_of_bank": snap.get("as_of_bank"), "as_of_cash": snap.get("as_of_cash"),
+            "rows": [{"key": k, "label": label, "ledger": lv, "portal": pv, "difference": pv - lv,
+                      "note": notes.get(k, "")} for k, label, lv, pv in rows],
+            "expenses_committed": snap.get("expenses_committed"),
+            "expenses_due": snap.get("expenses_due"),
+            "net_after_dues": ledger_funds - (snap.get("expenses_due") or 0),
+            "open_items": snap.get("open_items") or [],
+            "bank_series": snap.get("bank_series") or [],
+            "cash_series": snap.get("cash_series") or [],
+            "statement_verified": snap.get("statement_verified"),
+            "commitments": snap.get("commitments") or [],
+            "pledges": snap.get("pledges"),
+        }
     return {
-        "opening_bank": opening,
+        "opening_bank": funds["opening_bank"],
         "verified_receipts": receipts_total,
         "total_payments": payments_total,
-        "bank_balance": opening + bank_bal, "cash_balance": cash_bal,
-        "gateway_clearing": gateway_bal,
-        "current_balance": opening + bank_bal + cash_bal + gateway_bal,
+        "bank_balance": funds["bank"], "cash_balance": funds["cash"],
+        "icici_balance": funds["icici"], "yes_balance": funds["yes"],
+        "held_by_members": funds["held_by_members"],
+        "unidentified_deposits": funds["unidentified_deposits"],
+        "gateway_clearing": funds["gateway"],
+        "current_balance": funds["total"],
+        "expenses_paid": expenses_paid, "expenses_by_head": expenses_by_head,
         "advances_outstanding": advances_outstanding, "payables": payables,
+        "ledger_check": ledger_check,
     }
 
 
@@ -1008,13 +1113,12 @@ async def period_reopen(pc_id: str, body: dict = Body(...), request: Request = N
 @router.post("/public-report/generate")
 async def generate_public_report(body: dict = Body(default={}), request: Request = None,
                                  user: dict = Depends(require("public_report:publish"))):
-    base_total = donation_total = 0
+    base_total = donation_total = sponsor_total = 0
     async for r in db.receipts.find({"status": "issued"}):
-        base_total += r.get("base_amount", 0)
-        donation_total += r.get("donation_amount", 0)
-    sponsor_total = 0
-    async for s in db.sponsors.find({"is_deleted": {"$ne": True}}):
-        sponsor_total += int(s.get("cash_amount_paise", 0) or 0)
+        b = receipt_buckets(r)
+        base_total += b["subscription"]
+        donation_total += b["donation"]
+        sponsor_total += b["sponsorship"]
     expenses = {}
     async for j in db.journal_entries.find({}):
         for ln in j["lines"]:
@@ -1022,9 +1126,7 @@ async def generate_public_report(body: dict = Body(default={}), request: Request
                 acc = await db.chart_of_accounts.find_one({"code": ln["account_code"]})
                 name = acc["name"] if acc else ln["account_code"]
                 expenses[name] = expenses.get(name, 0) + ln["debit"] - ln["credit"]
-    bank = await db.bank_accounts.find_one({"id": "bank_main"})
-    opening = bank.get("opening_balance_paise", 0) if bank else 0
-    closing = opening + await account_balance("1001") + await account_balance("1002") + await account_balance("1003")
+    closing = (await fund_balances())["total"]
     report = {"id": new_id("pubrep"), "subscription_total": base_total, "donation_total": donation_total,
               "sponsor_total": sponsor_total, "expenses_by_category": expenses, "closing_balance": closing,
               "note": body.get("note", ""), "published": False, "generated_by": user["user_id"],
@@ -1064,24 +1166,37 @@ async def public_report():
 
 # =============================================================== REPORTS + EXPORTS
 async def _rep_receipt_register():
+    from docs import receipt_is_bank_verified
+
     rows = []
-    async for r in db.receipts.find({}, {"_id": 0}).sort("issued_at", 1):
-        rows.append([r["receipt_no"], r.get("payer_name"), r.get("tower_name"), r.get("flat_number"),
-                     fmt_inr(r.get("base_amount", 0)), fmt_inr(r.get("donation_amount", 0)),
-                     fmt_inr(r.get("total_amount", 0)), r.get("method"), r.get("status"),
-                     r.get("refund_status", "")])
-    return ("Receipt Register", ["Receipt No", "Payer", "Tower", "Flat", "Base", "Donation",
-                                 "Total", "Method", "Status", "Refund"], rows)
+    async for r in db.receipts.find({}, {"_id": 0}).sort("receipt_no", 1):
+        b = receipt_buckets(r)
+        rows.append([r["receipt_no"], receipt_paid_on(r), r.get("kind") or "subscription", r.get("payer_name"),
+                     r.get("tower_name"), r.get("flat_number"), fmt_inr(b["subscription"]), fmt_inr(b["donation"]),
+                     fmt_inr(b["sponsorship"]), fmt_inr(b["food"]), fmt_inr(r.get("total_amount", 0)),
+                     r.get("method"), "Yes" if receipt_is_bank_verified(r) else "No",
+                     r.get("bank_statement_ref") or "", r.get("status"), r.get("refund_status", "")])
+    return ("Receipt Register", ["Receipt No", "Paid On", "Kind", "Payer", "Tower", "Flat", "Subscription",
+                                 "Donation", "Sponsorship", "Food", "Total", "Method", "Bank Verified",
+                                 "Statement Ref", "Status", "Refund"], rows)
 
 
 async def _rep_household_register():
+    by_hh = {}
+    async for r in db.receipts.find({"status": "issued", "household_id": {"$nin": [None, ""]}}, {"_id": 0}):
+        b = receipt_buckets(r)
+        x = by_hh.setdefault(r["household_id"], {"sub": 0, "don": 0, "food": 0})
+        x["sub"] += b["subscription"]
+        x["don"] += b["donation"]
+        x["food"] += b["food"]
     rows = []
-    async for h in db.households.find({"is_deleted": {"$ne": True}}, {"_id": 0}):
-        paid = await db.receipts.count_documents({"household_id": h["id"], "status": "issued"})
+    async for h in db.households.find({"is_deleted": {"$ne": True}}, {"_id": 0}).sort([("tower_name", 1), ("flat_number", 1)]):
+        x = by_hh.get(h["id"], {"sub": 0, "don": 0, "food": 0})
         rows.append([h.get("tower_name"), h.get("flat_number"), h.get("primary_name"),
-                     h.get("occupancy_type"), h.get("family_members"), "Yes" if paid else "No"])
+                     h.get("occupancy_type"), h.get("family_members"), "Yes" if x["sub"] else "No",
+                     fmt_inr(x["sub"]), fmt_inr(x["don"]), fmt_inr(x["food"])])
     return ("Household Subscription Register", ["Tower", "Flat", "Primary Contact", "Occupancy",
-                                               "Members", "Paid"], rows)
+                                               "Members", "Subscribed", "Subscription", "Donation", "Food"], rows)
 
 
 async def _rep_general_ledger():
@@ -1114,20 +1229,75 @@ async def _rep_collection_by_tower():
     rows = []
     for t in towers:
         hh_ids = await db.households.distinct("id", {"tower_id": t["id"]})
-        total = 0
+        registered = await db.households.count_documents({"tower_id": t["id"], "is_deleted": {"$ne": True}})
+        subscribed, sub, don, food = set(), 0, 0, 0
         async for r in db.receipts.find({"household_id": {"$in": hh_ids}, "status": "issued"}):
-            total += r.get("total_amount", 0)
-        pd = await db.receipts.count_documents({"household_id": {"$in": hh_ids}, "status": "issued"})
-        rows.append([t["name"], pd, fmt_inr(total)])
-    return ("Collection by Tower", ["Tower", "Paid Households", "Total Collected"], rows)
+            b = receipt_buckets(r)
+            if r.get("kind") == "subscription":
+                subscribed.add(r["household_id"])
+            sub += b["subscription"]
+            don += b["donation"]
+            food += b["food"]
+        rows.append([t["name"], registered, len(subscribed), fmt_inr(sub), fmt_inr(don),
+                     fmt_inr(sub + don), fmt_inr(food)])
+    return ("Collection by Tower", ["Tower", "Registered Homes", "Subscribed Homes", "Subscription",
+                                    "Donations", "Puja Total", "Food (separate)"], rows)
 
 
 async def _rep_voucher_register():
+    names = {a["code"]: a["name"] async for a in db.chart_of_accounts.find({}, {"_id": 0, "code": 1, "name": 1})}
+    claims = {e["id"]: e async for e in db.expense_claims.find({}, {"_id": 0, "id": 1, "date": 1, "purpose": 1})}
     rows = []
-    async for v in db.payment_vouchers.find({}, {"_id": 0}).sort("created_at", 1):
-        rows.append([v["voucher_no"], v.get("vendor_id"), fmt_inr(v.get("amount_paise", 0)),
-                     v.get("bank_reference", ""), v.get("approved_by")])
-    return ("Payment Voucher Register", ["Voucher", "Vendor", "Amount", "Bank Ref", "Approved By"], rows)
+    async for v in db.payment_vouchers.find({}, {"_id": 0}).sort("voucher_no", 1):
+        c = claims.get(v.get("expense_id"), {})
+        rows.append([v["voucher_no"], c.get("date") or v.get("created_at", "")[:10], v.get("payee") or v.get("vendor_id"),
+                     c.get("purpose", ""), names.get(v.get("account_code"), v.get("account_code", "")),
+                     fmt_inr(v.get("amount_paise", 0)), v.get("paid_from", ""), v.get("bank_reference", ""),
+                     v.get("status", ""), v.get("approved_by")])
+    return ("Payment Voucher Register", ["Voucher", "Date", "Payee", "Purpose", "Head", "Amount", "Paid From",
+                                         "Bank Ref", "Status", "Approved By"], rows)
+
+
+async def _rep_bank_statement():
+    rows = []
+    async for ln in db.bank_statement_lines.find({}, {"_id": 0}).sort([("bank_account_id", 1), ("sno", 1)]):
+        cr = ln["amount_paise"] if ln.get("type") != "debit" else 0
+        dr = ln["amount_paise"] if ln.get("type") == "debit" else 0
+        rows.append([ln.get("sno", ""), ln.get("date"), ln.get("txn", ""), ln.get("description") or ln.get("ref"),
+                     fmt_inr(dr) if dr else "", fmt_inr(cr) if cr else "",
+                     fmt_inr(ln["balance_paise"]) if ln.get("balance_paise") is not None else "",
+                     "Yes" if ln.get("matched") else "No", ln.get("match_label", "")])
+    return ("Bank Statement Reconciliation", ["S.No", "Date", "Txn ID", "Description", "Debit", "Credit",
+                                             "Balance", "Matched", "Matched To"], rows)
+
+
+async def _rep_unidentified_deposits():
+    rows = []
+    async for ln in db.bank_statement_lines.find({"matched": False, "type": {"$ne": "debit"}}, {"_id": 0}).sort("sno", 1):
+        rows.append([ln.get("date"), ln.get("txn", ""), fmt_inr(ln["amount_paise"]),
+                     ln.get("description") or ln.get("ref"), ln.get("hint", "")])
+    return ("Unidentified Deposits", ["Date", "Txn ID", "Amount", "Bank Description", "Clue"], rows)
+
+
+async def _latest_snapshot() -> dict:
+    return await db.ledger_snapshots.find_one({}, {"_id": 0}, sort=[("recorded_at", -1)]) or {}
+
+
+async def _rep_vendor_commitments():
+    snap = await _latest_snapshot()
+    rows = [[c.get("sl"), c.get("vendor"), c.get("head"), c.get("group"), "Planned" if c.get("planned") else "Agreed",
+             fmt_inr(c["committed"]), fmt_inr(c["paid"]), fmt_inr(c["due"])] for c in snap.get("commitments") or []]
+    return ("Vendor Commitments (treasurer's expense ledger)", ["Sl", "Vendor", "Head", "Group", "Status",
+                                                                 "Committed", "Paid", "Due"], rows)
+
+
+async def _rep_donor_pledges():
+    snap = await _latest_snapshot()
+    p = snap.get("pledges") or {}
+    rows = [[x["name"], x.get("flat", ""), fmt_inr(x["proposed"]), fmt_inr(x["received"]),
+             fmt_inr(x["proposed"] - x["received"]), x.get("status", "")] for x in p.get("pending") or []]
+    return ("Donor Pledges Still Due (donations tracker)", ["Donor", "Flat", "Pledged", "Received", "Due",
+                                                            "Status"], rows)
 
 
 async def _rep_refund_register():
@@ -1188,6 +1358,10 @@ REPORTS = {
     "general_ledger": _rep_general_ledger,
     "trial_balance": _rep_trial_balance,
     "voucher_register": _rep_voucher_register,
+    "bank_statement": _rep_bank_statement,
+    "unidentified_deposits": _rep_unidentified_deposits,
+    "vendor_commitments": _rep_vendor_commitments,
+    "donor_pledges": _rep_donor_pledges,
     "refund_register": _rep_refund_register,
     "advances_ageing": _rep_advances_ageing,
     "sod_report": _rep_sod,

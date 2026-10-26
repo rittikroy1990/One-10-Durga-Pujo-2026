@@ -1,7 +1,7 @@
 """Official One 10 Durgotsav 2026 Pujo food menu (updated poster, 2 Oct 2026).
 
 6 days × breakfast / pure-veg breakfast packet / lunch / dinner × veg / non_veg.
-Plate photos live under /images/food-menu/day/{day}-{meal}-{veg|nonveg}.png
+Plate photos live under /images/food-menu/day/{day}-{meal}-{veg|nonveg}.jpg (PNG originals kept alongside)
 """
 from __future__ import annotations
 
@@ -9,10 +9,16 @@ from typing import Any
 
 BREAKFAST_PRICE = 70
 PACKET_PRICE = 70
+VEG_PROMISE = ("All veg items are no-onion, no-garlic — cooked in a separate place with separate utensils, "
+               "and served in a separate area.")
 ASHTAMI_BHOG_EXTRA = 170
 
 BREAKFAST_FREE_COUPONS = 3
 ASHTAMI_BHOG_FREE_HEADS = 4
+
+# Kids below this age (Pujo year minus year of birth) get ₹0 plates at paid meals — never at quota meals.
+PUJO_YEAR = 2026
+KIDS_FREE_BELOW_AGE = 7
 
 # Free units per flat (tower + flat) with a paid Puja subscription, applied at checkout (first N units are ₹0).
 # A per_day rule gives a separate quota for every Pujo day.
@@ -53,6 +59,14 @@ def complimentary_key(category: str, day_code: str) -> str:
             return rule["key"]
     return ""
 
+
+def kid_age(birth_year) -> int | None:
+    try:
+        age = PUJO_YEAR - int(birth_year)
+    except (TypeError, ValueError):
+        return None
+    return age if 0 <= age <= 17 else None
+
 BREAKFAST_COUPON_NOTE = (
     f"First {BREAKFAST_FREE_COUPONS} breakfasts each day per subscribed flat are complimentary — sit-down breakfast "
     f"and breakfast packet together (e.g. 2 breakfasts + 1 packet). Applied automatically in your cart. "
@@ -72,7 +86,8 @@ MENU_META = {
         "lunch": "1:00 PM – 3:00 PM",
         "dinner": "8:30 PM – 11:00 PM",
     },
-    "kids_note": "Food is complimentary for kids below 7 years.",
+    "kids_note": f"Kids below {KIDS_FREE_BELOW_AGE} (by year of birth) eat complimentary at paid meals — not at breakfast or Ashtami lunch.",
+    "kids_policy": {"year": PUJO_YEAR, "below_age": KIDS_FREE_BELOW_AGE},
     "notes": [
         f"{BREAKFAST_FREE_COUPONS} complimentary breakfast coupons every day per subscribed flat — sit-down breakfast "
         f"and breakfast packet together (e.g. 2 breakfasts + 1 packet). The first {BREAKFAST_FREE_COUPONS} each day are "
@@ -82,6 +97,7 @@ MENU_META = {
         "Complimentary breakfasts and Ashtami lunches are only for flats that have paid the Puja subscription (a donation of at least the subscription amount also counts).",
         "No take-aways for breakfast and Ashtami lunch.",
         f"Pure veg breakfast packet ₹{PACKET_PRICE} available every day.",
+        VEG_PROMISE,
         f"Ashtami lunch (khichuri bhog): first {ASHTAMI_BHOG_FREE_HEADS} heads per subscribed flat are "
         f"complimentary in the cart; the 5th onwards is ₹{ASHTAMI_BHOG_EXTRA} per head.",
     ],
@@ -96,7 +112,7 @@ def _breakfast(day_code: str, diet: str, name: str, description: str, *, active:
                price_note: str = "", for_all_diets: bool = False) -> dict[str, Any]:
     return {
         "day_code": day_code, "meal": "breakfast", "diet": diet,
-        "name": name, "description": description,
+        "name": f"{name} (Seating)", "description": description,
         "amount_rupees": BREAKFAST_PRICE,
         "is_complimentary": True,
         "complimentary_note": BREAKFAST_COUPON_NOTE,
@@ -134,7 +150,7 @@ _SAME_FOR_ALL = "Same plate as veg — listed once as a 'For everyone' card"
 CELLS: list[dict[str, Any]] = [
     # —— Sasthi · 16 Oct (Friday) ——
     *_common_breakfast("sasthi", "Sasthi", "Luchi, sada aloo tarkari, bode, tea / coffee"),
-    _packet("sasthi", "Sasthi Breakfast Packet", "Club kachori (5 pcs), jalebi"),
+    _packet("sasthi", "Sasthi Breakfast Packet", "Club kachori (5 pcs), jalebi, tea / coffee"),
     {
         "day_code": "sasthi", "meal": "lunch", "diet": "veg",
         "name": "Sasthi Veg Lunch",
@@ -162,7 +178,7 @@ CELLS: list[dict[str, Any]] = [
     # —— Saptami · 17 Oct (Saturday) ——
     _breakfast("saptami", "veg", "Saptami Veg Breakfast", "Veg sandwich, french fries, muffin, tea / coffee"),
     _breakfast("saptami", "non_veg", "Saptami Non-veg Breakfast", "Chicken sandwich, french fries, muffin, tea / coffee"),
-    _packet("saptami", "Saptami Breakfast Packet", "Idli (2 pcs), gulab jamun"),
+    _packet("saptami", "Saptami Breakfast Packet", "Idli (2 pcs), gulab jamun, tea / coffee"),
     {
         "day_code": "saptami", "meal": "lunch", "diet": "veg",
         "name": "Saptami Veg Lunch",
@@ -190,7 +206,7 @@ CELLS: list[dict[str, Any]] = [
     # —— 18 Oct (Sunday) — poster labels Saptami; portal day = Sap–Asht ——
     _breakfast("saptami_ashtami", "veg", "18 Oct Veg Breakfast", "Veg pasta, potato wedges, chocolate cake, tea / coffee"),
     _breakfast("saptami_ashtami", "non_veg", "18 Oct Non-veg Breakfast", "Non-veg pasta, potato wedges, chocolate cake, tea / coffee"),
-    _packet("saptami_ashtami", "18 Oct Breakfast Packet", "Hing kachori (3 pcs), imarti"),
+    _packet("saptami_ashtami", "18 Oct Breakfast Packet", "Hing kachori (3 pcs), imarti, tea / coffee"),
     {
         "day_code": "saptami_ashtami", "meal": "lunch", "diet": "veg",
         "name": "18 Oct Veg Lunch",
@@ -217,7 +233,7 @@ CELLS: list[dict[str, Any]] = [
     },
     # —— Ashtami · 19 Oct (Monday) ——
     *_common_breakfast("ashtami", "Ashtami", "Luchi, cholar dal, kalakand, tea / coffee"),
-    _packet("ashtami", "Ashtami Breakfast Packet", "Dahi vada (2 pcs), gulab jamun"),
+    _packet("ashtami", "Ashtami Breakfast Packet", "Dahi vada (2 pcs), gulab jamun, tea / coffee"),
     {
         "day_code": "ashtami", "meal": "lunch", "diet": "veg",
         "name": "Ashtami Lunch (Khichuri bhog)",
@@ -259,7 +275,7 @@ CELLS: list[dict[str, Any]] = [
     },
     # —— Nabami · 20 Oct (Tuesday) ——
     *_common_breakfast("nabami", "Nabami", "Aloo paratha, doi / raita, achar, tea / coffee"),
-    _packet("nabami", "Nabami Breakfast Packet", "Samosa, khasta kachori, dhokla"),
+    _packet("nabami", "Nabami Breakfast Packet", "Samosa, khasta kachori, dhokla, tea / coffee"),
     {
         "day_code": "nabami", "meal": "lunch", "diet": "veg",
         "name": "Nabami Veg Lunch",
@@ -286,7 +302,7 @@ CELLS: list[dict[str, Any]] = [
     },
     # —— Dashami · 21 Oct (Wednesday) ——
     *_common_breakfast("dashami", "Dashami", "Korai shutir kochuri, aloo dum, rosogolla, tea / coffee"),
-    _packet("dashami", "Dashami Breakfast Packet", "Vada (2 pcs), jalebi"),
+    _packet("dashami", "Dashami Breakfast Packet", "Vada (2 pcs), jalebi, tea / coffee"),
     {
         "day_code": "dashami", "meal": "lunch", "diet": "veg",
         "name": "Dashami Veg Lunch",
@@ -320,7 +336,7 @@ _DIET_SORT = {"veg": 0, "non_veg": 1}
 
 def day_meal_image_path(day_code: str, meal: str, diet: str = "veg") -> str:
     diet_key = "nonveg" if (diet or "").strip().lower() in {"non_veg", "nonveg"} else "veg"
-    return f"/images/food-menu/day/{day_code}-{meal}-{diet_key}.png"
+    return f"/images/food-menu/day/{day_code}-{meal}-{diet_key}.jpg"
 
 
 def cell_image_url(day_code: str, meal: str, diet: str = "veg") -> str:

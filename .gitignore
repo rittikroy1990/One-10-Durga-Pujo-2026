@@ -27,4 +27,5 @@ frontend/public/sponsorship/pages/
 
 # Resident payment proofs, receipts and import data (personal info)
 frontend/public/uploads/
+backend/private_uploads/
 backend/scripts/*import*.json

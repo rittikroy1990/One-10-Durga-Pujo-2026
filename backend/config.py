@@ -228,6 +228,8 @@ ORGANISATION_DEFAULTS = {
         "(not a registered society, company or trust). PAN allotted."
     ),
     "pan": "AADAE2932K",
+    "sponsorship_pan": "AACAO6230F",
+    "sponsorship_legal_name": "ONE 10 EVENT ORGANISING COMMITTEE",
     "date_of_formation": "2026-09-03",
     "address": (
         "One10 Residential Complex, Thakdari, Newtown, Action Area 1, "
@@ -439,6 +441,130 @@ SPONSORSHIP_PACKAGES = {
     ],
 }
 
+# Self-serve local business promotions (/promote). Prices in paise; outside-One10 is +50%, stored explicitly.
+LOCAL_BUSINESS_AD_PACKAGES = {
+    "version": 8,
+    "currency": "INR",
+    "window_start": "2026-10-07",
+    "window_end": "2026-11-30",
+    "window_label": "from now till 30 Nov 2026 — through Pujo, Lakshmi Puja, Kali Puja and Diwali",
+    "packages": [
+        {
+            "code": "neighbourhood_card",
+            "name": "Neighbourhood Card",
+            "amount_paise": 100000,
+            "amount_paise_outside": 150000,
+            "max_concurrent": None,
+            "placements": ["home_strip", "directory"],
+            "required_media": ["logo", "card"],
+            "optional_media": [],
+            "featured": False,
+            "free_for_subscribers": True,
+            "description": "Your card in the Home strip rotation and the Local businesses directory. "
+                           "Free for One Ten flats with a paid 2026 Pujo subscription.",
+            "includes": ["Home page strip (shared rotation)", "Directory listing with category filter",
+                         "WhatsApp / website / phone button"],
+        },
+        {
+            "code": "spotlight_feature",
+            "name": "Spotlight Feature",
+            "amount_paise": 200000,
+            "amount_paise_outside": 300000,
+            "max_concurrent": 12,
+            "placements": ["home_strip", "directory", "sponsors_rail", "full_page"],
+            "required_media": ["logo", "card", "hero"],
+            "optional_media": [],
+            "featured": True,
+            "description": "Everything in Card plus a dedicated business page and the Sponsors page rail.",
+            "includes": ["Everything in Neighbourhood Card", "Dedicated page at /local-businesses/your-name",
+                         "Sponsors page 'Neighbourhood businesses' rail", "Featured badge in the directory"],
+        },
+        {
+            "code": "story_page",
+            "name": "Story Page",
+            "amount_paise": 300000,
+            "amount_paise_outside": 450000,
+            "max_concurrent": 6,
+            "placements": ["home_strip", "directory", "sponsors_rail", "full_page", "story_layout"],
+            "required_media": ["logo", "card", "hero"],
+            "optional_media": ["story_vertical", "video"],
+            "featured": True,
+            "description": "Spotlight plus a story layout with vertical poster and a short video.",
+            "includes": ["Everything in Spotlight Feature", "Story layout with vertical poster",
+                         "Video up to 30 seconds"],
+        },
+    ],
+    "addons": [
+        {"code": "pin_home_3d", "name": "Pin to Home strip for 3 days", "amount_paise": 80000,
+         "eligible_packages": ["spotlight_feature", "story_page"], "max_concurrent": 3,
+         "description": "Shown first in the Home strip for 3 days after going live."},
+        {"code": "extend_30d", "name": "Extend 30 days (till 30 Dec)",
+         "amount_paise_by_package": {"neighbourhood_card": 100000, "spotlight_feature": 200000,
+                                     "story_page": 300000},
+         "eligible_packages": ["neighbourhood_card", "spotlight_feature", "story_page"],
+         "description": "Stays live 30 more days after 30 Nov — through Christmas."},
+        {"code": "category_exclusive", "name": "Category exclusive", "amount_paise": 250000,
+         "eligible_packages": ["spotlight_feature", "story_page"],
+         "description": "Only your business is live in your category while your ad runs."},
+    ],
+    "categories": [
+        "Food & cloud kitchen",
+        "Tuition & coaching",
+        "Salon & wellness",
+        "Clinic & pharmacy",
+        "Grocery & daily needs",
+        "Home services",
+        "Fashion & boutique",
+        "Professional services",
+        "Real estate & interiors",
+        "Other",
+    ],
+    "creative_specs": {
+        "logo": {"label": "Logo", "width": 800, "height": 800, "aspect": "1:1",
+                 "formats": ["png", "webp"], "max_mb": 5},
+        "card": {"label": "Card image", "width": 1200, "height": 630, "aspect": "1.91:1",
+                 "formats": ["jpg", "jpeg", "png", "webp"], "max_mb": 8},
+        "hero": {"label": "Hero banner", "width": 1920, "height": 1080, "aspect": "16:9",
+                 "formats": ["jpg", "jpeg", "png", "webp"], "max_mb": 12},
+        "story_vertical": {"label": "Vertical story poster", "width": 1080, "height": 1920, "aspect": "9:16",
+                           "formats": ["jpg", "jpeg", "png", "webp"], "max_mb": 12},
+        "video": {"label": "Video", "max_seconds": 30, "aspect": "16:9", "resolution": "1080p",
+                  "formats": ["mp4", "webm", "mov"], "max_mb": 50},
+    },
+    "dimension_tolerance": 0.02,
+    "copy_limits": {"headline": 120, "headline_recommended": 40, "writeup": 2000,
+                    "writeup_recommended": 160, "link_label": 24, "business_name": 80},
+    "rules": {
+        "resubmits_allowed": 1,
+        "one_active_submission": True,
+        "submissions_per_ip_per_day": 10,
+        "renewal_discount_pct": 20,
+        "payment_note": "Pay the exact amount shown to the committee UPI, then upload the screenshot and UTR. "
+                        "Ads go live only after committee review.",
+        "refund_policy": [
+            "Rejected without using the resubmit: full refund to the paying account.",
+            "Changes requested: no refund; fixing the creative is free.",
+            "After the ad is published: no refund.",
+        ],
+        "content_policy": [
+            "No political, religious-hate or adult content.",
+            "No misleading medical or financial guarantees.",
+            "No other brands' trademarks without rights.",
+            "Creatives must be clear and readable at the required size.",
+            "One contact number; no QR codes for unrelated UPI accounts.",
+        ],
+        "banned_categories": [],
+    },
+    "reject_reasons": [
+        {"code": "wrong_size", "label": "Wrong creative size"},
+        {"code": "low_quality", "label": "Low-quality or unreadable creative"},
+        {"code": "policy", "label": "Content policy"},
+        {"code": "payment_mismatch", "label": "Payment not found or amount mismatch"},
+        {"code": "duplicate", "label": "Duplicate application"},
+        {"code": "other", "label": "Other"},
+    ],
+}
+
 DEFAULT_SETTINGS = {
     "id": "app_settings",
     "platform": {
@@ -472,6 +598,7 @@ DEFAULT_SETTINGS = {
         "payment_provider": "upi_qr",
         "razorpay_public_checkout": False,
         "llm_screenshot_auto_issue": True,
+        "local_business_ads_enabled": False,
     },
     "approval_thresholds_paise": {
         "note": NOT_APPROVED,
@@ -492,22 +619,29 @@ DEFAULT_SETTINGS = {
         "Domain and email sender verification",
     ],
     "sponsorship": dict(SPONSORSHIP_PACKAGES),
+    "local_business_ads": dict(LOCAL_BUSINESS_AD_PACKAGES),
     "updated_at": iso(),
 }
 
 # ---------------------------------------------------------------- Chart of accounts
 CHART_OF_ACCOUNTS = [
-    {"code": "1001", "name": "Bank", "type": "asset"},
+    {"code": "1001", "name": "Bank — ICICI (EOC main)", "type": "asset"},
     {"code": "1002", "name": "Cash on hand", "type": "asset"},
     {"code": "1003", "name": "Gateway clearing", "type": "asset"},
+    {"code": "1004", "name": "Bank — YES (food QR)", "type": "asset"},
     {"code": "1200", "name": "Vendor advances", "type": "asset"},
     {"code": "1201", "name": "Volunteer/member advances", "type": "asset"},
+    {"code": "1210", "name": "Collections held by members (to hand over)", "type": "asset"},
     {"code": "2001", "name": "Accounts payable", "type": "liability"},
+    {"code": "2100", "name": "Unidentified deposits (suspense)", "type": "liability"},
     {"code": "4001", "name": "Subscription income \u2014 Khuti/Durga/Lakshmi", "type": "income"},
     {"code": "4002", "name": "Subscription income \u2014 Kali Puja", "type": "income"},
     {"code": "4003", "name": "Subscription income \u2014 Bijoya Sammilani", "type": "income"},
     {"code": "4100", "name": "Voluntary donations", "type": "income"},
     {"code": "4200", "name": "Sponsorship income", "type": "income"},
+    {"code": "4205", "name": "Local business advertising", "type": "income"},
+    {"code": "4300", "name": "Other income (bank test credits, interest)", "type": "income"},
+    {"code": "4400", "name": "Food subscription income", "type": "income"},
     {"code": "4900", "name": "Refunds/contra income", "type": "income"},
     {"code": "5010", "name": "Idol/ritual", "type": "expense"},
     {"code": "5020", "name": "Pandal/decor", "type": "expense"},
@@ -681,6 +815,10 @@ async def ensure_settings():
             # Refresh sponsorship catalog from proposal; never touches organisation contacts/bank
             patch["sponsorship"] = SPONSORSHIP_PACKAGES
 
+        lba = existing.get("local_business_ads") or {}
+        if (lba.get("version") or 0) < LOCAL_BUSINESS_AD_PACKAGES["version"]:
+            patch["local_business_ads"] = LOCAL_BUSINESS_AD_PACKAGES
+
         # Receipt letterhead defaults on settings + active cycle
         rc = existing.get("receipt") or {}
         rc_patch = {}
@@ -703,9 +841,13 @@ async def ensure_settings():
                 await db.annual_cycles.update_one({"id": cycle_id}, {"$set": {"receipt": rc}})
 
     # chart of accounts
-    if await db.chart_of_accounts.count_documents({}) == 0:
-        for a in CHART_OF_ACCOUNTS:
-            await db.chart_of_accounts.insert_one({**a, "active": True, "id": a["code"]})
+    for a in CHART_OF_ACCOUNTS:
+        await db.chart_of_accounts.update_one(
+            {"code": a["code"]},
+            {"$set": {"name": a["name"], "type": a["type"]},
+             "$setOnInsert": {"code": a["code"], "active": True, "id": a["code"]}},
+            upsert=True,
+        )
 
     # Seed / upgrade annual cycles (campaigns)
     settings_doc = await db.application_settings.find_one({"id": "app_settings"}) or {}

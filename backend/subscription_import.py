@@ -646,7 +646,7 @@ async def issue_for_row(row, cycle_id, settings, summary, *, dry_run: bool = Fal
         method=method,
         masked_ref=("CASH" if method == "cash" else "UTR-" + txn[-4:]),
         provider_payment_id=txn,
-        debit_account="1001",
+        debit_account=("1002" if method == "cash" else "1001"),
         request=request,
         bank_verified=True,
         issuance_source="collection",

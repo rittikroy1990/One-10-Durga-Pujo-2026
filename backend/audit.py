@@ -1,9 +1,12 @@
 """Atomic number sequences and append-only, hash-chained audit event service."""
+import asyncio
 import hashlib
 import json
 
 from db import db
 from util import now_utc, iso
+
+_chain_lock = asyncio.Lock()
 
 
 async def next_seq(key: str) -> int:
@@ -43,10 +46,6 @@ async def audit(action: str, *, actor=None, entity_type: str = "", entity_id: st
                 approval_chain=None, evidence=None, correlation_id: str = "",
                 post_close: bool = False):
     """Append an immutable, hash-chained audit event."""
-    seq = await next_seq("audit")
-    prev = await db.audit_events.find_one({"seq": seq - 1}, sort=[("seq", -1)]) if seq > 1 else None
-    prev_hash = prev.get("hash", "") if prev else "GENESIS"
-
     actor_id = actor.get("user_id") if isinstance(actor, dict) else (actor or "system")
     actor_role = ",".join(actor.get("roles", [])) if isinstance(actor, dict) else ""
     ip = ""
@@ -59,7 +58,6 @@ async def audit(action: str, *, actor=None, entity_type: str = "", entity_id: st
             pass
 
     event = {
-        "seq": seq,
         "actor_id": actor_id,
         "actor_role": actor_role,
         "action": action,
@@ -76,7 +74,17 @@ async def audit(action: str, *, actor=None, entity_type: str = "", entity_id: st
         "post_close": post_close,
         "created_at": iso(),
     }
-    event["prev_hash"] = prev_hash
-    event["hash"] = hashlib.sha256((prev_hash + _canonical(event)).encode()).hexdigest()
-    await db.audit_events.insert_one(event)
+    async with _chain_lock:
+        seq = await next_seq("audit")
+        prev = None
+        # Another server process may hold seq - 1 and not have written it yet; chain to it once it lands.
+        for _ in range(100 if seq > 1 else 0):
+            prev = await db.audit_events.find_one({"seq": seq - 1}, {"_id": 0, "hash": 1})
+            if prev:
+                break
+            await asyncio.sleep(0.02)
+        prev_hash = prev.get("hash", "") if prev else "GENESIS"
+        event = {"seq": seq, **event, "prev_hash": prev_hash}
+        event["hash"] = hashlib.sha256((prev_hash + _canonical(event)).encode()).hexdigest()
+        await db.audit_events.insert_one(event)
     return event["hash"]

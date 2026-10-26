@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { FileText, Wallet, Clock } from "lucide-react";
-import { API } from "../lib/api";
+import { toast } from "sonner";
+import { FileText, Wallet, Clock, Pencil, XCircle } from "lucide-react";
+import api, { API } from "../lib/api";
 import { Button } from "./ui";
 import { formatPaise, formatDateIST } from "../lib/utils";
 
@@ -10,14 +11,32 @@ const STATE_TONE = {
   part_paid: "bg-amber-50 text-amber-900 ring-amber-500/30",
   awaiting: "bg-amber-50 text-amber-900 ring-amber-500/30",
   under_review: "bg-sky-50 text-sky-900 ring-sky-500/25",
+  whatsapp_posted: "bg-emerald-50 text-emerald-900 ring-emerald-600/25",
   problem: "bg-red-50 text-vermilion-600 ring-red-300",
   not_open: "bg-slate-100 text-slate-700 ring-slate-300",
   cancelled: "bg-slate-100 text-slate-500 ring-slate-300",
   expired: "bg-slate-100 text-slate-500 ring-slate-300",
 };
 
-export default function FoodOrdersList({ orders, compact = false }) {
+export default function FoodOrdersList({ orders, compact = false, onChanged }) {
+  const [cancelling, setCancelling] = useState("");
   if (!orders?.length) return null;
+
+  const cancelOrder = async (o) => {
+    if (!window.confirm(`Cancel order ${o.ref}? Its complimentary meals go back to your flat.`)) return;
+    setCancelling(o.id);
+    try {
+      await api.post("/food/my-orders/cancel", { edit_token: o.edit_token });
+      toast.success(`Order ${o.ref} cancelled`);
+      onChanged?.();
+    } catch (err) {
+      const d = err?.response?.data?.detail;
+      toast.error(typeof d === "string" ? d : "Could not cancel the order");
+    } finally {
+      setCancelling("");
+    }
+  };
+
   return (
     <div className="space-y-3" data-testid="food-orders-list">
       {orders.map((o) => {
@@ -43,6 +62,7 @@ export default function FoodOrdersList({ orders, compact = false }) {
                     {i ? " · " : ""}
                     {l.day_label} {l.meal_label}{l.diet_label ? ` (${l.diet_label})` : ""} ×{l.heads}
                     {l.free ? <span className="text-emerald-700"> ({l.free} complimentary)</span> : null}
+                    {l.kids ? <span className="text-emerald-700"> (incl. {l.kids} kid{l.kids === 1 ? "" : "s"} below 7)</span> : null}
                   </span>
                 ))}
               </p>
@@ -70,10 +90,28 @@ export default function FoodOrdersList({ orders, compact = false }) {
                   </Button>
                 </Link>
               ) : null}
-              {o.status_token && o.state === "under_review" ? (
+              {o.status_token && (o.state === "under_review" || o.state === "whatsapp_posted") ? (
                 <Link to={`/payment/status?token=${encodeURIComponent(o.status_token)}`}>
                   <Button variant="subtle" size="sm"><Clock className="h-3.5 w-3.5" /> View payment status</Button>
                 </Link>
+              ) : null}
+              {o.edit_token ? (
+                <>
+                  <Link to={`/food?edit=${encodeURIComponent(o.edit_token)}`}>
+                    <Button variant="subtle" size="sm" data-testid={`food-order-edit-${o.ref}`}>
+                      <Pencil className="h-3.5 w-3.5" /> Edit order
+                    </Button>
+                  </Link>
+                  <Button
+                    variant="subtle"
+                    size="sm"
+                    disabled={cancelling === o.id}
+                    onClick={() => cancelOrder(o)}
+                    data-testid={`food-order-cancel-${o.ref}`}
+                  >
+                    <XCircle className="h-3.5 w-3.5" /> Cancel order
+                  </Button>
+                </>
               ) : null}
               {o.coupons_given ? <span className="text-xs font-medium text-emerald-700">✓ Coupons collected</span> : null}
             </div>

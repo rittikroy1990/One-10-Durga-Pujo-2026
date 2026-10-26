@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Clock, AlertTriangle, FileText, Loader2, Share2, BadgeCheck, Upload, Ticket } from "lucide-react";
 import api, { API } from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
+import WhatsAppOrderPanel from "../../components/WhatsAppOrderPanel";
 import { Button, Input, Label } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 
@@ -70,6 +71,7 @@ export default function PaymentStatus() {
   const [reference, setReference] = useState("");
   const [screenshot, setScreenshot] = useState(null);
   const [submitBusy, setSubmitBusy] = useState(false);
+  const [waOpen, setWaOpen] = useState(false);
   const timer = useRef();
 
   useEffect(() => {
@@ -88,7 +90,7 @@ export default function PaymentStatus() {
           }
           return r.data;
         });
-        const done = ["paid", "partially_paid", "needs_review", "error", "reconciliation_required", "cancelled"].includes(r.data.status)
+        const done = ["paid", "partially_paid", "needs_review", "error", "reconciliation_required", "cancelled", "whatsapp_posted"].includes(r.data.status)
           || Boolean(r.data.food_pay_open);
         if (!done && tries < 20) {
           timer.current = setTimeout(() => setTries((t) => t + 1), 3000);
@@ -107,6 +109,7 @@ export default function PaymentStatus() {
   const recon = data?.status === "reconciliation_required" || data?.status === "needs_review";
   const processing = data?.status === "processing";
   const cancelled = data?.status === "cancelled";
+  const waPosted = data?.status === "whatsapp_posted";
   const foodPayOpen = Boolean(data?.food_pay_open) && !paid && !partial && !recon && !processing && !cancelled;
   const hasScreenshot = Boolean(paid && (data?.screenshot_url || data?.has_payment_screenshot) && token);
   const canShareWhatsApp = Boolean((paid || partial) && (data?.verify_token || hasScreenshot));
@@ -290,6 +293,26 @@ export default function PaymentStatus() {
     </form>
   );
 
+  const whatsappOption = data?.whatsapp_text ? (
+    <div className="mt-5 rounded-2xl border border-emerald-600/25 bg-white/70 p-5 text-left">
+      {waOpen ? (
+        <>
+          <h2 className="mb-3 font-display text-2xl text-brown-900">Send on WhatsApp</h2>
+          <WhatsAppOrderPanel
+            text={data.whatsapp_text}
+            amountPaise={data.residual_amount || data.amount_due_paise}
+            statusToken={token}
+            onPosted={() => { setWaOpen(false); setTries((t) => t + 1); }}
+          />
+        </>
+      ) : (
+        <button type="button" onClick={() => setWaOpen(true)} className="w-full text-center text-sm font-semibold text-emerald-700 underline" data-testid="open-whatsapp-option">
+          Can&apos;t upload here? Send your screenshot on WhatsApp instead
+        </button>
+      )}
+    </div>
+  ) : null;
+
   return (
     <PublicLayout>
       <div className="mx-auto max-w-xl px-5 py-16 text-center">
@@ -318,19 +341,22 @@ export default function PaymentStatus() {
                   <p className="mt-1 text-sm text-emerald-900/75">
                     Download or print it, then show it to a committee member to collect your food coupons.
                   </p>
-                  <a href={`${API}/food/voucher/${data.food_voucher_token}/pdf`} target="_blank" rel="noreferrer" className="mt-3 inline-flex">
-                    <Button variant="primary" data-testid="open-food-voucher-btn">
-                      <Ticket className="h-4 w-4" /> Download food voucher
-                    </Button>
-                  </a>
                 </div>
               )}
               <div className="mt-6 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer" className="sm:inline-flex">
-                  <Button variant={data.food_voucher_token ? "subtle" : "primary"} className="w-full sm:w-auto" data-testid="download-receipt-btn">
-                    <FileText className="h-4 w-4" /> Download receipt
-                  </Button>
-                </a>
+                {data.food_voucher_token ? (
+                  <a href={`${API}/food/voucher/${data.food_voucher_token}/pdf`} target="_blank" rel="noreferrer" className="sm:inline-flex">
+                    <Button variant="primary" className="w-full sm:w-auto" data-testid="open-food-voucher-btn">
+                      <Ticket className="h-4 w-4" /> Download food voucher
+                    </Button>
+                  </a>
+                ) : (
+                  <a href={`${API}/receipt/pdf/${data.verify_token}`} target="_blank" rel="noreferrer" className="sm:inline-flex">
+                    <Button variant="primary" className="w-full sm:w-auto" data-testid="download-receipt-btn">
+                      <FileText className="h-4 w-4" /> Download receipt
+                    </Button>
+                  </a>
+                )}
                 {canShareWhatsApp && (
                   <Button
                     variant="subtle"
@@ -401,6 +427,7 @@ export default function PaymentStatus() {
               </div>
 
               {uploadForm("Upload next payment", "After paying the remaining balance, enter the new UTR and screenshot.")}
+              {whatsappOption}
             </>
           )}
           {processing && (
@@ -424,9 +451,26 @@ export default function PaymentStatus() {
                 {qrBlock}
               </div>
               {uploadForm("Upload payment", "Enter the UTR from your UPI app and the payment screenshot.")}
+              {whatsappOption}
               <p className="mt-3 text-xs text-brown-800/55">
                 Your food voucher (for collecting food coupons) is ready once the full amount is paid.
               </p>
+            </>
+          )}
+          {waPosted && (
+            <>
+              <CheckCircle2 className="mx-auto h-14 w-14 text-emerald-600" />
+              <h1 className="mt-3 font-display text-4xl">Posted on WhatsApp</h1>
+              <p className="mt-1 text-brown-800/70">{data.message}</p>
+              <p className="mt-2 text-xs text-brown-800/55">
+                Your food voucher appears under <Link to="/food/orders" className="font-semibold text-vermilion-600 underline">My orders</Link> once the committee confirms the payment.
+              </p>
+              {data.whatsapp_text ? (
+                <div className="mt-5 rounded-2xl border border-sun-400/30 bg-white/70 p-5">
+                  <p className="mb-3 text-left text-sm text-brown-800/70">Haven&apos;t posted the screenshot and this message yet? Do it now:</p>
+                  <WhatsAppOrderPanel text={data.whatsapp_text} amountPaise={data.amount_due_paise} statusToken={token} posted />
+                </div>
+              ) : null}
             </>
           )}
           {cancelled && (
@@ -437,7 +481,7 @@ export default function PaymentStatus() {
               <Link to="/food" className="mt-5 inline-flex"><Button variant="primary">Go to Food</Button></Link>
             </>
           )}
-          {data && !paid && !partial && !recon && !processing && !cancelled && !foodPayOpen && data.status !== "error" && (
+          {data && !paid && !partial && !recon && !processing && !cancelled && !waPosted && !foodPayOpen && data.status !== "error" && (
             <>
               <Clock className="mx-auto h-14 w-14 text-gold-500" />
               <h1 className="mt-3 font-display text-4xl">{data.do_not_pay_again ? "Verification in progress" : "Awaiting payment"}</h1>

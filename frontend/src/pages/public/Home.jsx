@@ -8,53 +8,39 @@ import {
 import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import BrandLogo from "../../components/BrandLogo";
+import { LocalAdsRail } from "../../components/LocalAds";
 import { Button } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
 import { FootfallHeroStrip } from "../../components/Footfall";
+import { SPONSORS_2026 } from "../../data/previousSponsors";
 
-/** Fresh community photos — each path used at most once on this page. */
-const LIVE_ALL = Array.from({ length: 32 }, (_, i) => `/images/campaign/live/live-${String(i + 1).padStart(2, "0")}.jpg`);
-/** Deleted from disk — never request these (avoids broken images). */
+/** 2026 community photos (live-33…43) — Dashami / immersion / dance / arrival. */
+const PUJO_2026 = Array.from({ length: 11 }, (_, i) => `/images/campaign/live/live-${String(i + 33).padStart(2, "0")}.jpg`);
+/** Earlier live set kept for depth in the moments slider. */
+const LIVE_EARLIER = Array.from({ length: 32 }, (_, i) => `/images/campaign/live/live-${String(i + 1).padStart(2, "0")}.jpg`);
 const DELETED_LIVE = new Set([
   "/images/campaign/live/live-01.jpg",
   "/images/campaign/live/live-03.jpg",
   "/images/campaign/live/live-04.jpg",
-  "/images/campaign/live/live-32.jpg", // couple at pratima — removed from site
+  "/images/campaign/live/live-32.jpg",
 ]);
-const LIVE = LIVE_ALL; // keep index map stable for named placements
 const ok = (src) => src && !DELETED_LIVE.has(src);
-/** Main focus: children before the Durga pratima (user-selected centerpiece). */
-const HERO = "/images/campaign/live/live-focus.jpg"; // same as live-11
-const TOWERS = LIVE[11]; // 12 — wide lit towers
-const FIREWORK = LIVE[12]; // 13 — low-angle tower + firework (portrait feature)
-/** Newer photos placed in separate sections — never clustered side-by-side. */
-const SINDOOR_GROUP = LIVE[27]; // 28
-const SINDOOR_GROUP_B = LIVE[28]; // 29
-const FAMILY_AT_PANDAL = LIVE[29]; // 30 — family selfie
-const SINDUR_RITUAL = LIVE[30]; // 31 — offering sindoor to Maa
-const PLACE_MAIN = LIVE[20]; // 21 — purohit aarti before Maa
-const SKIP_PEEK = new Set([0, 2, 3, 10, 11, 12, 20, 29, 30, 31]); // drop deleted + dedicated placements
-const PEEK_POOL = LIVE.filter((_, i) => i < 27 && !SKIP_PEEK.has(i)).filter(ok);
-/** Middle gallery: scatter sindoor groups; family+pratima last. */
-const SLIDER_A = (() => {
-  const base = PEEK_POOL.slice(0, 10);
-  const out = [...base];
-  if (out.length >= 3) out.splice(2, 0, SINDOOR_GROUP);
-  if (out.length >= 8) out.splice(7, 0, SINDOOR_GROUP_B);
-  else out.push(SINDOOR_GROUP_B);
-  out.push(FAMILY_AT_PANDAL);
-  return out.filter(ok).slice(0, 13);
-})();
-const USED = new Set([
-  HERO, PLACE_MAIN, TOWERS, FIREWORK, ...SLIDER_A,
-  ...DELETED_LIVE,
-  LIVE[10],
-  FAMILY_AT_PANDAL, SINDOOR_GROUP, SINDOOR_GROUP_B,
-]);
-const SLIDER_B_CLEAN = [
-  ...LIVE.filter((src) => ok(src) && !USED.has(src) && src !== SINDUR_RITUAL),
-  SINDUR_RITUAL,
+/** Hero: Sindoor Khela line before Maa (live-33 → live-focus.jpg). */
+const HERO = "/images/campaign/live/live-focus.jpg";
+const PLACE_MAIN = PUJO_2026[7]; // idol arrival on truck
+const TOWERS = PUJO_2026[9]; // immersion-night barricade crowd
+const FIREWORK = PUJO_2026[8]; // visarjan
+/** Peek gallery — new 2026 shots first (skip hero duplicate live-33). */
+const SLIDER_A = [
+  PUJO_2026[1], PUJO_2026[2], PUJO_2026[5], PUJO_2026[6],
+  PUJO_2026[3], PUJO_2026[4], PUJO_2026[7], PUJO_2026[8],
+  PUJO_2026[9], PUJO_2026[10],
 ].filter(ok);
+const USED = new Set([HERO, PLACE_MAIN, TOWERS, FIREWORK, ...SLIDER_A]);
+const SLIDER_B_CLEAN = [
+  ...PUJO_2026.filter((src) => ok(src) && !USED.has(src)),
+  ...LIVE_EARLIER.filter((src) => ok(src) && !USED.has(src)),
+].filter((src, i, arr) => ok(src) && arr.indexOf(src) === i);
 
 function PhotoSlider({ images, intervalMs = 4500, aspect = "aspect-[16/10]", fit = "cover", className = "", testid = "photo-slider" }) {
   const [idx, setIdx] = useState(0);
@@ -231,7 +217,7 @@ export default function Home() {
         <div className="relative w-full">
           <img
             src={HERO}
-            alt="Goddess Durga and her children at One 10 Durgotsav"
+            alt="Sindoor Khela at One 10 Durgotsav 2026"
             className="block h-auto w-full brightness-[1.06] contrast-[1.04] saturate-[1.08]"
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-sun-50/70 via-transparent to-transparent md:from-sun-50 md:via-sun-50/25" />
@@ -264,12 +250,12 @@ export default function Home() {
                   {camp?.theme_line || "Amader Pujo · Amader One10"} — ONE-10 community celebration, organised by EOC.
                 </motion.p>
                 <motion.div variants={fade} custom={3} className="mt-4 flex w-full flex-col gap-2.5 sm:mt-6 sm:w-auto sm:flex-row sm:flex-wrap sm:gap-3">
-                  <Link to="/subscribe" className="w-full sm:w-auto">
+                  <Link to="/contribute?mode=subscribe" className="w-full sm:w-auto">
                     <Button variant="primary" size="lg" data-testid="hero-subscribe-btn" className="w-full sm:w-auto">
                       Subscribe <ArrowRight className="h-5 w-5" />
                     </Button>
                   </Link>
-                  <Link to="/donate" className="w-full sm:w-auto">
+                  <Link to="/contribute?mode=donate" className="w-full sm:w-auto">
                     <Button variant="outline" size="lg" data-testid="hero-donate-btn" className="w-full sm:w-auto">
                       Donate
                     </Button>
@@ -317,9 +303,38 @@ export default function Home() {
         </div>
       </section>
 
+      <LocalAdsRail where="home" eyebrow="Neighbourhood" title="Local businesses" blurb="Committee-approved businesses from One Ten and around." />
+
+      <section className="border-b border-sun-400/25 bg-white" data-testid="home-sponsors-2026">
+        <div className="mx-auto max-w-7xl px-5 py-10 sm:py-12">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-vermilion-500">Thank you</p>
+              <h2 className="mt-2 font-display text-3xl text-brown-900 sm:text-4xl">Our 2026 sponsors</h2>
+            </div>
+            <Link to="/sponsors#sponsors-2026" className="text-sm font-semibold text-vermilion-600 hover:underline">
+              See all partners <ArrowRight className="ml-1 inline h-4 w-4" />
+            </Link>
+          </div>
+          <div className="mt-8 grid grid-cols-3 items-center gap-x-4 gap-y-6 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+            {SPONSORS_2026.map((s) => (
+              <div key={s.id} className="flex items-center justify-center">
+                <img
+                  src={s.src}
+                  alt={s.name}
+                  title={s.name}
+                  className="h-10 w-full max-w-[120px] object-contain opacity-90 sm:h-12"
+                  loading="lazy"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="border-b border-sun-400/20 bg-sky-50 py-10">
         <div className="mx-auto mb-6 max-w-7xl px-5">
-          <p className="text-xs uppercase tracking-[0.35em] text-vermilion-500">Gallery</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-vermilion-500">Gallery · 2026</p>
           <h2 className="mt-2 font-display text-3xl text-brown-900 sm:text-4xl">Life at our Pujo</h2>
         </div>
         <PeekSlider images={SLIDER_A} testid="home-peek-slider" />
@@ -337,7 +352,7 @@ export default function Home() {
             <div className="relative aspect-[3/4] sm:aspect-[4/5]">
               <img
                 src={PLACE_MAIN}
-                alt="Purohit performing aarti before Goddess Durga at One10"
+                alt="Maa Durga arriving at One 10 for Durgotsav 2026"
                 className="h-full w-full object-cover object-top"
               />
             </div>
@@ -373,7 +388,7 @@ export default function Home() {
           >
             <img
               src={FIREWORK}
-              alt="One10 tower lit for Pujo with fireworks overhead"
+              alt="Visarjan — Maa Durga immersion, One 10 Durgotsav 2026"
               className="absolute inset-0 h-full w-full object-cover object-[center_30%] sm:object-center"
             />
             <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6 lg:hidden">
@@ -397,7 +412,7 @@ export default function Home() {
             >
               <img
                 src={TOWERS}
-                alt="One10 towers dressed in festive lights"
+                alt="Residents and Bidhannagar Traffic Police at One 10 Pujo night"
                 className="absolute inset-0 h-full w-full object-cover object-center"
               />
             </motion.div>
@@ -430,18 +445,17 @@ export default function Home() {
             viewport={{ once: true }}
             className="flex flex-col justify-center border border-sun-400/30 bg-white p-5 shadow-card sm:p-8 md:p-10"
           >
-            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500 sm:text-xs">Household subscription</p>
+            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500 sm:text-xs">Remaining season</p>
             <h2 className="mt-3 font-display text-4xl text-brown-900 sm:text-5xl md:text-6xl">
-              {sub ? formatPaise(sub.base_amount_paise) : "₹1"}
+              ₹1,000
               <span className="ml-2 align-middle text-base text-brown-800/45 sm:text-lg">/ family</span>
             </h2>
             <p className="mt-4 max-w-md text-sm text-brown-800/70 sm:text-base">
-              One transparent contribution for the season. Voluntary donations are recorded separately.
-              Receipts issue only after payment is verified.
+              Durga Pujo ₹2,500 is closed. Open now: Kali Puja + Bijoya Sammilani subscribe and donation heads on the YES Bank QR.
             </p>
             <div className="mt-6 flex items-center gap-2 text-sm text-brown-800/55 sm:mt-8">
               <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500" />
-              Ledgered · reconcilable · publicly verifiable
+              Ledgered · YES Bank · publicly verifiable
             </div>
           </motion.div>
 
@@ -452,29 +466,29 @@ export default function Home() {
             transition={{ delay: 0.08 }}
             className="border border-sun-400/40 bg-white p-5 text-brown-900 shadow-card sm:p-7 md:p-9"
           >
-            <h3 className="font-display text-2xl sm:text-3xl">What it covers</h3>
+            <h3 className="font-display text-2xl sm:text-3xl">What is open</h3>
             <div className="mt-4 divide-y divide-brown-800/10 sm:mt-5">
-              {(sub?.components || [
-                { label: "Khuti Puja + Durga Puja + Lakshmi Puja", amount_paise: 250000 },
+              {[
+                { label: "Khuti + Durga + Lakshmi (closed)", amount_paise: 250000, closed: true },
                 { label: "Kali Puja", amount_paise: 30000 },
                 { label: "Bijoya Sammilani", amount_paise: 70000 },
-              ]).map((c, i) => (
-                <div key={i} className="flex items-center justify-between gap-3 py-3 sm:gap-4 sm:py-3.5">
+              ].map((c, i) => (
+                <div key={i} className={`flex items-center justify-between gap-3 py-3 sm:gap-4 sm:py-3.5 ${c.closed ? "opacity-50" : ""}`}>
                   <div className="flex items-start gap-2 pr-2">
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-vermilion-500" />
-                    <span className="text-sm">{c.label}</span>
+                    <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${c.closed ? "text-brown-800/35" : "text-vermilion-500"}`} />
+                    <span className={`text-sm ${c.closed ? "line-through" : ""}`}>{c.label}</span>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold tabular-nums sm:text-base">{formatPaise(c.amount_paise)}</span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums sm:text-base">
+                    {c.closed ? "Done" : formatPaise(c.amount_paise)}
+                  </span>
                 </div>
               ))}
             </div>
             <div className="mt-4 flex items-center justify-between bg-gradient-to-r from-vermilion-500 to-sun-400 px-3 py-3 text-white sm:mt-5 sm:px-4 sm:py-3.5">
-              <span className="font-display text-xl sm:text-2xl">Total</span>
-              <span className="font-display text-2xl sm:text-3xl">
-                {sub ? formatPaise(sub.base_amount_paise) : "₹1.00"}
-              </span>
+              <span className="font-display text-xl sm:text-2xl">Open total</span>
+              <span className="font-display text-2xl sm:text-3xl">₹1,000.00</span>
             </div>
-            <Link to="/subscribe">
+            <Link to="/contribute?mode=subscribe">
               <Button variant="primary" size="lg" className="mt-5 w-full sm:mt-6" data-testid="breakup-subscribe-btn">
                 Subscribe & Pay Now <ArrowRight className="h-5 w-5" />
               </Button>
@@ -487,7 +501,7 @@ export default function Home() {
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-5 sm:py-16 md:py-24">
           <div className="mb-6 flex flex-wrap items-end justify-between gap-3 sm:mb-8 sm:gap-4">
             <div>
-              <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500 sm:text-xs">Moments</p>
+              <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500 sm:text-xs">Moments · 2026</p>
               <h2 className="mt-2 font-display text-3xl text-brown-900 sm:text-4xl md:text-5xl">From our Pujo</h2>
             </div>
             <p className="text-xs text-brown-800/45 sm:text-sm">{SLIDER_B_CLEAN.length} photographs · autoplay</p>
@@ -512,8 +526,8 @@ export default function Home() {
           </p>
           <div className="mt-8 grid gap-3 sm:mt-10 sm:gap-4 md:grid-cols-3">
             {[
-              { to: "/subscribe", t: "Subscribe", d: "Pay the family subscription and receive a verified digital receipt.", icon: ShieldCheck },
-              { to: "/donate", t: "Donate", d: "Support a puja head — idol, bhog, flowers and more — with a voluntary gift.", icon: HandHeart },
+              { to: "/contribute?mode=subscribe", t: "Subscribe", d: "Kali Puja & Bijoya Sammilani — remaining season on YES Bank QR.", icon: ShieldCheck },
+              { to: "/contribute?mode=donate", t: "Donate", d: "Kali Puja & Bijoya Sammilani heads — YES Bank QR.", icon: HandHeart },
               { to: "/sponsors", t: "Sponsorship", d: "Brand packages — title, gates, stalls and on-ground presence.", icon: Building2 },
             ].map((x) => (
               <Link

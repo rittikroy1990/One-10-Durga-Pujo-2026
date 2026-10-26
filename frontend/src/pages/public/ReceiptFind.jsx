@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText, Loader2, Upload, Receipt, Search, RotateCcw } from "lucide-react";
 import api, { API } from "../../lib/api";
+import { loadFlats, prefetchFlats } from "../../lib/flats";
 import PublicLayout from "../../components/PublicLayout";
 import { Button, Label, Input, Select } from "../../components/ui";
 
@@ -106,7 +107,7 @@ export default function ReceiptFind() {
   const [genResult, setGenResult] = useState(null);
 
   useEffect(() => {
-    api.get("/towers").then((r) => setTowers(r.data.items || [])).catch(() => {});
+    api.get("/towers").then((r) => { setTowers(r.data.items || []); prefetchFlats(r.data.items); }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -115,10 +116,7 @@ export default function ReceiptFind() {
       setFlatId("");
       return;
     }
-    api
-      .get(`/towers/${towerId}/flats`)
-      .then((r) => setFlats(r.data.items || []))
-      .catch(() => setFlats([]));
+    loadFlats(towerId).then(setFlats).catch(() => setFlats([]));
     setFlatId("");
   }, [towerId]);
 

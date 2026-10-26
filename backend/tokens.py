@@ -21,6 +21,20 @@ def read_food_voucher_token(token: str) -> str | None:
         return None
 
 
+_food_edit = URLSafeTimedSerializer(SECRET, salt="food-edit")
+
+
+def food_edit_token(food_id: str) -> str:
+    return _food_edit.dumps({"f": food_id})
+
+
+def read_food_edit_token(token: str, max_age: int = 2 * 86400) -> str | None:
+    try:
+        return _food_edit.loads(token, max_age=max_age).get("f")
+    except (BadSignature, SignatureExpired):
+        return None
+
+
 def receipt_token(receipt_id: str) -> str:
     return _receipt.dumps({"r": receipt_id})
 

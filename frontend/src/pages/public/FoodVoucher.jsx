@@ -6,6 +6,7 @@ import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { formatPaise, formatDateIST } from "../../lib/utils";
+import { VEG_PROMISE } from "../../lib/food";
 
 function shortDate(iso) {
   if (!iso) return "";
@@ -83,7 +84,8 @@ export default function FoodVoucher() {
                 </dl>
 
                 <div className="mt-5 grid grid-cols-3 gap-2 text-center">
-                  {[["Total heads", data.totals.heads], ["Complimentary", data.totals.free], ["Paid", data.totals.paid]].map(([label, n]) => (
+                  {[["Total heads", data.totals.heads], ["Complimentary", data.totals.free], ["Paid", data.totals.paid],
+                    ...(data.totals.kids ? [["Kids below 7", data.totals.kids]] : [])].map(([label, n]) => (
                     <div key={label} className="rounded-xl border border-sun-400/30 bg-white py-2.5">
                       <div className="font-display text-2xl">{n}</div>
                       <div className="text-[11px] uppercase tracking-wide text-brown-800/50">{label}</div>
@@ -108,6 +110,7 @@ export default function FoodVoucher() {
                             <span className="shrink-0 text-right tabular-nums">
                               <b>{l.heads}</b>
                               {l.free ? <span className="ml-1 text-xs text-emerald-700">({l.free} complimentary)</span> : null}
+                              {l.kids ? <span className="ml-1 text-xs text-emerald-700">(incl. {l.kids} kid{l.kids === 1 ? "" : "s"} below 7)</span> : null}
                             </span>
                           </li>
                         ))}
@@ -140,6 +143,7 @@ export default function FoodVoucher() {
                   ) : null}
                 </div>
                 <p className="mt-4 text-center text-xs text-brown-800/45">No take-aways for breakfast and Ashtami lunch.</p>
+                <p className="mt-1 text-center text-xs text-emerald-800/80" data-testid="food-voucher-veg-promise">{VEG_PROMISE}</p>
               </div>
             )}
           </div>

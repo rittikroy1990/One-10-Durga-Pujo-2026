@@ -3,7 +3,7 @@ import { NavLink, Outlet, Navigate, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Wallet, Scale, BookOpenCheck, ShoppingCart, Users2, FileBarChart,
   ScrollText, Lock, Settings2, LogOut, Flower2, Menu, X, ShieldCheck, QrCode, Receipt,
-  UtensilsCrossed, ClipboardList,
+  UtensilsCrossed, ClipboardList, Megaphone, HandPlatter,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { Spinner } from "./ui";
@@ -13,6 +13,8 @@ const NAV = [
   { to: "/admin/collection", label: "Collection", icon: Wallet, perm: "households:read" },
   { to: "/admin/expenses", label: "Expenses", icon: Receipt, perm: "budget:read" },
   { to: "/admin/food", label: "Food subscriptions", icon: ClipboardList, perm: "households:read" },
+  { to: "/admin/food-reports", label: "Food reports", icon: FileBarChart, perm: "households:read" },
+  { to: "/admin/vendor-meals", label: "Vendor meals", icon: HandPlatter, perm: "households:read" },
   { to: "/admin/food-menu", label: "Food Menu", icon: UtensilsCrossed, perm: "households:read" },
   {
     to: "/admin/payment-qrs",
@@ -21,6 +23,7 @@ const NAV = [
     anyPerm: ["payments:manage", "receipts:manage"],
   },
   // Hidden for now — finance/ops modules not needed in current committee workflow
+  { to: "/admin/ads", label: "Business ads", icon: Megaphone, anyPerm: ["ads:review", "ops:manage"] },
   { to: "/admin/reconciliation", label: "Reconciliation", icon: Scale, perm: "recon:read", hidden: true },
   { to: "/admin/accounting", label: "Accounting", icon: BookOpenCheck, perm: "accounting:read", hidden: true },
   { to: "/admin/procurement", label: "Procurement", icon: ShoppingCart, perm: "budget:read", hidden: true },

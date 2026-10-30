@@ -1,0 +1,11 @@
+[Unit]
+Description=Check One10Events GitHub main every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=60s
+Persistent=true
+Unit=one10events-deploy.service
+
+[Install]
+WantedBy=timers.target

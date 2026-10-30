@@ -1,20 +1,21 @@
 /** One 10 Durgotsav 2026 partners (from the thank-you sponsors poster). */
+const V = "20261027a"; // cache-bust when logo assets are refreshed
 export const SPONSORS_2026 = [
-  { id: "gopower-electech", name: "GoPower Electech", src: "/images/sponsors/2026/gopower-electech.png" },
-  { id: "squad-synergy", name: "Squad Synergy", src: "/images/sponsors/2026/squad-synergy.png" },
-  { id: "insure-efficient", name: "Insure Efficient", src: "/images/sponsors/2026/insure-efficient.png" },
-  { id: "vikran-engineering", name: "Vikran Engineering", src: "/images/sponsors/2026/vikran-engineering.png" },
-  { id: "times-of-india", name: "The Times of India", src: "/images/sponsors/2026/times-of-india.png" },
-  { id: "universal-mep", name: "Universal MEP", src: "/images/sponsors/2026/universal-mep.png" },
-  { id: "allcargo", name: "allcargo", src: "/images/sponsors/2026/allcargo.png" },
-  { id: "roxx", name: "ROXX", src: "/images/sponsors/2026/roxx.png" },
-  { id: "luxerra", name: "Luxerra", src: "/images/sponsors/2026/luxerra.png" },
-  { id: "skipper-pipes", name: "Skipper Pipes", src: "/images/sponsors/2026/skipper-pipes.png" },
-  { id: "skipper-furnishings", name: "Skipper Furnishings", src: "/images/sponsors/2026/skipper-furnishings.png" },
-  { id: "britannia", name: "Britannia", src: "/images/sponsors/2026/britannia.png" },
-  { id: "jeeneet-academy", name: "Jeeneet Academy", src: "/images/sponsors/2026/jeeneet-academy.png" },
-  { id: "borondalaa", name: "Borondalaa", src: "/images/sponsors/2026/borondalaa.png" },
-  { id: "zee-bangla", name: "Zee Bangla", src: "/images/sponsors/2026/zee-bangla.png" },
+  { id: "gopower-electech", name: "GoPower Electech", src: `/images/sponsors/2026/gopower-electech.png?v=${V}` },
+  { id: "squad-synergy", name: "Squad Synergy", src: `/images/sponsors/2026/squad-synergy.png?v=${V}` },
+  { id: "insure-efficient", name: "Insure Efficient", src: `/images/sponsors/2026/insure-efficient.png?v=${V}` },
+  { id: "vikran-engineering", name: "Vikran Engineering", src: `/images/sponsors/2026/vikran-engineering.png?v=${V}` },
+  { id: "times-of-india", name: "The Times of India", src: `/images/sponsors/2026/times-of-india.png?v=${V}` },
+  { id: "universal-mep", name: "Universal MEP", src: `/images/sponsors/2026/universal-mep.png?v=${V}` },
+  { id: "allcargo", name: "allcargo", src: `/images/sponsors/2026/allcargo.png?v=${V}` },
+  { id: "roxx", name: "ROXX", src: `/images/sponsors/2026/roxx.png?v=${V}` },
+  { id: "luxerra", name: "Luxerra", src: `/images/sponsors/2026/luxerra.png?v=${V}` },
+  { id: "skipper-pipes", name: "Skipper Pipes", src: `/images/sponsors/2026/skipper-pipes.png?v=${V}` },
+  { id: "skipper-furnishings", name: "Skipper Furnishings", src: `/images/sponsors/2026/skipper-furnishings.png?v=${V}` },
+  { id: "britannia", name: "Britannia", src: `/images/sponsors/2026/britannia.png?v=${V}` },
+  { id: "jeeneet-academy", name: "Jeeneet Academy", src: `/images/sponsors/2026/jeeneet-academy.png?v=${V}` },
+  { id: "borondalaa", name: "Borondalaa", src: `/images/sponsors/2026/borondalaa.png?v=${V}` },
+  { id: "zee-bangla", name: "Zee Bangla", src: `/images/sponsors/2026/zee-bangla.png?v=${V}` },
 ];
 
 /** Previous One 10 Durgotsav partners (logo strip on /sponsors). */

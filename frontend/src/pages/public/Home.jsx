@@ -22,6 +22,7 @@ const DELETED_LIVE = new Set([
   "/images/campaign/live/live-01.jpg",
   "/images/campaign/live/live-03.jpg",
   "/images/campaign/live/live-04.jpg",
+  "/images/campaign/live/live-07.jpg", // cooler in frame · Shubho Sashthi overlay
   "/images/campaign/live/live-32.jpg",
 ]);
 const ok = (src) => src && !DELETED_LIVE.has(src);
@@ -316,15 +317,19 @@ export default function Home() {
               See all partners <ArrowRight className="ml-1 inline h-4 w-4" />
             </Link>
           </div>
-          <div className="mt-8 grid grid-cols-3 items-center gap-x-4 gap-y-6 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+          <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {SPONSORS_2026.map((s) => (
-              <div key={s.id} className="flex items-center justify-center">
+              <div
+                key={s.id}
+                className="flex aspect-[5/3] items-center justify-center bg-sun-50/60 p-4 ring-1 ring-sun-400/20 sm:p-5"
+                title={s.name}
+              >
                 <img
                   src={s.src}
                   alt={s.name}
-                  title={s.name}
-                  className="h-10 w-full max-w-[120px] object-contain opacity-90 sm:h-12"
+                  className="max-h-full max-w-full object-contain"
                   loading="lazy"
+                  decoding="async"
                 />
               </div>
             ))}

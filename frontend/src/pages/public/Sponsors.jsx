@@ -270,15 +270,22 @@ export default function Sponsors() {
           <p className="mt-2 max-w-2xl text-sm text-brown-800/65">
             Brands standing with One 10 Durgotsav this year — with heartfelt gratitude from the Event Organising Committee.
           </p>
-          <div className="mt-8 grid grid-cols-2 items-center gap-x-6 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {SPONSORS_2026.map((s) => (
-              <div key={s.id} className="flex flex-col items-center gap-2 text-center" data-testid={`sponsor-2026-${s.id}`}>
-                <img
-                  src={s.src}
-                  alt={s.name}
-                  className="h-14 w-full max-w-[160px] object-contain sm:h-16"
-                  loading="lazy"
-                />
+              <div
+                key={s.id}
+                className="flex flex-col items-center gap-3 text-center"
+                data-testid={`sponsor-2026-${s.id}`}
+              >
+                <div className="flex aspect-[5/3] w-full items-center justify-center bg-white p-5 ring-1 ring-sun-400/25 sm:p-6">
+                  <img
+                    src={s.src}
+                    alt={s.name}
+                    className="max-h-full max-w-full object-contain"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
                 <span className="text-[11px] text-brown-800/55">{s.name}</span>
               </div>
             ))}
@@ -347,15 +354,18 @@ export default function Sponsors() {
           <p className="mt-2 max-w-xl text-sm text-brown-800/65">
             Brands and institutions that stood with One 10 Durgotsav in earlier years.
           </p>
-          <div className="mt-8 grid grid-cols-2 items-center gap-x-6 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {PREVIOUS_SPONSORS.map((s) => (
-              <div key={s.id} className="flex flex-col items-center gap-2 text-center" data-testid={`sponsor-logo-${s.id}`}>
-                <img
-                  src={s.src}
-                  alt={s.name}
-                  className="h-12 w-full max-w-[140px] object-contain opacity-80 transition hover:opacity-100 sm:h-14"
-                  loading="lazy"
-                />
+              <div key={s.id} className="flex flex-col items-center gap-3 text-center" data-testid={`sponsor-logo-${s.id}`}>
+                <div className="flex h-24 w-full items-center justify-center bg-white p-4 opacity-90 ring-1 ring-sun-400/20 transition hover:opacity-100 sm:h-28">
+                  <img
+                    src={s.src}
+                    alt={s.name}
+                    className="max-h-full max-w-full object-contain"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
                 <span className="text-[11px] text-brown-800/50">{s.name}</span>
               </div>
             ))}

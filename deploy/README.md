@@ -7,7 +7,7 @@ A changed commit is built and tested before switching production. Build time is
 additional to the polling interval. Other branches do not deploy.
 
 The VPS uses a repository-scoped **read-only** deploy key. No GitHub write token
-or inbound deployment endpoint is installed on the VPS. HTTPS host verification
+or inbound deployment endpoint is installed on the VPS. SSH host verification
 is enabled for GitHub. Root SSH remains restricted to the configured key holders.
 
 ## What is deployed
@@ -41,6 +41,7 @@ systemctl list-timers one10events-deploy.timer
 journalctl -u one10events-deploy.service -n 100 --no-pager
 cat /opt/one10events/deployed-sha
 cat /opt/one10events/deployed-at
+curl --fail https://one10events.in/deployment-version.json
 systemctl start one10events-deploy.service
 # Explicitly retry or rebuild the same revision:
 /usr/local/sbin/one10events-deploy --force

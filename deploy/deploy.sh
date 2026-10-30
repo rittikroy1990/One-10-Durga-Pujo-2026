@@ -82,6 +82,8 @@ docker run --rm --memory=3g --cpus=2 \
     -v "$release/frontend:/app" -w /app node:22-bookworm \
     sh -ec 'npm ci --no-audit --no-fund && npm run build'
 test -s "$release/frontend/build/index.html"
+printf '{"commit":"%s","built_at":"%s"}\n' "$target" "$(date -u +%FT%TZ)" \
+    > "$release/frontend/build/deployment-version.json"
 # Imports validate syntax/dependencies without running lifespan handlers against the database.
 docker run --rm \
     -v "$release:$release" \
@@ -109,6 +111,8 @@ start_backend "$image"
 health
 curl --fail --silent --resolve one10events.in:443:127.0.0.1 https://one10events.in/ >/dev/null
 curl --fail --silent --resolve one10events.in:443:127.0.0.1 https://one10events.in/api/config >/dev/null
+curl --fail --silent --resolve one10events.in:443:127.0.0.1 https://one10events.in/deployment-version.json \
+    | grep -Fq "$target"
 printf '%s\n' "$target" > "$STATE/deployed-sha"
 printf '%s\n' "$target" > "$STATE/SOURCE_COMMIT"
 docker image inspect "$image" --format '{{.Id}}' > "$STATE/IMAGE_ID"

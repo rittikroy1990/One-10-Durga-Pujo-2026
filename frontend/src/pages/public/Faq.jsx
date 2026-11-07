@@ -273,7 +273,7 @@ export default function Faq() {
 
           <FaqItem q="Where do I register for food / meals?" id="faq-food">
             <p>
-              Open <PageLink to="/food">Food</PageLink>, select meals for the published days, and submit with
+              Open <PageLink to="/food/bijaya">Food</PageLink>, choose your plates, and submit with
               your tower / flat details. Follow any payment instructions shown on that page.
             </p>
           </FaqItem>

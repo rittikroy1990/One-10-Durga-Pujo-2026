@@ -16,14 +16,12 @@ import { normalizeMobile } from "../../lib/food";
 const MAX_PLATES = 50;
 
 const DIET_OPTIONS = [
-  { value: "", label: "All" },
   { value: "veg", label: "Veg", dot: "bg-emerald-600" },
   { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
 ];
 
 /** Veg / Non-veg cards are separate. Shared sides (for_all_diets) show under both filters. */
 function dietMatches(item, diet) {
-  if (!diet) return true;
   if (item.for_all_diets) return true;
   return item.diet === diet;
 }
@@ -35,7 +33,7 @@ function DietToggle({ value, onChange }) {
         const active = value === opt.value;
         return (
           <button
-            key={opt.value || "all"}
+            key={opt.value}
             type="button"
             role="radio"
             aria-checked={active}
@@ -43,7 +41,7 @@ function DietToggle({ value, onChange }) {
             className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition sm:flex-none ${
               active ? "bg-white text-brown-900 shadow-sm ring-1 ring-sun-400/40" : "text-brown-800/60 hover:text-brown-900"
             }`}
-            data-testid={`bijaya-diet-${opt.value || "all"}`}
+            data-testid={`bijaya-diet-${opt.value}`}
           >
             {opt.dot ? <span className={`h-2.5 w-2.5 rounded-sm ${opt.dot}`} /> : null}
             {opt.label}
@@ -177,7 +175,7 @@ export default function BijayaFood() {
   const [flats, setFlats] = useState([]);
   const [flatsLoading, setFlatsLoading] = useState(false);
   const [plates, setPlates] = useState(1);
-  const [dietFilter, setDietFilter] = useState("");
+  const [dietFilter, setDietFilter] = useState("veg");
   const [step, setStep] = useState("menu");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({

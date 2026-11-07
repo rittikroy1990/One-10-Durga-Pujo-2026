@@ -15,6 +15,47 @@ import { VEG_PROMISE, normalizeMobile } from "../../lib/food";
 
 const MAX_PLATES = 50;
 
+function mediaUrl(path) {
+  if (!path) return "";
+  if (path.startsWith("http") || path.startsWith("/")) return path;
+  return `/${path}`;
+}
+
+/** Same retry behaviour as Durga Pujo food cards. */
+function MenuPhoto({ src, alt }) {
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setAttempt(0);
+    setFailed(false);
+  }, [src]);
+  if (failed) {
+    return (
+      <div className="grid h-full place-items-center bg-gradient-to-b from-amber-50 to-sun-50 px-4 text-center">
+        <div>
+          <UtensilsCrossed className="mx-auto h-7 w-7 text-amber-700/60" aria-hidden />
+          <p className="mt-1 text-xs text-brown-800/50">Photo couldn't load</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={attempt ? `${src}${src.includes("?") ? "&" : "?"}retry=${attempt}` : src}
+      alt={alt}
+      className="h-full w-full object-cover"
+      loading="lazy"
+      decoding="async"
+      width={800}
+      height={450}
+      onError={() => {
+        if (attempt < 2) setTimeout(() => setAttempt((a) => a + 1), 800 * (attempt + 1));
+        else setFailed(true);
+      }}
+    />
+  );
+}
+
 function QtyControl({ value, onBump, onSet, label, testId }) {
   return (
     <div className="inline-flex items-center gap-1.5" data-testid={testId}>
@@ -271,27 +312,84 @@ export default function BijayaFood() {
 
   const stepForBar = step === "done" ? (paymentEnabled ? "pay" : "checkout") : step;
 
+  const plateImage = cfg?.plate_image_url || "";
+
   const menuList = useMemo(() => {
     if (!menuReady) return null;
     return menuSections.map((section) => (
-      <div key={section.section} className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6" data-testid="bijaya-menu-section">
-        <h2 className="font-display text-2xl text-brown-900">{section.section}</h2>
-        {section.section_bn ? (
-          <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
-        ) : null}
-        <ul className="mt-4 divide-y divide-sun-400/20">
-          {(section.items || []).map((item) => (
-            <li key={item.name} className="flex items-start justify-between gap-3 py-2.5" data-testid="bijaya-menu-item">
-              <div>
-                <div className="font-medium text-brown-900">{item.name}</div>
-                {item.name_bn ? <div className="text-xs text-brown-800/50">{item.name_bn}</div> : null}
+      <div key={section.section} className="space-y-5" data-testid="bijaya-menu-section">
+        <div>
+          <h2 className="font-display text-2xl text-brown-900">{section.section}</h2>
+          {section.section_bn ? (
+            <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
+          ) : null}
+          <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)} — photos below, same style as Durga Pujo food.</p>
+        </div>
+
+        {plateImage ? (
+          <article className="overflow-hidden rounded-2xl border border-sun-400/30 bg-white shadow-card" data-testid="bijaya-plate-hero">
+            <div className="relative aspect-[16/9] bg-sun-50">
+              <MenuPhoto src={mediaUrl(plateImage)} alt="Bijaya Sammilani full plate" />
+              <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+                <span className="rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-brown-900 shadow-sm">
+                  Full plate
+                </span>
+                <span className="rounded-full bg-vermilion-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+                  {formatPaise(unitPaise)}
+                </span>
               </div>
-            </li>
+            </div>
+            <div className="p-4 sm:p-5">
+              <h3 className="font-display text-2xl text-brown-900">Bijaya Sammilani plate</h3>
+              <p className="mt-1 text-sm text-brown-800/60">Everything on the menu for one person — veg and non-veg choices included.</p>
+            </div>
+          </article>
+        ) : null}
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          {(section.items || []).map((item) => (
+            <article
+              key={item.id || item.name}
+              className="overflow-hidden rounded-2xl border border-sun-400/30 bg-white shadow-card"
+              data-testid={`bijaya-menu-item-${item.id || item.name}`}
+            >
+              <div className="relative aspect-[16/9] bg-sun-50">
+                {item.image_url ? (
+                  <MenuPhoto src={mediaUrl(item.image_url)} alt={item.name || "Menu"} />
+                ) : (
+                  <div className="grid h-full place-items-center bg-gradient-to-b from-amber-50 to-sun-50 px-4 text-center">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800/90">
+                        Image not uploaded
+                      </p>
+                      <p className="mt-1 text-xs text-brown-800/50">Menu photo coming soon</p>
+                    </div>
+                  </div>
+                )}
+                <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+                  {item.diet_label ? (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${
+                        item.diet === "veg"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-vermilion-600 text-white"
+                      }`}
+                    >
+                      {item.diet_label}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="p-4 sm:p-5">
+                <h3 className="font-display text-xl text-brown-900 sm:text-2xl">{item.name}</h3>
+                {item.name_bn ? <p className="mt-0.5 text-sm text-brown-800/55">{item.name_bn}</p> : null}
+              </div>
+            </article>
           ))}
-        </ul>
+        </div>
       </div>
     ));
-  }, [menuReady, menuSections]);
+  }, [menuReady, menuSections, plateImage, unitPaise]);
 
   if (cfg && !cfg.page_enabled) {
     return (

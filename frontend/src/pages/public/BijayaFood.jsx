@@ -655,7 +655,50 @@ export default function BijayaFood() {
           </form>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[1fr_20rem]" data-testid="bijaya-menu-step">
-            <div className="space-y-5">
+            {/* Mobile: flat/tower dropdowns first (below header). Desktop: after menu photos. */}
+            <div
+              className="order-1 rounded-2xl border border-emerald-600/25 bg-white p-4 shadow-card sm:p-5 lg:order-2 lg:col-start-1"
+              data-testid="bijaya-flat-card"
+            >
+              <h2 className="font-display text-xl text-brown-900">Your flat</h2>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <Label required>Tower</Label>
+                  <Select
+                    data-testid="bijaya-tower"
+                    value={form.tower_id}
+                    onChange={(e) => setForm({ ...form, tower_id: e.target.value, flat_id: "", flat_number: "" })}
+                  >
+                    <option value="">Select tower</option>
+                    {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <Label required>Flat</Label>
+                  <Select
+                    data-testid="bijaya-flat"
+                    value={form.flat_id}
+                    disabled={flatsLoading}
+                    onChange={(e) => setForm({ ...form, flat_id: e.target.value })}
+                  >
+                    <option value="">{flatsLoading ? "Loading flats…" : "Select flat"}</option>
+                    {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <Label required>Mobile</Label>
+                  <Input
+                    data-testid="bijaya-mobile"
+                    value={form.mobile}
+                    onChange={(e) => setForm({ ...form, mobile: normalizeMobile(e.target.value) })}
+                    placeholder="10-digit mobile"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="order-2 space-y-5 lg:order-1 lg:col-start-1">
               {!menuReady ? (
                 <div className="rounded-2xl border border-dashed border-amber-400/50 bg-amber-50/70 p-6 text-center" data-testid="bijaya-menu-placeholder">
                   <Clock className="mx-auto h-8 w-8 text-amber-700/70" />
@@ -667,48 +710,9 @@ export default function BijayaFood() {
                   </p>
                 </div>
               ) : menuList}
-
-              <div className="rounded-2xl border border-emerald-600/25 bg-white p-4 shadow-card sm:p-5" data-testid="bijaya-flat-card">
-                <h2 className="font-display text-xl text-brown-900">Your flat</h2>
-                <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <div>
-                    <Label required>Tower</Label>
-                    <Select
-                      data-testid="bijaya-tower"
-                      value={form.tower_id}
-                      onChange={(e) => setForm({ ...form, tower_id: e.target.value, flat_id: "", flat_number: "" })}
-                    >
-                      <option value="">Select tower</option>
-                      {towers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </Select>
-                  </div>
-                  <div>
-                    <Label required>Flat</Label>
-                    <Select
-                      data-testid="bijaya-flat"
-                      value={form.flat_id}
-                      disabled={flatsLoading}
-                      onChange={(e) => setForm({ ...form, flat_id: e.target.value })}
-                    >
-                      <option value="">{flatsLoading ? "Loading flats…" : "Select flat"}</option>
-                      {flats.map((f) => <option key={f.id} value={f.id}>{f.number}</option>)}
-                    </Select>
-                  </div>
-                  <div>
-                    <Label required>Mobile</Label>
-                    <Input
-                      data-testid="bijaya-mobile"
-                      value={form.mobile}
-                      onChange={(e) => setForm({ ...form, mobile: normalizeMobile(e.target.value) })}
-                      placeholder="10-digit mobile"
-                      inputMode="numeric"
-                    />
-                  </div>
-                </div>
-              </div>
             </div>
 
-            <aside className="lg:sticky lg:top-24 lg:self-start">
+            <aside className="order-3 lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:self-start">
               <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card" data-testid="bijaya-cart">
                 <h2 className="font-display text-xl text-brown-900">Your plates</h2>
                 <p className="mt-1 text-sm text-brown-800/60">{formatPaise(unitPaise)} each</p>

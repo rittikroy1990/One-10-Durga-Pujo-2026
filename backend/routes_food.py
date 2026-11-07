@@ -728,7 +728,6 @@ async def bijaya_food_menu():
         EVENT_CODE, EVENT_TITLE, EVENT_TITLE_BN, PACKAGE_LABEL, PACKAGE_CODE,
         PACKAGE_AMOUNT_PAISE, PAGE_ENABLED, PAYMENT_ENABLED, PAYMENT_NOTE,
         MENU_READY, MENU_PLACEHOLDER_TITLE, MENU_PLACEHOLDER_NOTE, MENU_SECTIONS,
-        PLATE_IMAGE_URL,
     )
     return {
         "event_code": EVENT_CODE,
@@ -743,7 +742,6 @@ async def bijaya_food_menu():
         "payment_note": PAYMENT_NOTE,
         "payment_method": "upi_qr",
         "menu_ready": MENU_READY,
-        "plate_image_url": PLATE_IMAGE_URL,
         "menu_placeholder": {
             "title": MENU_PLACEHOLDER_TITLE,
             "note": MENU_PLACEHOLDER_NOTE,

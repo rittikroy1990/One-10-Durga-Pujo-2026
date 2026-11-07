@@ -20,10 +20,7 @@ MENU_PLACEHOLDER_NOTE = (
     "finalises it. You can still subscribe and pay via UPI QR now."
 )
 
-# Hero / overall plate photo (same style as Durga Pujo food cards).
-PLATE_IMAGE_URL = "/images/food-menu/bijaya/plate-hero.jpg"
-
-# Final plate menu — image_url uses the same 16:9 card treatment as Durga food.
+# Final plate menu — each item has its own 16:9 photo (Durga food card style). No header plate image.
 MENU_SECTIONS: list[dict] = [
     {
         "section": "Bijaya Sammilani plate",
@@ -35,7 +32,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/plate-hero.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/water.jpg",
             },
             {
                 "id": "chop",
@@ -43,6 +41,7 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
+                "for_all_diets": True,
                 "image_url": "/images/food-menu/bijaya/chop.jpg",
             },
             {
@@ -51,7 +50,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "কাসুন্দি",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/chop.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/kasundi.jpg",
             },
             {
                 "id": "salad",
@@ -59,7 +59,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "সালাদ",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/plate-hero.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/salad.jpg",
             },
             {
                 "id": "kachuri",
@@ -67,7 +68,7 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "মটর কচুরি",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/kachuri-aloodum.jpg",
+                "image_url": "/images/food-menu/bijaya/kachuri.jpg",
             },
             {
                 "id": "aloo_dum",
@@ -75,7 +76,7 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "কাশ্মীরি আলু দম",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/kachuri-aloodum.jpg",
+                "image_url": "/images/food-menu/bijaya/aloodum.jpg",
             },
             {
                 "id": "plain_rice",
@@ -83,7 +84,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "সাদা ভাত",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/polao-mains.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/plain-rice.jpg",
             },
             {
                 "id": "bhetki_paneer",
@@ -91,7 +93,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
-                "image_url": "/images/food-menu/bijaya/polao-mains.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/bhetki-paneer.jpg",
             },
             {
                 "id": "basanti_polao",
@@ -99,7 +102,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "বসন্তী পোলাও",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/polao-mains.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/basanti-polao.jpg",
             },
             {
                 "id": "curries",
@@ -107,6 +111,7 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
+                "for_all_diets": True,
                 "image_url": "/images/food-menu/bijaya/curries.jpg",
             },
             {
@@ -115,7 +120,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "ফলের চাটনি",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/sweets.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/chutney.jpg",
             },
             {
                 "id": "papad",
@@ -123,7 +129,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "পাপড়",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/sweets.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/papad.jpg",
             },
             {
                 "id": "rosogolla",
@@ -131,7 +138,8 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "রসগোল্লা (২টি)",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/sweets.jpg",
+                "for_all_diets": True,
+                "image_url": "/images/food-menu/bijaya/rosogolla.jpg",
             },
         ],
     },

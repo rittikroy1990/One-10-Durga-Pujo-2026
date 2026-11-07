@@ -15,6 +15,45 @@ import { VEG_PROMISE, normalizeMobile } from "../../lib/food";
 
 const MAX_PLATES = 50;
 
+const DIET_OPTIONS = [
+  { value: "", label: "All" },
+  { value: "veg", label: "Veg", dot: "bg-emerald-600" },
+  { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
+];
+
+/** Shared sides + veg/non-veg choice dishes show under both diet filters (same idea as Durga food). */
+function dietMatches(item, diet) {
+  if (!diet) return true;
+  if (item.for_all_diets || item.diet === "both") return true;
+  return item.diet === diet;
+}
+
+function DietToggle({ value, onChange }) {
+  return (
+    <div role="radiogroup" aria-label="Veg or non-veg" className="inline-flex w-full rounded-full border border-sun-400/40 bg-sun-50/60 p-1 sm:w-auto" data-testid="bijaya-diet-toggle">
+      {DIET_OPTIONS.map((opt) => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value || "all"}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(opt.value)}
+            className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition sm:flex-none ${
+              active ? "bg-white text-brown-900 shadow-sm ring-1 ring-sun-400/40" : "text-brown-800/60 hover:text-brown-900"
+            }`}
+            data-testid={`bijaya-diet-${opt.value || "all"}`}
+          >
+            {opt.dot ? <span className={`h-2.5 w-2.5 rounded-sm ${opt.dot}`} /> : null}
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function mediaUrl(path) {
   if (!path) return "";
   if (path.startsWith("http") || path.startsWith("/")) return path;
@@ -138,6 +177,7 @@ export default function BijayaFood() {
   const [flats, setFlats] = useState([]);
   const [flatsLoading, setFlatsLoading] = useState(false);
   const [plates, setPlates] = useState(1);
+  const [dietFilter, setDietFilter] = useState("");
   const [step, setStep] = useState("menu");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
@@ -312,84 +352,76 @@ export default function BijayaFood() {
 
   const stepForBar = step === "done" ? (paymentEnabled ? "pay" : "checkout") : step;
 
-  const plateImage = cfg?.plate_image_url || "";
-
   const menuList = useMemo(() => {
     if (!menuReady) return null;
-    return menuSections.map((section) => (
-      <div key={section.section} className="space-y-5" data-testid="bijaya-menu-section">
-        <div>
-          <h2 className="font-display text-2xl text-brown-900">{section.section}</h2>
-          {section.section_bn ? (
-            <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
-          ) : null}
-          <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)} — photos below, same style as Durga Pujo food.</p>
-        </div>
-
-        {plateImage ? (
-          <article className="overflow-hidden rounded-2xl border border-sun-400/30 bg-white shadow-card" data-testid="bijaya-plate-hero">
-            <div className="relative aspect-[16/9] bg-sun-50">
-              <MenuPhoto src={mediaUrl(plateImage)} alt="Bijaya Sammilani full plate" />
-              <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
-                <span className="rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-brown-900 shadow-sm">
-                  Full plate
-                </span>
-                <span className="rounded-full bg-vermilion-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
-                  {formatPaise(unitPaise)}
-                </span>
-              </div>
+    return menuSections.map((section) => {
+      const items = (section.items || []).filter((item) => dietMatches(item, dietFilter));
+      return (
+        <div key={section.section} className="space-y-5" data-testid="bijaya-menu-section">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="font-display text-2xl text-brown-900">{section.section}</h2>
+              {section.section_bn ? (
+                <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
+              ) : null}
+              <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)} — photos below, same style as Durga Pujo food.</p>
             </div>
-            <div className="p-4 sm:p-5">
-              <h3 className="font-display text-2xl text-brown-900">Bijaya Sammilani plate</h3>
-              <p className="mt-1 text-sm text-brown-800/60">Everything on the menu for one person — veg and non-veg choices included.</p>
-            </div>
-          </article>
-        ) : null}
+            <DietToggle value={dietFilter} onChange={setDietFilter} />
+          </div>
 
-        <div className="grid gap-5 sm:grid-cols-2">
-          {(section.items || []).map((item) => (
-            <article
-              key={item.id || item.name}
-              className="overflow-hidden rounded-2xl border border-sun-400/30 bg-white shadow-card"
-              data-testid={`bijaya-menu-item-${item.id || item.name}`}
-            >
-              <div className="relative aspect-[16/9] bg-sun-50">
-                {item.image_url ? (
-                  <MenuPhoto src={mediaUrl(item.image_url)} alt={item.name || "Menu"} />
-                ) : (
-                  <div className="grid h-full place-items-center bg-gradient-to-b from-amber-50 to-sun-50 px-4 text-center">
-                    <div>
-                      <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800/90">
-                        Image not uploaded
-                      </p>
-                      <p className="mt-1 text-xs text-brown-800/50">Menu photo coming soon</p>
+          {items.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-sun-400/40 bg-sun-50/50 px-4 py-6 text-center text-sm text-brown-800/60">
+              No dishes in this filter. Try All or the other diet.
+            </p>
+          ) : (
+            <div className="grid gap-5 sm:grid-cols-2">
+              {items.map((item) => (
+                <article
+                  key={item.id || item.name}
+                  className="overflow-hidden rounded-2xl border border-sun-400/30 bg-white shadow-card"
+                  data-testid={`bijaya-menu-item-${item.id || item.name}`}
+                >
+                  <div className="relative aspect-[16/9] bg-sun-50">
+                    {item.image_url ? (
+                      <MenuPhoto src={mediaUrl(item.image_url)} alt={item.name || "Menu"} />
+                    ) : (
+                      <div className="grid h-full place-items-center bg-gradient-to-b from-amber-50 to-sun-50 px-4 text-center">
+                        <div>
+                          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800/90">
+                            Image not uploaded
+                          </p>
+                          <p className="mt-1 text-xs text-brown-800/50">Menu photo coming soon</p>
+                        </div>
+                      </div>
+                    )}
+                    <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+                      {item.diet_label ? (
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${
+                            item.diet === "veg"
+                              ? "bg-emerald-600 text-white"
+                              : item.diet === "both"
+                                ? "bg-brown-900 text-white"
+                                : "bg-vermilion-600 text-white"
+                          }`}
+                        >
+                          {item.diet_label}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                )}
-                <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
-                  {item.diet_label ? (
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${
-                        item.diet === "veg"
-                          ? "bg-emerald-600 text-white"
-                          : "bg-vermilion-600 text-white"
-                      }`}
-                    >
-                      {item.diet_label}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="p-4 sm:p-5">
-                <h3 className="font-display text-xl text-brown-900 sm:text-2xl">{item.name}</h3>
-                {item.name_bn ? <p className="mt-0.5 text-sm text-brown-800/55">{item.name_bn}</p> : null}
-              </div>
-            </article>
-          ))}
+                  <div className="p-4 sm:p-5">
+                    <h3 className="font-display text-xl text-brown-900 sm:text-2xl">{item.name}</h3>
+                    {item.name_bn ? <p className="mt-0.5 text-sm text-brown-800/55">{item.name_bn}</p> : null}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
-    ));
-  }, [menuReady, menuSections, plateImage, unitPaise]);
+      );
+    });
+  }, [menuReady, menuSections, dietFilter, unitPaise]);
 
   if (cfg && !cfg.page_enabled) {
     return (

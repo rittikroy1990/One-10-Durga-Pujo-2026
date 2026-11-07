@@ -426,7 +426,7 @@ export default function BijayaFood() {
       <PublicLayout>
         <section className="relative flex min-h-[70vh] items-center justify-center overflow-hidden border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 px-4 pt-24 pb-16">
           <div className="relative mx-auto max-w-xl text-center">
-            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">বিজয়া সংমিলনী</p>
+            <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">বিজয়া সম্মিলনী</p>
             <h1 className="mt-3 font-display text-4xl text-brown-900 sm:text-5xl">Coming soon</h1>
             <p className="mt-3 text-base text-brown-800/70">Bijaya Sammilani food subscriptions will open soon.</p>
             <div className="mt-8">
@@ -444,7 +444,7 @@ export default function BijayaFood() {
     <PublicLayout>
       <section className="border-b border-sun-400/25 bg-gradient-to-b from-sun-50 via-white to-sky-50 pt-8 pb-8">
         <div className="mx-auto max-w-5xl px-4 sm:px-5">
-          <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">বিজয়া সংমিলনী · Food</p>
+          <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">বিজয়া সম্মিলনী · Food</p>
           <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">
             {cfg?.title || "Bijaya Sammilani"}
           </h1>

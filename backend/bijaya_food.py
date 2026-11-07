@@ -1,8 +1,8 @@
-"""Bijaya Sammilani (বিজয়া সংমিলনী) food subscription — fixed per-plate package + QR pay."""
+"""Bijaya Sammilani (বিজয়া সম্মিলনী) food subscription — fixed per-plate package + QR pay."""
 
 EVENT_CODE = "bijaya_sammilani"
 EVENT_TITLE = "Bijaya Sammilani"
-EVENT_TITLE_BN = "বিজয়া সংমিলনী"
+EVENT_TITLE_BN = "বিজয়া সম্মিলনী"
 PACKAGE_LABEL = "Bijaya Sammilani food plate"
 PACKAGE_CODE = "bijaya_package"
 
@@ -25,7 +25,7 @@ MENU_PLACEHOLDER_NOTE = (
 MENU_SECTIONS: list[dict] = [
     {
         "section": "Bijaya Sammilani plate",
-        "section_bn": "বিজয়া সংমিলনী প্লেট",
+        "section_bn": "বিজয়া সম্মিলনী প্লেট",
         "items": [
             {
                 "id": "water",

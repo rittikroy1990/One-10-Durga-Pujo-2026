@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   UtensilsCrossed, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
-  Minus, Plus, ArrowRight, ArrowLeft, Check, ClipboardList, Leaf, Clock,
+  Minus, Plus, ArrowRight, ArrowLeft, Check, ClipboardList, Clock,
 } from "lucide-react";
 import api from "../../lib/api";
 import { loadFlats, prefetchFlats } from "../../lib/flats";
@@ -11,7 +11,7 @@ import PublicLayout from "../../components/PublicLayout";
 import WhatsAppOrderPanel from "../../components/WhatsAppOrderPanel";
 import { Button, Input, Label, Select, Spinner } from "../../components/ui";
 import { formatPaise } from "../../lib/utils";
-import { VEG_PROMISE, normalizeMobile } from "../../lib/food";
+import { normalizeMobile } from "../../lib/food";
 
 const MAX_PLATES = 50;
 
@@ -475,10 +475,6 @@ export default function BijayaFood() {
             </Link>
           </div>
 
-          <p className="mt-4 flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-600/25 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
-            <Leaf className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-            <span>{VEG_PROMISE}</span>
-          </p>
         </div>
       </section>
 

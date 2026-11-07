@@ -42,7 +42,7 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "veg",
                 "diet_label": "Veg",
-                "image_url": "/images/food-menu/bijaya/veg-chop.jpg",
+                "image_url": "/images/food-menu/bijaya/veg-chop-v2.jpg",
             },
             {
                 "id": "fish_chop",

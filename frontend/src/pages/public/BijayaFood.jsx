@@ -82,7 +82,7 @@ function MenuPhoto({ src, alt }) {
     <img
       src={attempt ? `${src}${src.includes("?") ? "&" : "?"}retry=${attempt}` : src}
       alt={alt}
-      className="h-full w-full object-cover"
+      className="h-full w-full object-cover object-center"
       loading="lazy"
       decoding="async"
       width={800}

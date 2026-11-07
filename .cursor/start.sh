@@ -2,7 +2,12 @@
 # Cloud Agent start — MongoDB + FastAPI + CRA for One 10 Events.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Cloud Agent builds may place the repo under /agent/repos/<name>.
+if [ -d "/agent/repos/One-10-Durga-Pujo-2026" ]; then
+  ROOT="/agent/repos/One-10-Durga-Pujo-2026"
+fi
 cd "$ROOT"
 
 mkdir -p /tmp/one10-mongo /tmp/one10-logs

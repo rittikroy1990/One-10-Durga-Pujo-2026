@@ -723,22 +723,27 @@ _REPEAT_ORDER_WINDOW_SECONDS = 120
 
 @router.get("/food/bijaya/menu")
 async def bijaya_food_menu():
-    """Public Bijaya Sammilani food package — fixed ₹607, menu placeholder until supplied."""
+    """Public Bijaya Sammilani food package — fixed per-plate price, menu from config."""
     from bijaya_food import (
         EVENT_CODE, EVENT_TITLE, EVENT_TITLE_BN, PACKAGE_LABEL, PACKAGE_CODE,
         PACKAGE_AMOUNT_PAISE, PAGE_ENABLED, PAYMENT_ENABLED, PAYMENT_NOTE,
         MENU_READY, MENU_PLACEHOLDER_TITLE, MENU_PLACEHOLDER_NOTE, MENU_SECTIONS,
     )
+    s = await get_settings()
+    cfg = s.get("bijaya_food") or {}
+    amount = int(cfg.get("amount_paise") or PACKAGE_AMOUNT_PAISE)
+    page_enabled = bool(cfg["page_enabled"]) if "page_enabled" in cfg else bool(PAGE_ENABLED)
+    payment_enabled = bool(cfg["payment_enabled"]) if "payment_enabled" in cfg else bool(PAYMENT_ENABLED)
     return {
         "event_code": EVENT_CODE,
         "title": EVENT_TITLE,
         "title_bn": EVENT_TITLE_BN,
         "package_label": PACKAGE_LABEL,
         "package_code": PACKAGE_CODE,
-        "amount_paise": PACKAGE_AMOUNT_PAISE,
-        "amount_label": f"₹{PACKAGE_AMOUNT_PAISE // 100}",
-        "page_enabled": PAGE_ENABLED,
-        "payment_enabled": PAYMENT_ENABLED,
+        "amount_paise": amount,
+        "amount_label": f"₹{amount // 100}",
+        "page_enabled": page_enabled,
+        "payment_enabled": payment_enabled,
         "payment_note": PAYMENT_NOTE,
         "payment_method": "upi_qr",
         "menu_ready": MENU_READY,
@@ -757,7 +762,12 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
         EVENT_CODE, EVENT_TITLE, PACKAGE_LABEL, PACKAGE_CODE, PACKAGE_AMOUNT_PAISE,
         PAGE_ENABLED, PAYMENT_ENABLED,
     )
-    if not PAGE_ENABLED:
+    s = await get_settings()
+    cfg = s.get("bijaya_food") or {}
+    page_enabled = bool(cfg["page_enabled"]) if "page_enabled" in cfg else bool(PAGE_ENABLED)
+    payment_cfg = bool(cfg["payment_enabled"]) if "payment_enabled" in cfg else bool(PAYMENT_ENABLED)
+    unit_paise = int(cfg.get("amount_paise") or PACKAGE_AMOUNT_PAISE)
+    if not page_enabled:
         raise HTTPException(status_code=403, detail="Bijaya Sammilani food subscriptions are not open yet.")
 
     tower_id = (body.get("tower_id") or "").strip()
@@ -789,8 +799,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
     if diet not in ("veg", "non_veg"):
         raise HTTPException(status_code=400, detail="Choose veg or non-veg plate.")
     diet_label = DIET_TYPES.get(diet) or diet
-    # Same ₹660 for veg and non-veg plates.
-    unit_paise = int(PACKAGE_AMOUNT_PAISE)
+    # Same package price for veg and non-veg plates.
     total_paise = unit_paise * quantity
     meal_label = f"{PACKAGE_LABEL} ({diet_label})"
     selections = [{
@@ -828,7 +837,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
 
         cycle_id = await get_active_cycle_id()
         sid = new_id("food")
-        payment_enabled = bool(PAYMENT_ENABLED) and total_paise > 0
+        payment_enabled = bool(payment_cfg) and total_paise > 0
         doc = {
             "id": sid,
             "cycle_id": cycle_id,

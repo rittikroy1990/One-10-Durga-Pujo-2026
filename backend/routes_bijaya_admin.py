@@ -16,7 +16,7 @@ from config import get_settings, get_active_cycle_id
 from db import NO_ID, db, new_id
 from util import iso
 
-router = APIRouter()
+router = APIRouter(prefix="/api")
 
 _BIJAYA_EVENT = "bijaya_sammilani"
 _TEMPLATE_HEADERS = [
@@ -347,8 +347,12 @@ async def admin_bijaya_import(
                         flat_number = flat.get("number") or flat_number
 
         payment_status = _payment_status_from_cell(str(row.get("payment_status") or ""))
-        # Offline import: "paid" means committee marked collected; pending otherwise.
-        if payment_status not in ("paid", "pending", "not_open", "complimentary"):
+        # Do not mark paid via CSV — use Record pay (UTR → receipt) for audit trail.
+        if payment_status in ("paid", "complimentary", "partially_paid"):
+            skipped += 1
+            errors.append({"row": idx, "error": "Don't set paid in CSV — create/update as pending, then use Record pay with UTR"})
+            continue
+        if payment_status not in ("pending", "not_open"):
             payment_status = "pending"
         notes = str(row.get("notes") or "").strip()[:500]
 

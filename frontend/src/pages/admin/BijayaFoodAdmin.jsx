@@ -360,11 +360,32 @@ export default function BijayaFoodAdmin() {
                       <TD><StatusBadge status={paymentLabel(r.payment_status)} /></TD>
                       <TD className="whitespace-nowrap text-xs text-brown-800/60">{formatDateIST(r.created_at)}</TD>
                       <TD className="text-right">
-                        {["pending", "partially_paid"].includes(r.payment_status) && r.intent_id ? (
-                          <Button variant="subtle" size="sm" onClick={() => openRecord(r)} data-testid={`bijaya-record-${r.ref}`}>
-                            <Wallet className="h-3.5 w-3.5" /> Record pay
-                          </Button>
-                        ) : null}
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {["pending", "partially_paid"].includes(r.payment_status) && r.intent_id ? (
+                            <Button variant="subtle" size="sm" onClick={() => openRecord(r)} data-testid={`bijaya-record-${r.ref}`}>
+                              <Wallet className="h-3.5 w-3.5" /> Record pay
+                            </Button>
+                          ) : null}
+                          {["pending", "partially_paid", "not_open"].includes(r.payment_status) ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                if (!window.confirm(`Cancel Bijaya order #${r.ref}?`)) return;
+                                try {
+                                  await api.post(`/admin/food-subscriptions/${r.id}/cancel`, {});
+                                  toast.success(`Order #${r.ref} cancelled`);
+                                  load();
+                                } catch (err) {
+                                  toast.error(err?.response?.data?.detail || "Could not cancel");
+                                }
+                              }}
+                              data-testid={`bijaya-cancel-${r.ref}`}
+                            >
+                              Cancel
+                            </Button>
+                          ) : null}
+                        </div>
                       </TD>
                     </TR>
                   ))}

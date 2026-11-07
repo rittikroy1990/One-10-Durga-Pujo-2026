@@ -242,8 +242,11 @@ export default function BijayaFood() {
     }
   };
 
+  const plateDietLabel = dietFilter === "non_veg" ? "Non-veg" : "Veg";
+
   const goCheckout = () => {
     if (plates < 1) return toast.error("Add at least one plate");
+    if (dietFilter !== "veg" && dietFilter !== "non_veg") return toast.error("Choose veg or non-veg plate");
     if (!form.tower_id || !form.flat_id) return toast.error("Select your tower and flat");
     if (!/^[6-9]\d{9}$/.test(form.mobile)) return toast.error("Enter a valid 10-digit mobile number");
     setStep("checkout");
@@ -271,6 +274,7 @@ export default function BijayaFood() {
         flat_id: form.flat_id,
         flat_number: flat?.number || form.flat_number,
         quantity: plates,
+        diet: dietFilter,
       });
       let session = null;
       if (r.data.payment_enabled && r.data.intent_id) {
@@ -345,6 +349,7 @@ export default function BijayaFood() {
     setReference("");
     setScreenshot(null);
     setPlates(1);
+    setDietFilter("veg");
     setStep("menu");
   };
 
@@ -362,14 +367,15 @@ export default function BijayaFood() {
               {section.section_bn ? (
                 <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
               ) : null}
-              <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)}</p>
+              <p className="mt-1 text-sm text-brown-800/60">
+                {plateDietLabel} plate · {formatPaise(unitPaise)}
+              </p>
             </div>
-            <DietToggle value={dietFilter} onChange={setDietFilter} />
           </div>
 
           {items.length === 0 ? (
             <p className="rounded-xl border border-dashed border-sun-400/40 bg-sun-50/50 px-4 py-6 text-center text-sm text-brown-800/60">
-              No dishes in this filter. Try All or the other diet.
+              No dishes for this plate type. Try the other option.
             </p>
           ) : (
             <div className="grid gap-5 sm:grid-cols-2">
@@ -417,7 +423,7 @@ export default function BijayaFood() {
         </div>
       );
     });
-  }, [menuReady, menuSections, dietFilter, unitPaise]);
+  }, [menuReady, menuSections, dietFilter, plateDietLabel, unitPaise]);
 
   if (cfg && !cfg.page_enabled) {
     return (
@@ -607,7 +613,8 @@ export default function BijayaFood() {
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
               <h2 className="font-display text-2xl text-brown-900">Your details</h2>
               <p className="mt-1 text-sm text-brown-800/60">
-                {plates} plate{plates === 1 ? "" : "s"} · {formatPaise(totalPaise)}
+                {plates} {plateDietLabel.toLowerCase()} plate{plates === 1 ? "" : "s"} · {formatPaise(totalPaise)}
+                <span className="text-brown-800/45"> (same price for veg &amp; non-veg)</span>
               </p>
               <div className="mt-4 space-y-3">
                 <div>
@@ -687,7 +694,11 @@ export default function BijayaFood() {
               <aside className="lg:sticky lg:top-24">
                 <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card" data-testid="bijaya-cart">
                   <h2 className="font-display text-xl text-brown-900">Your plates</h2>
-                  <p className="mt-1 text-sm text-brown-800/60">{formatPaise(unitPaise)} each</p>
+                  <p className="mt-1 text-sm text-brown-800/60">{formatPaise(unitPaise)} each · same for veg &amp; non-veg</p>
+                  <div className="mt-4 space-y-2">
+                    <span className="text-sm font-medium text-brown-900">Plate type</span>
+                    <DietToggle value={dietFilter} onChange={setDietFilter} />
+                  </div>
                   <div className="mt-4 flex items-center justify-between gap-3">
                     <span className="text-sm font-medium text-brown-900">Plates</span>
                     <QtyControl
@@ -699,7 +710,9 @@ export default function BijayaFood() {
                     />
                   </div>
                   <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
-                    <div className="text-sm text-brown-800/60">{plates} plate{plates === 1 ? "" : "s"}</div>
+                    <div className="text-sm text-brown-800/60">
+                      {plates} {plateDietLabel.toLowerCase()} plate{plates === 1 ? "" : "s"}
+                    </div>
                     <div className="text-right">
                       <div className="text-[10px] uppercase tracking-wide text-brown-800/45">You pay</div>
                       <div className="font-display text-3xl text-vermilion-600" data-testid="bijaya-total">

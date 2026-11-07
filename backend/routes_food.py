@@ -785,14 +785,22 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
     if quantity < 1 or quantity > 50:
         raise HTTPException(status_code=400, detail="Enter between 1 and 50 plates.")
 
+    diet = _normalize_diet(body.get("diet") or body.get("plate_diet") or "")
+    if diet not in ("veg", "non_veg"):
+        raise HTTPException(status_code=400, detail="Choose veg or non-veg plate.")
+    diet_label = DIET_TYPES.get(diet) or diet
+    # Same ₹660 for veg and non-veg plates.
     unit_paise = int(PACKAGE_AMOUNT_PAISE)
     total_paise = unit_paise * quantity
+    meal_label = f"{PACKAGE_LABEL} ({diet_label})"
     selections = [{
         "item_id": PACKAGE_CODE,
         "day_code": EVENT_CODE,
         "day_label": EVENT_TITLE,
         "meal_code": "package",
-        "meal_label": PACKAGE_LABEL,
+        "meal_label": meal_label,
+        "diet": diet,
+        "diet_label": diet_label,
         "quantity": quantity,
         "unit_amount_paise": unit_paise,
         "line_total_paise": total_paise,
@@ -801,7 +809,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
     }]
 
     async with _flat_guard(flat_id):
-        # Same flat + mobile + Bijaya package + qty within the repeat window → return existing order.
+        # Same flat + mobile + Bijaya package + diet + qty within the repeat window → return existing order.
         since = (datetime.now(timezone.utc) - timedelta(seconds=_REPEAT_ORDER_WINDOW_SECONDS)).isoformat()
         async for o in db.food_subscriptions.find(
             {
@@ -811,8 +819,10 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             },
             NO_ID,
         ).sort("created_at", -1):
-            prev_qty = int(((o.get("selections") or [{}])[0] or {}).get("quantity") or 0)
-            if prev_qty == quantity:
+            prev_sel = (o.get("selections") or [{}])[0] or {}
+            prev_qty = int(prev_sel.get("quantity") or 0)
+            prev_diet = _normalize_diet(o.get("diet") or prev_sel.get("diet") or "")
+            if prev_qty == quantity and prev_diet == diet:
                 return await _register_response(
                     o, message="This Bijaya order was already placed — here it is again.")
 
@@ -832,6 +842,8 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             "flat_number": flat_number,
             "family_members": int(body.get("family_members") or 1),
             "notes": (body.get("notes") or "").strip()[:500],
+            "diet": diet,
+            "diet_label": diet_label,
             "selections": selections,
             "selection_count": quantity,
             "kids": [],
@@ -877,7 +889,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
                 "food_subscription_id": sid,
                 "event_code": EVENT_CODE,
                 "base_amount": total_paise, "donation_amount": 0, "total_amount": total_paise,
-                "components": [{"code": PACKAGE_CODE, "label": PACKAGE_LABEL, "amount_paise": total_paise}],
+                "components": [{"code": PACKAGE_CODE, "label": meal_label, "amount_paise": total_paise}],
                 "payer_name": name, "payer_mobile": mobile or "",
                 "status": "payment_pending", "method": "upi_qr",
                 "notes": doc["notes"], "created_at": iso(),
@@ -895,6 +907,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             "event_code": EVENT_CODE,
             "name": name,
             "mobile": (mobile[-4:] if mobile else ""),
+            "diet": diet,
             "total_amount_paise": total_paise,
             "payment_enabled": payment_enabled,
         },

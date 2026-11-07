@@ -446,7 +446,7 @@ export default function BijayaFood() {
         <div className="mx-auto max-w-5xl px-4 sm:px-5">
           <p className="text-[10px] uppercase tracking-[0.35em] text-vermilion-500">বিজয়া সম্মিলনী · Food</p>
           <h1 className="mt-2 font-display text-4xl text-brown-900 sm:text-5xl">
-            {cfg?.title || "Bijaya Sammilani"}
+            {cfg?.title || "Bijaya Sammilani Food"}
           </h1>
           {cfg?.title_bn ? (
             <p className="mt-1 font-display text-2xl text-brown-800/70">{cfg.title_bn}</p>

@@ -1,8 +1,8 @@
 """Bijaya Sammilani (বিজয়া সম্মিলনী) food subscription — fixed per-plate package + QR pay."""
 
 EVENT_CODE = "bijaya_sammilani"
-EVENT_TITLE = "Bijaya Sammilani"
-EVENT_TITLE_BN = "বিজয়া সম্মিলনী"
+EVENT_TITLE = "Bijaya Sammilani Food"
+EVENT_TITLE_BN = "বিজয়া সম্মিলনী খাবার"
 PACKAGE_LABEL = "Bijaya Sammilani food plate"
 PACKAGE_CODE = "bijaya_package"
 
@@ -24,8 +24,8 @@ MENU_PLACEHOLDER_NOTE = (
 # Dual choices are listed as separate veg / non-veg cards for the diet filter.
 MENU_SECTIONS: list[dict] = [
     {
-        "section": "Bijaya Sammilani plate",
-        "section_bn": "বিজয়া সম্মিলনী প্লেট",
+        "section": "Bijaya Sammilani Food plate",
+        "section_bn": "বিজয়া সম্মিলনী খাবার প্লেট",
         "items": [
             {
                 "id": "water",

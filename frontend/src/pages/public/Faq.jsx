@@ -8,7 +8,6 @@ import api from "../../lib/api";
 import PublicLayout from "../../components/PublicLayout";
 import TechSupportBrand from "../../components/TechSupportBrand";
 import { formatPaise } from "../../lib/utils";
-import { VEG_PROMISE } from "../../lib/food";
 
 const DIRECTORY = [
   { to: "/", label: "Home", blurb: "Campaign overview, venue & how to join", icon: HelpCircle },
@@ -273,12 +272,9 @@ export default function Faq() {
 
           <FaqItem q="Where do I register for food / meals?" id="faq-food">
             <p>
-              Open <PageLink to="/food">Food</PageLink>, choose your plates, and submit with
+              Open <PageLink to="/food">Food</PageLink> for Bijaya Sammilani, choose your plates, and submit with
               your tower / flat details. Follow any payment instructions shown on that page.
             </p>
-          </FaqItem>
-          <FaqItem q="How is the veg food prepared?" id="faq-food-veg">
-            <p>{VEG_PROMISE}</p>
           </FaqItem>
         </section>
 

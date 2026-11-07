@@ -6,7 +6,6 @@ import PublicLayout from "../../components/PublicLayout";
 import { Button } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
 import { formatPaise, formatDateIST } from "../../lib/utils";
-import { VEG_PROMISE } from "../../lib/food";
 
 function shortDate(iso) {
   if (!iso) return "";
@@ -142,8 +141,6 @@ export default function FoodVoucher() {
                     </Link>
                   ) : null}
                 </div>
-                <p className="mt-4 text-center text-xs text-brown-800/45">No take-aways for breakfast and Ashtami lunch.</p>
-                <p className="mt-1 text-center text-xs text-emerald-800/80" data-testid="food-voucher-veg-promise">{VEG_PROMISE}</p>
               </div>
             )}
           </div>

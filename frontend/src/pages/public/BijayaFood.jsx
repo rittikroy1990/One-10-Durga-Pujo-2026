@@ -473,13 +473,6 @@ export default function BijayaFood() {
             >
               <ClipboardList className="h-4 w-4 text-vermilion-500" /> My orders
             </Link>
-            <Link
-              to="/food"
-              className="inline-flex items-center gap-1.5 rounded-full border border-sun-400/35 bg-white px-3 py-1.5 font-medium text-brown-900 hover:border-vermilion-500/40 hover:text-vermilion-600"
-              data-testid="bijaya-durga-food-link"
-            >
-              Durga Pujo food
-            </Link>
           </div>
 
           <p className="mt-4 flex max-w-2xl items-start gap-2 rounded-xl border border-emerald-600/25 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">

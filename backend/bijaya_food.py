@@ -114,7 +114,7 @@ MENU_SECTIONS: list[dict] = [
             {
                 "id": "basanti_polao",
                 "name": "Basanti polao",
-                "name_bn": "বসন্তী পোলাও",
+                "name_bn": "বাসন্তী পোলাও",
                 "diet": "veg",
                 "diet_label": "Veg",
                 "for_all_diets": True,

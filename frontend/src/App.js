@@ -13,6 +13,7 @@ import Subscribe from "./pages/public/Subscribe";
 import Donate from "./pages/public/Donate";
 import Contribute from "./pages/public/Contribute";
 import Food from "./pages/public/Food";
+import BijayaFood from "./pages/public/BijayaFood";
 import FoodVoucher from "./pages/public/FoodVoucher";
 import FoodOrders from "./pages/public/FoodOrders";
 import PaymentStatus from "./pages/public/PaymentStatus";
@@ -67,6 +68,8 @@ function AppRoutes() {
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
       <Route path="/food" element={<Food />} />
+      <Route path="/food/bijaya" element={<BijayaFood />} />
+      <Route path="/food/bijaya-sammilani" element={<BijayaFood />} />
       <Route path="/food/voucher/:token" element={<FoodVoucher />} />
       <Route path="/food/orders" element={<FoodOrders />} />
       <Route path="/food-poll" element={<FoodPoll />} />

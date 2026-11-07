@@ -16,6 +16,7 @@ const LINKS = [
   { to: "/sponsors", label: "Sponsorship" },
   { to: "/promote", label: "Promote", ads: true, desktopClass: "hidden 2xl:block" },
   { to: "/food", label: "Food" },
+  { to: "/food/bijaya", label: "Bijaya Food" },
   { to: "/participate", label: "Participate" },
   { to: "/faq", label: "FAQ" },
   { to: "/receipt/find", label: "Receipts" },
@@ -168,6 +169,7 @@ export function PublicFooter() {
             <li><Link to="/events" className="hover:text-brown-900">Programme</Link></li>
             <li><Link to="/nirghanto" className="hover:text-brown-900">Nirghonto</Link></li>
             <li><Link to="/food" className="hover:text-brown-900">Food</Link></li>
+            <li><Link to="/food/bijaya" className="hover:text-brown-900">Bijaya Food</Link></li>
             <li><Link to="/receipt/find" className="hover:text-brown-900">Find Receipt</Link></li>
             <li><Link to="/transparency" className="hover:text-brown-900">Digital Pandal Meter</Link></li>
             <li><Link to="/participate" className="hover:text-brown-900">Participate</Link></li>

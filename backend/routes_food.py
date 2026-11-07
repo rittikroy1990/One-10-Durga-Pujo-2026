@@ -718,6 +718,196 @@ async def food_register(body: dict = Body(...), request: Request = None):
 _REPEAT_ORDER_WINDOW_SECONDS = 120
 
 
+# =============================================================== Bijaya Sammilani food package
+
+
+@router.get("/food/bijaya/menu")
+async def bijaya_food_menu():
+    """Public Bijaya Sammilani food package — fixed ₹607, menu placeholder until supplied."""
+    from bijaya_food import (
+        EVENT_CODE, EVENT_TITLE, EVENT_TITLE_BN, PACKAGE_LABEL, PACKAGE_CODE,
+        PACKAGE_AMOUNT_PAISE, PAGE_ENABLED, PAYMENT_ENABLED, PAYMENT_NOTE,
+        MENU_READY, MENU_PLACEHOLDER_TITLE, MENU_PLACEHOLDER_NOTE, MENU_SECTIONS,
+    )
+    return {
+        "event_code": EVENT_CODE,
+        "title": EVENT_TITLE,
+        "title_bn": EVENT_TITLE_BN,
+        "package_label": PACKAGE_LABEL,
+        "package_code": PACKAGE_CODE,
+        "amount_paise": PACKAGE_AMOUNT_PAISE,
+        "amount_label": f"₹{PACKAGE_AMOUNT_PAISE // 100}",
+        "page_enabled": PAGE_ENABLED,
+        "payment_enabled": PAYMENT_ENABLED,
+        "payment_note": PAYMENT_NOTE,
+        "payment_method": "upi_qr",
+        "menu_ready": MENU_READY,
+        "menu_placeholder": {
+            "title": MENU_PLACEHOLDER_TITLE,
+            "note": MENU_PLACEHOLDER_NOTE,
+        },
+        "menu_sections": MENU_SECTIONS if MENU_READY else [],
+    }
+
+
+@router.post("/food/bijaya/register")
+async def bijaya_food_register(body: dict = Body(...), request: Request = None):
+    """Register Bijaya Sammilani food subscription at fixed ₹607 and open UPI QR payment."""
+    from bijaya_food import (
+        EVENT_CODE, EVENT_TITLE, PACKAGE_LABEL, PACKAGE_CODE, PACKAGE_AMOUNT_PAISE,
+        PAGE_ENABLED, PAYMENT_ENABLED,
+    )
+    if not PAGE_ENABLED:
+        raise HTTPException(status_code=403, detail="Bijaya Sammilani food subscriptions are not open yet.")
+
+    tower_id = (body.get("tower_id") or "").strip()
+    flat_id = (body.get("flat_id") or "").strip()
+    if not tower_id or not flat_id:
+        raise HTTPException(status_code=400, detail="Select your tower and flat.")
+    flat = await db.flats.find_one({"id": flat_id, "tower_id": tower_id}, {"_id": 0, "number": 1})
+    tower = await db.towers.find_one({"id": tower_id}, {"_id": 0, "name": 1})
+    if not flat or not tower:
+        raise HTTPException(status_code=400, detail="Select a valid tower and flat.")
+    tower_name = tower.get("name") or ""
+    flat_number = flat.get("number") or ""
+
+    name = (body.get("name") or "").strip() or (await _flat_contact(flat_id)).get("name") or ""
+    mobile = _mobile_input(body.get("mobile"))
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required.")
+    if not re.fullmatch(r"[6-9]\d{9}", mobile):
+        raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number.")
+
+    try:
+        quantity = int(body.get("quantity") or body.get("plates") or 1)
+    except (TypeError, ValueError):
+        quantity = 0
+    if quantity < 1 or quantity > 50:
+        raise HTTPException(status_code=400, detail="Enter between 1 and 50 plates.")
+
+    unit_paise = int(PACKAGE_AMOUNT_PAISE)
+    total_paise = unit_paise * quantity
+    selections = [{
+        "item_id": PACKAGE_CODE,
+        "day_code": EVENT_CODE,
+        "day_label": EVENT_TITLE,
+        "meal_code": "package",
+        "meal_label": PACKAGE_LABEL,
+        "quantity": quantity,
+        "unit_amount_paise": unit_paise,
+        "line_total_paise": total_paise,
+        "free_qty": 0,
+        "kid_qty": 0,
+    }]
+
+    async with _flat_guard(flat_id):
+        # Same flat + mobile + Bijaya package + qty within the repeat window → return existing order.
+        since = (datetime.now(timezone.utc) - timedelta(seconds=_REPEAT_ORDER_WINDOW_SECONDS)).isoformat()
+        async for o in db.food_subscriptions.find(
+            {
+                "flat_id": flat_id, "mobile": mobile, "event_code": EVENT_CODE,
+                "created_at": {"$gte": since},
+                "payment_status": {"$in": ["pending", "not_open"]}, "replaced_by": None,
+            },
+            NO_ID,
+        ).sort("created_at", -1):
+            prev_qty = int(((o.get("selections") or [{}])[0] or {}).get("quantity") or 0)
+            if prev_qty == quantity:
+                return await _register_response(
+                    o, message="This Bijaya order was already placed — here it is again.")
+
+        cycle_id = await get_active_cycle_id()
+        sid = new_id("food")
+        payment_enabled = bool(PAYMENT_ENABLED) and total_paise > 0
+        doc = {
+            "id": sid,
+            "cycle_id": cycle_id,
+            "event_code": EVENT_CODE,
+            "event_title": EVENT_TITLE,
+            "name": name,
+            "mobile": mobile,
+            "tower_id": tower_id,
+            "tower_name": tower_name,
+            "flat_id": flat_id,
+            "flat_number": flat_number,
+            "family_members": int(body.get("family_members") or 1),
+            "notes": (body.get("notes") or "").strip()[:500],
+            "selections": selections,
+            "selection_count": quantity,
+            "kids": [],
+            "kid_heads": 0,
+            "amount_status": "fixed",
+            "total_amount_paise": total_paise,
+            "complimentary": {},
+            "flat_subscribed": await _flat_subscribed(flat_id),
+            "payment_status": "pending" if payment_enabled else "not_open",
+            "status": "registered",
+            "coupon_id": None,
+            "coupon_no": None,
+            "intent_id": None,
+            "created_at": iso(),
+            "updated_at": iso(),
+            "source": "public",
+            "order_mode": "bijaya_package",
+        }
+
+        intent_id = None
+        if payment_enabled:
+            existing_hh = await db.households.find_one(
+                {"cycle_id": cycle_id, "tower_id": tower_id, "flat_id": flat_id}, {"_id": 0, "id": 1},
+            )
+            if existing_hh:
+                hid = existing_hh["id"]
+                await db.households.update_one({"id": hid}, {"$set": {"is_food_subscriber": True}})
+            else:
+                hid = new_id("hh")
+                await db.households.insert_one({
+                    "id": hid, "cycle_id": cycle_id,
+                    "tower_id": tower_id, "tower_name": tower_name,
+                    "flat_id": flat_id, "flat_number": flat_number,
+                    "occupancy_type": "other", "family_members": doc["family_members"],
+                    "primary_name": name, "primary_mobile": mobile or "",
+                    "is_food_subscriber": True, "created_at": iso(), "is_deleted": False,
+                    "source": "food_subscription",
+                })
+            intent_id = new_id("intent")
+            await db.subscription_intents.insert_one({
+                "id": intent_id, "cycle_id": cycle_id, "household_id": hid,
+                "kind": "food_subscription",
+                "food_subscription_id": sid,
+                "event_code": EVENT_CODE,
+                "base_amount": total_paise, "donation_amount": 0, "total_amount": total_paise,
+                "components": [{"code": PACKAGE_CODE, "label": PACKAGE_LABEL, "amount_paise": total_paise}],
+                "payer_name": name, "payer_mobile": mobile or "",
+                "status": "payment_pending", "method": "upi_qr",
+                "notes": doc["notes"], "created_at": iso(),
+            })
+            doc["intent_id"] = intent_id
+
+        await db.food_subscriptions.insert_one(doc)
+
+    await audit(
+        "food.bijaya.register",
+        actor="public",
+        entity_type="food_subscription",
+        entity_id=sid,
+        after={
+            "event_code": EVENT_CODE,
+            "name": name,
+            "mobile": (mobile[-4:] if mobile else ""),
+            "total_amount_paise": total_paise,
+            "payment_enabled": payment_enabled,
+        },
+        reason="Public Bijaya Sammilani food subscription",
+        request=request,
+    )
+    message = (
+        f"Order placed. Pay ₹{total_paise // 100} via UPI QR and upload your payment screenshot."
+        if payment_enabled else "Order placed. Payment is not open yet."
+    )
+    return await _register_response(doc, message=message)
+
+
 async def _recent_identical_order(flat_id: str, mobile: str, selections: list) -> dict | None:
     since = (datetime.now(timezone.utc) - timedelta(seconds=_REPEAT_ORDER_WINDOW_SECONDS)).isoformat()
     want = _cart_signature(selections)

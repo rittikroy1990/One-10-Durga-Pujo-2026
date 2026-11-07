@@ -1320,6 +1320,12 @@ export default function Food() {
               ? "Add items, set quantities, then check out."
               : "Pick how many breakfasts, lunches and dinners you need. Your total updates as you add."}
           </p>
+          <p className="mt-3 text-sm text-brown-800/65">
+            Looking for Bijaya Sammilani?{" "}
+            <Link to="/food/bijaya" className="font-semibold text-vermilion-600 underline" data-testid="food-bijaya-link">
+              Order Bijaya food plates (₹660)
+            </Link>
+          </p>
 
           {!catalogMode && (
             <div className="mt-4 flex flex-wrap gap-2">

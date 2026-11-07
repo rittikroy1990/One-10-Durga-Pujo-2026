@@ -21,6 +21,7 @@ MENU_PLACEHOLDER_NOTE = (
 )
 
 # Final plate menu — each item has its own 16:9 photo (Durga food card style). No header plate image.
+# Dual choices are listed as separate veg / non-veg cards for the diet filter.
 MENU_SECTIONS: list[dict] = [
     {
         "section": "Bijaya Sammilani plate",
@@ -36,12 +37,20 @@ MENU_SECTIONS: list[dict] = [
                 "image_url": "/images/food-menu/bijaya/water.jpg",
             },
             {
-                "id": "chop",
-                "name": "Fish chop / Veg chop",
+                "id": "veg_chop",
+                "name": "Veg chop",
                 "name_bn": "",
-                "diet": "both",
-                "diet_label": "Veg / Non-veg",
-                "image_url": "/images/food-menu/bijaya/chop.jpg",
+                "diet": "veg",
+                "diet_label": "Veg",
+                "image_url": "/images/food-menu/bijaya/veg-chop.jpg",
+            },
+            {
+                "id": "fish_chop",
+                "name": "Fish chop",
+                "name_bn": "",
+                "diet": "non_veg",
+                "diet_label": "Non-veg",
+                "image_url": "/images/food-menu/bijaya/fish-chop.jpg",
             },
             {
                 "id": "kasundi",
@@ -87,12 +96,20 @@ MENU_SECTIONS: list[dict] = [
                 "image_url": "/images/food-menu/bijaya/plain-rice.jpg",
             },
             {
-                "id": "bhetki_paneer",
-                "name": "Desi bhetki paturi / Paneer pasinda",
+                "id": "paneer_pasinda",
+                "name": "Paneer pasinda",
                 "name_bn": "",
-                "diet": "both",
-                "diet_label": "Veg / Non-veg",
-                "image_url": "/images/food-menu/bijaya/bhetki-paneer.jpg",
+                "diet": "veg",
+                "diet_label": "Veg",
+                "image_url": "/images/food-menu/bijaya/paneer-pasinda.jpg",
+            },
+            {
+                "id": "bhetki_paturi",
+                "name": "Desi bhetki paturi",
+                "name_bn": "",
+                "diet": "non_veg",
+                "diet_label": "Non-veg",
+                "image_url": "/images/food-menu/bijaya/bhetki-paturi.jpg",
             },
             {
                 "id": "basanti_polao",
@@ -104,12 +121,20 @@ MENU_SECTIONS: list[dict] = [
                 "image_url": "/images/food-menu/bijaya/basanti-polao.jpg",
             },
             {
-                "id": "curries",
-                "name": "Mutton rogan josh / Chicken kosha / Navaratna korma",
+                "id": "navaratna_korma",
+                "name": "Navaratna korma",
                 "name_bn": "",
-                "diet": "both",
-                "diet_label": "Veg / Non-veg",
-                "image_url": "/images/food-menu/bijaya/curries.jpg",
+                "diet": "veg",
+                "diet_label": "Veg",
+                "image_url": "/images/food-menu/bijaya/navaratna-korma.jpg",
+            },
+            {
+                "id": "mutton_chicken",
+                "name": "Mutton rogan josh / Chicken kosha",
+                "name_bn": "",
+                "diet": "non_veg",
+                "diet_label": "Non-veg",
+                "image_url": "/images/food-menu/bijaya/mutton-chicken.jpg",
             },
             {
                 "id": "chutney",

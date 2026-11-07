@@ -21,13 +21,10 @@ const DIET_OPTIONS = [
   { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
 ];
 
-/** Veg = pure veg only. Dual dishes (paturi/chop/curries) stay out of Veg; they show under All / Non-veg. */
+/** Veg / Non-veg cards are separate. Shared sides (for_all_diets) show under both filters. */
 function dietMatches(item, diet) {
   if (!diet) return true;
-  if (diet === "veg") return item.diet === "veg";
-  if (diet === "non_veg") {
-    return item.diet === "non_veg" || item.diet === "both" || !!item.for_all_diets;
-  }
+  if (item.for_all_diets) return true;
   return item.diet === diet;
 }
 
@@ -403,9 +400,7 @@ export default function BijayaFood() {
                           className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${
                             item.diet === "veg"
                               ? "bg-emerald-600 text-white"
-                              : item.diet === "both"
-                                ? "bg-brown-900 text-white"
-                                : "bg-vermilion-600 text-white"
+                              : "bg-vermilion-600 text-white"
                           }`}
                         >
                           {item.diet_label}
@@ -457,7 +452,7 @@ export default function BijayaFood() {
             <p className="mt-1 font-display text-2xl text-brown-800/70">{cfg.title_bn}</p>
           ) : null}
           <p className="mt-2 max-w-xl text-brown-800/70">
-            Choose how many plates you need, then pay by UPI QR — same flow as Durga Pujo food.
+            Choose how many plates you need, then pay by UPI QR.
           </p>
 
           <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-sun-400/35 bg-white px-4 py-2 text-sm shadow-sm" data-testid="bijaya-price-badge">

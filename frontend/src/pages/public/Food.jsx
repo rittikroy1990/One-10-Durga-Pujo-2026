@@ -1246,10 +1246,17 @@ export default function Food() {
             <p className="mx-auto mt-5 max-w-md text-sm text-brown-800/60">
               Already ordered? Your food voucher and any balance to pay are under My orders.
             </p>
-            <div className="mt-6">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <Link
+                to="/food/bijaya"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-vermilion-500 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-vermilion-600"
+                data-testid="food-closed-bijaya"
+              >
+                <UtensilsCrossed className="h-4 w-4" /> Bijaya Sammilani food
+              </Link>
               <Link
                 to="/food/orders"
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-vermilion-500 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-vermilion-600"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-sun-400/40 bg-white px-6 py-3 text-sm font-semibold text-brown-900 shadow-sm hover:border-vermilion-500/40"
                 data-testid="food-closed-my-orders"
               >
                 <ClipboardList className="h-4 w-4" /> My orders

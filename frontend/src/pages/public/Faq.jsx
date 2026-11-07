@@ -16,7 +16,7 @@ const DIRECTORY = [
   { to: "/donate", label: "Donate", blurb: "Voluntary gift — resident or other donor", icon: Heart },
   { to: "/events", label: "Programme", blurb: "Day-by-day ritual calendar & venue", icon: CalendarDays },
   { to: "/nirghanto", label: "Nirghonto", blurb: "Printable PDF / PNG puja timing cards", icon: Download },
-  { to: "/food", label: "Food", blurb: "Community food / meal subscription", icon: UtensilsCrossed },
+  { to: "/food/bijaya", label: "Food", blurb: "Bijaya Sammilani food plate subscription", icon: UtensilsCrossed },
   { to: "/sponsors", label: "Sponsors", blurb: "Brand partnership packages", icon: Handshake },
   { to: "/participate", label: "Participate", blurb: "Volunteer, perform, family activities", icon: Users },
   { to: "/receipt/find", label: "Find Receipt", blurb: "Look up your verified digital receipt", icon: Receipt },

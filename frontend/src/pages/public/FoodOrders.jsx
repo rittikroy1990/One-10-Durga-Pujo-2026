@@ -47,7 +47,7 @@ export default function FoodOrders() {
   return (
     <PublicLayout>
       <div className="mx-auto max-w-2xl px-5 py-10" data-testid="food-orders-page">
-        <Link to="/food" className="inline-flex items-center gap-1.5 text-sm text-brown-800/60 hover:text-vermilion-600">
+        <Link to="/food/bijaya" className="inline-flex items-center gap-1.5 text-sm text-brown-800/60 hover:text-vermilion-600">
           <ArrowLeft className="h-4 w-4" /> Food
         </Link>
         <h1 className="mt-3 font-display text-3xl text-brown-900">My food orders</h1>
@@ -102,7 +102,7 @@ export default function FoodOrders() {
               </p>
             ) : null}
             <p className="mt-4 text-xs text-brown-800/55">
-              Need more meals? <Link to="/food" className="font-semibold text-vermilion-600 underline">Place another order</Link> — each order gets its own food voucher.
+              Need more meals? <Link to="/food/bijaya" className="font-semibold text-vermilion-600 underline">Place another order</Link> — each order gets its own food voucher.
             </p>
           </div>
         ) : null}

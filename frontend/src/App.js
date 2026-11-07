@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AuthProvider } from "./context/AuthContext";
@@ -67,9 +67,12 @@ function AppRoutes() {
       <Route path="/contribute" element={<Contribute />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
-      <Route path="/food" element={<Food />} />
+      {/* Primary Food entry opens Bijaya Sammilani (Durga Pujo food is closed). */}
+      <Route path="/food" element={<Navigate to="/food/bijaya" replace />} />
       <Route path="/food/bijaya" element={<BijayaFood />} />
       <Route path="/food/bijaya-sammilani" element={<BijayaFood />} />
+      <Route path="/food/durga-pujo" element={<Food />} />
+      <Route path="/food/pujo" element={<Navigate to="/food/durga-pujo" replace />} />
       <Route path="/food/voucher/:token" element={<FoodVoucher />} />
       <Route path="/food/orders" element={<FoodOrders />} />
       <Route path="/food-poll" element={<FoodPoll />} />

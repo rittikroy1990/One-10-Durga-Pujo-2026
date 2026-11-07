@@ -21,10 +21,13 @@ const DIET_OPTIONS = [
   { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
 ];
 
-/** Shared sides + veg/non-veg choice dishes show under both diet filters (same idea as Durga food). */
+/** Veg = pure veg only. Dual dishes (paturi/chop/curries) stay out of Veg; they show under All / Non-veg. */
 function dietMatches(item, diet) {
   if (!diet) return true;
-  if (item.for_all_diets || item.diet === "both") return true;
+  if (diet === "veg") return item.diet === "veg";
+  if (diet === "non_veg") {
+    return item.diet === "non_veg" || item.diet === "both" || !!item.for_all_diets;
+  }
   return item.diet === diet;
 }
 

@@ -41,7 +41,6 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
-                "for_all_diets": True,
                 "image_url": "/images/food-menu/bijaya/chop.jpg",
             },
             {
@@ -93,7 +92,6 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
-                "for_all_diets": True,
                 "image_url": "/images/food-menu/bijaya/bhetki-paneer.jpg",
             },
             {
@@ -111,7 +109,6 @@ MENU_SECTIONS: list[dict] = [
                 "name_bn": "",
                 "diet": "both",
                 "diet_label": "Veg / Non-veg",
-                "for_all_diets": True,
                 "image_url": "/images/food-menu/bijaya/curries.jpg",
             },
             {

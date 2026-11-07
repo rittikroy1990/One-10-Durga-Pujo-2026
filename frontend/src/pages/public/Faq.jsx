@@ -16,7 +16,7 @@ const DIRECTORY = [
   { to: "/donate", label: "Donate", blurb: "Voluntary gift — resident or other donor", icon: Heart },
   { to: "/events", label: "Programme", blurb: "Day-by-day ritual calendar & venue", icon: CalendarDays },
   { to: "/nirghanto", label: "Nirghonto", blurb: "Printable PDF / PNG puja timing cards", icon: Download },
-  { to: "/food/bijaya", label: "Food", blurb: "Bijaya Sammilani food plate subscription", icon: UtensilsCrossed },
+  { to: "/food", label: "Food", blurb: "Bijaya Sammilani food plate subscription", icon: UtensilsCrossed },
   { to: "/sponsors", label: "Sponsors", blurb: "Brand partnership packages", icon: Handshake },
   { to: "/participate", label: "Participate", blurb: "Volunteer, perform, family activities", icon: Users },
   { to: "/receipt/find", label: "Find Receipt", blurb: "Look up your verified digital receipt", icon: Receipt },
@@ -273,7 +273,7 @@ export default function Faq() {
 
           <FaqItem q="Where do I register for food / meals?" id="faq-food">
             <p>
-              Open <PageLink to="/food/bijaya">Food</PageLink>, choose your plates, and submit with
+              Open <PageLink to="/food">Food</PageLink>, choose your plates, and submit with
               your tower / flat details. Follow any payment instructions shown on that page.
             </p>
           </FaqItem>

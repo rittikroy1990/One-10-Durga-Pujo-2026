@@ -478,7 +478,7 @@ export default function PaymentStatus() {
               <AlertTriangle className="mx-auto h-14 w-14 text-amber-500" />
               <h1 className="mt-3 font-display text-4xl">Order closed</h1>
               <p className="mt-1 text-brown-800/70">{data.message}</p>
-              <Link to="/food/bijaya" className="mt-5 inline-flex"><Button variant="primary">Go to Food</Button></Link>
+              <Link to="/food" className="mt-5 inline-flex"><Button variant="primary">Go to Food</Button></Link>
             </>
           )}
           {data && !paid && !partial && !recon && !processing && !cancelled && !waPosted && !foodPayOpen && data.status !== "error" && (

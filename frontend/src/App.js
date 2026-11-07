@@ -12,7 +12,6 @@ import Home from "./pages/public/Home";
 import Subscribe from "./pages/public/Subscribe";
 import Donate from "./pages/public/Donate";
 import Contribute from "./pages/public/Contribute";
-import Food from "./pages/public/Food";
 import BijayaFood from "./pages/public/BijayaFood";
 import FoodVoucher from "./pages/public/FoodVoucher";
 import FoodOrders from "./pages/public/FoodOrders";
@@ -67,12 +66,14 @@ function AppRoutes() {
       <Route path="/contribute" element={<Contribute />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/donate" element={<Donate />} />
-      {/* Primary Food entry opens Bijaya Sammilani (Durga Pujo food is closed). */}
-      <Route path="/food" element={<Navigate to="/food/bijaya" replace />} />
+      {/* Food = Bijaya Sammilani (old Durga Pujo food page removed). */}
+      <Route path="/food" element={<BijayaFood />} />
       <Route path="/food/bijaya" element={<BijayaFood />} />
       <Route path="/food/bijaya-sammilani" element={<BijayaFood />} />
-      <Route path="/food/durga-pujo" element={<Food />} />
-      <Route path="/food/pujo" element={<Navigate to="/food/durga-pujo" replace />} />
+      <Route path="/food/durga-pujo" element={<Navigate to="/food" replace />} />
+      <Route path="/food/pujo" element={<Navigate to="/food" replace />} />
+      <Route path="/food/register" element={<Navigate to="/food" replace />} />
+      <Route path="/food/register/*" element={<Navigate to="/food" replace />} />
       <Route path="/food/voucher/:token" element={<FoodVoucher />} />
       <Route path="/food/orders" element={<FoodOrders />} />
       <Route path="/food-poll" element={<FoodPoll />} />

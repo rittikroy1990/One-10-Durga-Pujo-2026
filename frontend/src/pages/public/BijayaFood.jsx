@@ -364,7 +364,7 @@ export default function BijayaFood() {
               {section.section_bn ? (
                 <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
               ) : null}
-              <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)} — photos below, same style as Durga Pujo food.</p>
+              <p className="mt-1 text-sm text-brown-800/60">Full plate · {formatPaise(unitPaise)}</p>
             </div>
             <DietToggle value={dietFilter} onChange={setDietFilter} />
           </div>
@@ -430,8 +430,8 @@ export default function BijayaFood() {
             <h1 className="mt-3 font-display text-4xl text-brown-900 sm:text-5xl">Coming soon</h1>
             <p className="mt-3 text-base text-brown-800/70">Bijaya Sammilani food subscriptions will open soon.</p>
             <div className="mt-8">
-              <Link to="/food" className="inline-flex rounded-full bg-vermilion-500 px-6 py-3 text-sm font-semibold text-white hover:bg-vermilion-600">
-                Durga Pujo food
+              <Link to="/" className="inline-flex rounded-full bg-vermilion-500 px-6 py-3 text-sm font-semibold text-white hover:bg-vermilion-600">
+                Back to home
               </Link>
             </div>
           </div>

@@ -15,7 +15,7 @@ const LINKS = [
   { to: "/contribute", label: "Donate" },
   { to: "/sponsors", label: "Sponsorship" },
   { to: "/promote", label: "Promote", ads: true, desktopClass: "hidden 2xl:block" },
-  { to: "/food/bijaya", label: "Food" },
+  { to: "/food", label: "Food" },
   { to: "/participate", label: "Participate" },
   { to: "/faq", label: "FAQ" },
   { to: "/receipt/find", label: "Receipts" },
@@ -78,7 +78,8 @@ export function PublicNav() {
               to={l.to}
               data-testid={`nav-${l.label.toLowerCase().replace(/\s/g, "-")}`}
               className={`whitespace-nowrap px-1.5 py-2 text-sm font-medium transition-colors 2xl:px-3 ${l.desktopClass || ""} ${
-                loc.pathname === l.to || (l.to === "/food/bijaya" && loc.pathname.startsWith("/food/bijaya"))
+                loc.pathname === l.to
+                  || (l.to === "/food" && (loc.pathname === "/food" || loc.pathname.startsWith("/food/bijaya")))
                   ? "text-vermilion-500"
                   : "text-brown-800/70 hover:text-brown-900"
               }`}
@@ -169,7 +170,7 @@ export function PublicFooter() {
             <li><Link to="/faq" className="hover:text-brown-900">FAQ & site guide</Link></li>
             <li><Link to="/events" className="hover:text-brown-900">Programme</Link></li>
             <li><Link to="/nirghanto" className="hover:text-brown-900">Nirghonto</Link></li>
-            <li><Link to="/food/bijaya" className="hover:text-brown-900">Food</Link></li>
+            <li><Link to="/food" className="hover:text-brown-900">Food</Link></li>
             <li><Link to="/receipt/find" className="hover:text-brown-900">Find Receipt</Link></li>
             <li><Link to="/transparency" className="hover:text-brown-900">Digital Pandal Meter</Link></li>
             <li><Link to="/participate" className="hover:text-brown-900">Participate</Link></li>

@@ -94,10 +94,37 @@ async def _enrich(item: dict) -> dict:
     it["ref"] = it["id"][-6:].upper()
     it["amount_due_paise"] = max(0, int(it.get("total_amount_paise") or 0) - int(settlement["paid"] or 0))
     it["paid_paise"] = int(settlement["paid"] or 0)
+    breakdown = dict(it.get("plate_breakdown") or {})
+    if not breakdown:
+        for sel in (it.get("selections") or []):
+            code = (sel.get("plate_category") or "").strip()
+            if not code:
+                d = (sel.get("diet") or "").strip()
+                code = "veg" if d == "veg" else "non_veg_chicken" if d == "non_veg" else ""
+            if not code:
+                continue
+            breakdown[code] = int(breakdown.get(code) or 0) + int(sel.get("quantity") or 0)
+    it["plate_breakdown"] = breakdown
     diet = (it.get("diet") or ((it.get("selections") or [{}])[0] or {}).get("diet") or "").strip()
     it["diet"] = diet or ""
-    it["diet_label"] = it.get("diet_label") or ("Veg" if diet == "veg" else "Non-veg" if diet == "non_veg" else "")
-    qty = int(((it.get("selections") or [{}])[0] or {}).get("quantity") or it.get("selection_count") or 0)
+    if it.get("diet_label"):
+        pass
+    elif breakdown:
+        labels = {
+            "veg": "Veg",
+            "non_veg_chicken": "Non-veg chicken",
+            "non_veg_mutton": "Non-veg mutton",
+        }
+        it["diet_label"] = ", ".join(
+            f"{qty}× {labels.get(code, code)}" for code, qty in breakdown.items() if int(qty or 0) > 0
+        )
+    else:
+        it["diet_label"] = "Veg" if diet == "veg" else "Non-veg" if diet == "non_veg" else ""
+    qty = int(it.get("selection_count") or 0)
+    if not qty:
+        qty = sum(int(v or 0) for v in breakdown.values()) or int(
+            ((it.get("selections") or [{}])[0] or {}).get("quantity") or 0
+        )
     it["plate_qty"] = qty
     return it
 
@@ -113,11 +140,16 @@ async def admin_list_bijaya(user: dict = Depends(require("households:read", "ops
     for it in items:
         if it.get("payment_status") in ("cancelled", "expired"):
             continue
-        q = int(it.get("plate_qty") or 0)
-        if it.get("diet") == "non_veg":
-            nonveg_plates += q
+        bd = it.get("plate_breakdown") or {}
+        if bd:
+            veg_plates += int(bd.get("veg") or 0)
+            nonveg_plates += int(bd.get("non_veg_chicken") or 0) + int(bd.get("non_veg_mutton") or 0)
         else:
-            veg_plates += q
+            q = int(it.get("plate_qty") or 0)
+            if it.get("diet") == "non_veg":
+                nonveg_plates += q
+            else:
+                veg_plates += q
         if it.get("paid_in_full") or it.get("payment_status") in ("paid", "complimentary"):
             paid_count += 1
             paid_paise += int(it.get("total_amount_paise") or 0)

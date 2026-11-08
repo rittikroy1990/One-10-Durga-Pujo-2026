@@ -15,41 +15,22 @@ import { normalizeMobile } from "../../lib/food";
 
 const MAX_PLATES = 50;
 
-const DIET_OPTIONS = [
-  { value: "veg", label: "Veg", dot: "bg-emerald-600" },
-  { value: "non_veg", label: "Non-veg", dot: "bg-vermilion-600" },
+const DEFAULT_PLATE_CATEGORIES = [
+  { code: "veg", label: "Veg" },
+  { code: "non_veg_chicken", label: "Non-veg chicken" },
+  { code: "non_veg_mutton", label: "Non-veg mutton" },
 ];
 
-/** Veg / Non-veg cards are separate. Shared sides (for_all_diets) show under both filters. */
-function dietMatches(item, diet) {
-  if (item.for_all_diets) return true;
-  return item.diet === diet;
-}
+const emptyPlateCounts = (categories = DEFAULT_PLATE_CATEGORIES) =>
+  Object.fromEntries(categories.map((c) => [c.code, 0]));
 
-function DietToggle({ value, onChange }) {
-  return (
-    <div role="radiogroup" aria-label="Veg or non-veg" className="inline-flex w-full rounded-full border border-sun-400/40 bg-sun-50/60 p-1 sm:w-auto" data-testid="bijaya-diet-toggle">
-      {DIET_OPTIONS.map((opt) => {
-        const active = value === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(opt.value)}
-            className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-4 text-sm font-semibold transition sm:flex-none ${
-              active ? "bg-white text-brown-900 shadow-sm ring-1 ring-sun-400/40" : "text-brown-800/60 hover:text-brown-900"
-            }`}
-            data-testid={`bijaya-diet-${opt.value}`}
-          >
-            {opt.dot ? <span className={`h-2.5 w-2.5 rounded-sm ${opt.dot}`} /> : null}
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
+/** Catalog filter: item.plate_categories, else shared / diet fallback. */
+function plateCategoryMatches(item, plateCategory) {
+  const listed = item.plate_categories;
+  if (Array.isArray(listed) && listed.length) return listed.includes(plateCategory);
+  if (item.for_all_diets) return true;
+  if (plateCategory === "veg") return item.diet === "veg";
+  return item.diet === "non_veg";
 }
 
 function mediaUrl(path) {
@@ -174,8 +155,8 @@ export default function BijayaFood() {
   const [towers, setTowers] = useState([]);
   const [flats, setFlats] = useState([]);
   const [flatsLoading, setFlatsLoading] = useState(false);
-  const [plates, setPlates] = useState(1);
-  const [dietFilter, setDietFilter] = useState("veg");
+  const [plateCounts, setPlateCounts] = useState(() => emptyPlateCounts());
+  const [plateCategory, setPlateCategory] = useState("veg");
   const [step, setStep] = useState("menu");
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
@@ -195,7 +176,18 @@ export default function BijayaFood() {
 
   useEffect(() => {
     api.get("/food/bijaya/menu")
-      .then((r) => setCfg(r.data))
+      .then((r) => {
+        setCfg(r.data);
+        const cats = r.data.plate_categories || DEFAULT_PLATE_CATEGORIES;
+        setPlateCounts((prev) => {
+          const next = emptyPlateCounts(cats);
+          for (const c of cats) next[c.code] = Number(prev[c.code] || 0);
+          return next;
+        });
+        if (!cats.some((c) => c.code === plateCategory) && cats[0]) {
+          setPlateCategory(cats[0].code);
+        }
+      })
       .catch(() => toast.error("Could not load Bijaya food page"));
     api.get("/towers")
       .then((r) => {
@@ -203,6 +195,7 @@ export default function BijayaFood() {
         prefetchFlats(r.data.items || []);
       })
       .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only boot-load once
   }, []);
 
   useEffect(() => {
@@ -219,11 +212,18 @@ export default function BijayaFood() {
     return () => { cancelled = true; };
   }, [form.tower_id]);
 
+  const plateCategories = cfg?.plate_categories?.length ? cfg.plate_categories : DEFAULT_PLATE_CATEGORIES;
   const unitPaise = cfg?.amount_paise ?? 66000;
+  const plates = useMemo(
+    () => plateCategories.reduce((sum, c) => sum + Number(plateCounts[c.code] || 0), 0),
+    [plateCategories, plateCounts],
+  );
   const totalPaise = unitPaise * plates;
   const paymentEnabled = Boolean(cfg?.payment_enabled);
   const menuReady = Boolean(cfg?.menu_ready);
   const menuSections = cfg?.menu_sections || [];
+  const activePlateMeta = plateCategories.find((c) => c.code === plateCategory) || plateCategories[0];
+  const activePlateCount = Number(plateCounts[plateCategory] || 0);
   const pay = upiSession?.payment;
   const qrSrc = pay?.qr_data_url
     || upiSession?.qr_url
@@ -242,11 +242,20 @@ export default function BijayaFood() {
     }
   };
 
-  const plateDietLabel = dietFilter === "non_veg" ? "Non-veg" : "Veg";
+  const setActivePlateCount = (n) => {
+    const next = Math.max(0, Math.min(MAX_PLATES, n));
+    setPlateCounts((prev) => ({ ...prev, [plateCategory]: next }));
+  };
+
+  const plateSummary = useMemo(
+    () => plateCategories
+      .map((c) => ({ ...c, qty: Number(plateCounts[c.code] || 0) }))
+      .filter((c) => c.qty > 0),
+    [plateCategories, plateCounts],
+  );
 
   const goCheckout = () => {
     if (plates < 1) return toast.error("Add at least one plate");
-    if (dietFilter !== "veg" && dietFilter !== "non_veg") return toast.error("Choose veg or non-veg plate");
     if (!form.tower_id || !form.flat_id) return toast.error("Select your tower and flat");
     if (!/^[6-9]\d{9}$/.test(form.mobile)) return toast.error("Enter a valid 10-digit mobile number");
     setStep("checkout");
@@ -266,6 +275,8 @@ export default function BijayaFood() {
     try {
       const tower = towers.find((t) => t.id === form.tower_id);
       const flat = flats.find((f) => f.id === form.flat_id);
+      const platesPayload = {};
+      for (const c of plateCategories) platesPayload[c.code] = Number(plateCounts[c.code] || 0);
       const r = await api.post("/food/bijaya/register", {
         name,
         mobile: form.mobile,
@@ -273,8 +284,7 @@ export default function BijayaFood() {
         tower_name: tower?.name || form.tower_name,
         flat_id: form.flat_id,
         flat_number: flat?.number || form.flat_number,
-        quantity: plates,
-        diet: dietFilter,
+        plates: platesPayload,
       });
       let session = null;
       if (r.data.payment_enabled && r.data.intent_id) {
@@ -348,8 +358,8 @@ export default function BijayaFood() {
     setUpiSession(null);
     setReference("");
     setScreenshot(null);
-    setPlates(1);
-    setDietFilter("veg");
+    setPlateCounts(emptyPlateCounts(plateCategories));
+    setPlateCategory(plateCategories[0]?.code || "veg");
     setStep("menu");
   };
 
@@ -358,7 +368,7 @@ export default function BijayaFood() {
   const menuList = useMemo(() => {
     if (!menuReady) return null;
     return menuSections.map((section) => {
-      const items = (section.items || []).filter((item) => dietMatches(item, dietFilter));
+      const items = (section.items || []).filter((item) => plateCategoryMatches(item, plateCategory));
       return (
         <div key={section.section} className="space-y-5" data-testid="bijaya-menu-section">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -367,8 +377,8 @@ export default function BijayaFood() {
               {section.section_bn ? (
                 <p className="mt-0.5 text-sm text-brown-800/55">{section.section_bn}</p>
               ) : null}
-              <p className="mt-1 text-sm text-brown-800/60">
-                {plateDietLabel} plate · {formatPaise(unitPaise)}
+              <p className="mt-1 text-sm text-brown-800/60" data-testid="bijaya-catalog-count">
+                {activePlateMeta?.label || "Plate"} · {activePlateCount} plate{activePlateCount === 1 ? "" : "s"} selected · {formatPaise(unitPaise)} each
               </p>
             </div>
           </div>
@@ -423,7 +433,7 @@ export default function BijayaFood() {
         </div>
       );
     });
-  }, [menuReady, menuSections, dietFilter, plateDietLabel, unitPaise]);
+  }, [menuReady, menuSections, plateCategory, activePlateMeta, activePlateCount, unitPaise]);
 
   if (cfg && !cfg.page_enabled) {
     return (
@@ -492,7 +502,9 @@ export default function BijayaFood() {
                 {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
               </p>
               <p className="mt-1 text-sm text-brown-800/55">
-                {intent.selection_count || plates} plate{(intent.selection_count || plates) === 1 ? "" : "s"} · Order {String(intent.id || "").slice(-6).toUpperCase()}
+                {intent.selection_count || plates} plate{(intent.selection_count || plates) === 1 ? "" : "s"}
+                {intent.diet_label ? ` · ${intent.diet_label}` : ""}
+                {" · "}Order {String(intent.id || "").slice(-6).toUpperCase()}
               </p>
               <p className="mt-1 text-xs text-brown-800/50">
                 Paying later? Open <Link to="/food/orders" className="font-semibold text-vermilion-600 underline">My orders</Link>.
@@ -612,9 +624,10 @@ export default function BijayaFood() {
             </button>
             <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card sm:p-6">
               <h2 className="font-display text-2xl text-brown-900">Your details</h2>
-              <p className="mt-1 text-sm text-brown-800/60">
-                {plates} {plateDietLabel.toLowerCase()} plate{plates === 1 ? "" : "s"} · {formatPaise(totalPaise)}
-                <span className="text-brown-800/45"> (same price for veg &amp; non-veg)</span>
+              <p className="mt-1 text-sm text-brown-800/60" data-testid="bijaya-checkout-summary">
+                {plateSummary.map((c) => `${c.qty}× ${c.label}`).join(" · ") || `${plates} plate${plates === 1 ? "" : "s"}`}
+                {" · "}{formatPaise(totalPaise)}
+                <span className="text-brown-800/45"> (₹660 each)</span>
               </p>
               <div className="mt-4 space-y-3">
                 <div>
@@ -694,24 +707,47 @@ export default function BijayaFood() {
               <aside className="lg:sticky lg:top-24">
                 <div className="rounded-2xl border border-sun-400/30 bg-white p-5 shadow-card" data-testid="bijaya-cart">
                   <h2 className="font-display text-xl text-brown-900">Your plates</h2>
-                  <p className="mt-1 text-sm text-brown-800/60">{formatPaise(unitPaise)} each · same for veg &amp; non-veg</p>
+                  <p className="mt-1 text-sm text-brown-800/60">{formatPaise(unitPaise)} each · same price for every plate type</p>
                   <div className="mt-4 space-y-2">
-                    <span className="text-sm font-medium text-brown-900">Plate type</span>
-                    <DietToggle value={dietFilter} onChange={setDietFilter} />
+                    <Label htmlFor="bijaya-plate-type">Plate type</Label>
+                    <Select
+                      id="bijaya-plate-type"
+                      data-testid="bijaya-plate-type"
+                      value={plateCategory}
+                      onChange={(e) => setPlateCategory(e.target.value)}
+                    >
+                      {plateCategories.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.label}{Number(plateCounts[c.code] || 0) ? ` (${plateCounts[c.code]})` : ""}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                   <div className="mt-4 flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-brown-900">Plates</span>
+                    <span className="text-sm font-medium text-brown-900">
+                      {activePlateMeta?.label || "Plates"}
+                    </span>
                     <QtyControl
-                      value={plates}
-                      label="plates"
+                      value={activePlateCount}
+                      label={activePlateMeta?.label || "plates"}
                       testId="bijaya-qty"
-                      onBump={(d) => setPlates((n) => Math.max(0, Math.min(MAX_PLATES, n + d)))}
-                      onSet={setPlates}
+                      onBump={(d) => setActivePlateCount(activePlateCount + d)}
+                      onSet={setActivePlateCount}
                     />
                   </div>
+                  <ul className="mt-3 space-y-1 text-sm text-brown-800/70" data-testid="bijaya-plate-counts">
+                    {plateCategories.map((c) => (
+                      <li key={c.code} className="flex items-center justify-between gap-2">
+                        <span>{c.label}</span>
+                        <span className="font-semibold text-brown-900" data-testid={`bijaya-count-${c.code}`}>
+                          {Number(plateCounts[c.code] || 0)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                   <div className="mt-4 flex items-end justify-between border-t border-sun-400/20 pt-3">
                     <div className="text-sm text-brown-800/60">
-                      {plates} {plateDietLabel.toLowerCase()} plate{plates === 1 ? "" : "s"}
+                      {plates} plate{plates === 1 ? "" : "s"} total
                     </div>
                     <div className="text-right">
                       <div className="text-[10px] uppercase tracking-wide text-brown-800/45">You pay</div>

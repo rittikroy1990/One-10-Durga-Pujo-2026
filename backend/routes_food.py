@@ -728,6 +728,7 @@ async def bijaya_food_menu():
         EVENT_CODE, EVENT_TITLE, EVENT_TITLE_BN, PACKAGE_LABEL, PACKAGE_CODE,
         PACKAGE_AMOUNT_PAISE, PAGE_ENABLED, PAYMENT_ENABLED, PAYMENT_NOTE,
         MENU_READY, MENU_PLACEHOLDER_TITLE, MENU_PLACEHOLDER_NOTE, MENU_SECTIONS,
+        PLATE_CATEGORIES,
     )
     s = await get_settings()
     cfg = s.get("bijaya_food") or {}
@@ -751,13 +752,69 @@ async def bijaya_food_menu():
             "title": MENU_PLACEHOLDER_TITLE,
             "note": MENU_PLACEHOLDER_NOTE,
         },
+        "plate_categories": PLATE_CATEGORIES,
         "menu_sections": MENU_SECTIONS if MENU_READY else [],
     }
 
 
+def _bijaya_plate_breakdown(body: dict) -> list[dict]:
+    """Parse veg / non-veg chicken / non-veg mutton plate counts from the register body."""
+    from bijaya_food import PLATE_CATEGORIES, PLATE_CATEGORY_CODES
+    by_code = {c["code"]: c for c in PLATE_CATEGORIES}
+    raw_plates = body.get("plates")
+    counts: dict[str, int] = {code: 0 for code in PLATE_CATEGORY_CODES}
+
+    if isinstance(raw_plates, dict):
+        for code in PLATE_CATEGORY_CODES:
+            try:
+                counts[code] = max(0, min(50, int(raw_plates.get(code) or 0)))
+            except (TypeError, ValueError):
+                counts[code] = 0
+    else:
+        # Backward compatible: single diet/plate_category + quantity.
+        cat = (body.get("plate_category") or body.get("plate_diet") or body.get("diet") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "vegetarian": "veg",
+            "nonveg": "non_veg_chicken",
+            "non_veg": "non_veg_chicken",
+            "chicken": "non_veg_chicken",
+            "nonveg_chicken": "non_veg_chicken",
+            "mutton": "non_veg_mutton",
+            "nonveg_mutton": "non_veg_mutton",
+        }
+        cat = aliases.get(cat, cat)
+        if cat not in counts:
+            raise HTTPException(status_code=400, detail="Choose veg, non-veg chicken, or non-veg mutton.")
+        try:
+            quantity = int(body.get("quantity") or body.get("plates") or 1)
+        except (TypeError, ValueError):
+            quantity = 0
+        if quantity < 1 or quantity > 50:
+            raise HTTPException(status_code=400, detail="Enter between 1 and 50 plates.")
+        counts[cat] = quantity
+
+    lines = []
+    for code in PLATE_CATEGORY_CODES:
+        qty = counts[code]
+        if qty < 1:
+            continue
+        meta = by_code[code]
+        lines.append({
+            "plate_category": code,
+            "diet": meta["diet"],
+            "diet_label": meta["label"],
+            "quantity": qty,
+        })
+    if not lines:
+        raise HTTPException(status_code=400, detail="Add at least one plate.")
+    if sum(l["quantity"] for l in lines) > 50:
+        raise HTTPException(status_code=400, detail="Enter between 1 and 50 plates in total.")
+    return lines
+
+
 @router.post("/food/bijaya/register")
 async def bijaya_food_register(body: dict = Body(...), request: Request = None):
-    """Register Bijaya Sammilani food subscription at fixed ₹607 and open UPI QR payment."""
+    """Register Bijaya Sammilani food subscription at fixed per-plate price and open UPI QR payment."""
     from bijaya_food import (
         EVENT_CODE, EVENT_TITLE, PACKAGE_LABEL, PACKAGE_CODE, PACKAGE_AMOUNT_PAISE,
         PAGE_ENABLED, PAYMENT_ENABLED,
@@ -788,38 +845,37 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
     if not re.fullmatch(r"[6-9]\d{9}", mobile):
         raise HTTPException(status_code=400, detail="Enter a valid 10-digit mobile number.")
 
-    try:
-        quantity = int(body.get("quantity") or body.get("plates") or 1)
-    except (TypeError, ValueError):
-        quantity = 0
-    if quantity < 1 or quantity > 50:
-        raise HTTPException(status_code=400, detail="Enter between 1 and 50 plates.")
-
-    diet = _normalize_diet(body.get("diet") or body.get("plate_diet") or "")
-    if diet not in ("veg", "non_veg"):
-        raise HTTPException(status_code=400, detail="Choose veg or non-veg plate.")
-    diet_label = DIET_TYPES.get(diet) or diet
-    # Same package price for veg and non-veg plates.
+    plate_lines = _bijaya_plate_breakdown(body)
+    quantity = sum(int(l["quantity"]) for l in plate_lines)
     total_paise = unit_paise * quantity
+    plate_breakdown = {l["plate_category"]: int(l["quantity"]) for l in plate_lines}
+    diet_parts = [f"{l['quantity']}× {l['diet_label']}" for l in plate_lines]
+    diet_label = ", ".join(diet_parts)
+    primary_diet = plate_lines[0]["diet"] if len(plate_lines) == 1 else "mixed"
     meal_label = f"{PACKAGE_LABEL} ({diet_label})"
-    selections = [{
-        "item_id": PACKAGE_CODE,
-        "day_code": EVENT_CODE,
-        "day_label": EVENT_TITLE,
-        "meal_code": "package",
-        "meal_label": meal_label,
-        "diet": diet,
-        "diet_label": diet_label,
-        "quantity": quantity,
-        "unit_amount_paise": unit_paise,
-        "line_total_paise": total_paise,
-        "free_qty": 0,
-        "kid_qty": 0,
-    }]
+    selections = []
+    for line in plate_lines:
+        line_total = unit_paise * int(line["quantity"])
+        selections.append({
+            "item_id": f"{PACKAGE_CODE}_{line['plate_category']}",
+            "day_code": EVENT_CODE,
+            "day_label": EVENT_TITLE,
+            "meal_code": "package",
+            "meal_label": f"{PACKAGE_LABEL} ({line['diet_label']})",
+            "diet": line["diet"],
+            "diet_label": line["diet_label"],
+            "plate_category": line["plate_category"],
+            "quantity": int(line["quantity"]),
+            "unit_amount_paise": unit_paise,
+            "line_total_paise": line_total,
+            "free_qty": 0,
+            "kid_qty": 0,
+        })
 
     async with _flat_guard(flat_id):
-        # Same flat + mobile + Bijaya package + diet + qty within the repeat window → return existing order.
+        # Same flat + mobile + Bijaya package + plate mix within the repeat window → return existing order.
         since = (datetime.now(timezone.utc) - timedelta(seconds=_REPEAT_ORDER_WINDOW_SECONDS)).isoformat()
+        want_sig = tuple(sorted((l["plate_category"], int(l["quantity"])) for l in plate_lines))
         async for o in db.food_subscriptions.find(
             {
                 "flat_id": flat_id, "mobile": mobile, "event_code": EVENT_CODE,
@@ -828,10 +884,16 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             },
             NO_ID,
         ).sort("created_at", -1):
-            prev_sel = (o.get("selections") or [{}])[0] or {}
-            prev_qty = int(prev_sel.get("quantity") or 0)
-            prev_diet = _normalize_diet(o.get("diet") or prev_sel.get("diet") or "")
-            if prev_qty == quantity and prev_diet == diet:
+            prev_breakdown = o.get("plate_breakdown") or {}
+            if prev_breakdown:
+                prev_sig = tuple(sorted((k, int(v)) for k, v in prev_breakdown.items() if int(v or 0) > 0))
+            else:
+                prev_sel = (o.get("selections") or [{}])[0] or {}
+                prev_cat = prev_sel.get("plate_category") or (
+                    "veg" if (o.get("diet") or prev_sel.get("diet")) == "veg" else "non_veg_chicken"
+                )
+                prev_sig = ((prev_cat, int(prev_sel.get("quantity") or o.get("selection_count") or 0)),)
+            if prev_sig == want_sig:
                 return await _register_response(
                     o, message="This Bijaya order was already placed — here it is again.")
 
@@ -851,8 +913,9 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             "flat_number": flat_number,
             "family_members": int(body.get("family_members") or 1),
             "notes": (body.get("notes") or "").strip()[:500],
-            "diet": diet,
+            "diet": primary_diet,
             "diet_label": diet_label,
+            "plate_breakdown": plate_breakdown,
             "selections": selections,
             "selection_count": quantity,
             "kids": [],
@@ -916,7 +979,7 @@ async def bijaya_food_register(body: dict = Body(...), request: Request = None):
             "event_code": EVENT_CODE,
             "name": name,
             "mobile": (mobile[-4:] if mobile else ""),
-            "diet": diet,
+            "plate_breakdown": plate_breakdown,
             "total_amount_paise": total_paise,
             "payment_enabled": payment_enabled,
         },

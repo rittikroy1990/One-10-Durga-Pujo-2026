@@ -43,6 +43,7 @@ export default function BijayaFoodAdmin() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [markPaidOnUpload, setMarkPaidOnUpload] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [q, setQ] = useState("");
   const [dietFilter, setDietFilter] = useState("");
@@ -75,7 +76,11 @@ export default function BijayaFoodAdmin() {
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase().replace(/^#/, "");
     return items.filter((r) => {
-      if (dietFilter && (r.diet || "") !== dietFilter) return false;
+      if (dietFilter === "non_veg") {
+        if (!String(r.diet || "").startsWith("non_veg")) return false;
+      } else if (dietFilter && (r.diet || "") !== dietFilter) {
+        return false;
+      }
       if (payFilter === "paid" && !(r.paid_in_full || ["paid", "complimentary"].includes(r.payment_status))) return false;
       if (payFilter === "unpaid" && (r.paid_in_full || ["paid", "complimentary", "cancelled", "expired"].includes(r.payment_status))) return false;
       if (!needle) return true;
@@ -126,7 +131,7 @@ export default function BijayaFoodAdmin() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const r = await api.post("/admin/bijaya-food/import", fd);
+      const r = await api.post(`/admin/bijaya-food/import?mark_paid=${markPaidOnUpload ? "true" : "false"}`, fd);
       setImportResult(r.data);
       toast.success(r.data.message || "Import done");
       load();
@@ -190,7 +195,8 @@ export default function BijayaFoodAdmin() {
         <div>
           <h1 className="font-display text-3xl text-brown-900">Bijaya Sammilani Food</h1>
           <p className="mt-1 max-w-2xl text-sm text-brown-800/65">
-            Veg / non-veg plates at the same price. Download the CSV template, fill offline, upload — or record UPI payments from screenshots.
+            Download the CSV, fill name / tower / flat / diet (veg, non_veg_chicken, or non_veg_mutton) / quantity.
+            Mobile is optional for committee uploads. Set payment_status to paid in the sheet, or tick “Mark all paid on upload”.
           </p>
           <p className="mt-1 text-xs text-brown-800/50">
             Public page: <a href="/food" target="_blank" rel="noreferrer" className="font-semibold text-vermilion-600 underline">/food</a>
@@ -205,6 +211,14 @@ export default function BijayaFoodAdmin() {
           <Button variant="subtle" size="sm" onClick={downloadTemplate} disabled={downloading} data-testid="bijaya-template-download">
             <Download className="h-4 w-4" /> {downloading ? "…" : "Download template"}
           </Button>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-sun-400/30 bg-white px-3 py-1.5 text-sm text-brown-900" data-testid="bijaya-mark-paid-toggle">
+            <input
+              type="checkbox"
+              checked={markPaidOnUpload}
+              onChange={(e) => setMarkPaidOnUpload(e.target.checked)}
+            />
+            Mark all paid on upload
+          </label>
           <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onUpload} data-testid="bijaya-template-file" />
           <Button variant="subtle" size="sm" disabled={uploading} onClick={() => fileRef.current?.click()} data-testid="bijaya-template-upload">
             <Upload className="h-4 w-4" /> {uploading ? "Uploading…" : "Upload filled"}
@@ -303,7 +317,9 @@ export default function BijayaFoodAdmin() {
             >
               <option value="">All plates</option>
               <option value="veg">Veg</option>
-              <option value="non_veg">Non-veg</option>
+              <option value="non_veg">Non-veg (any)</option>
+              <option value="non_veg_chicken">Non-veg chicken</option>
+              <option value="non_veg_mutton">Non-veg mutton</option>
             </select>
             <select
               className="min-h-10 rounded-xl border border-sun-400/35 bg-white px-3 text-sm"

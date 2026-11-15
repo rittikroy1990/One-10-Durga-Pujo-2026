@@ -1908,9 +1908,14 @@ async def admin_food_reports(user: dict = Depends(require("households:read", "op
     or fully complimentary; everything else is "awaiting" payment. Heads include the ₹0 kid plates.
     """
     from docs import receipt_is_bank_verified
-    orders = await db.food_subscriptions.find(
+    from bijaya_food import EVENT_CODE as _BIJAYA_EVENT, PLATE_CATEGORIES as _BIJAYA_CATS
+    # Durga Pujo meal reports stay separate from Bijaya Sammilani package orders.
+    all_live = await db.food_subscriptions.find(
         {"payment_status": {"$nin": _RELEASED_PAYMENT_STATUSES}}, NO_ID,
     ).sort("created_at", 1).to_list(5000)
+    bijaya_orders = [o for o in all_live if (o.get("event_code") or "") == _BIJAYA_EVENT
+                     or (o.get("order_mode") or "") == "bijaya_package"]
+    orders = [o for o in all_live if o not in bijaya_orders]
     receipts_by: dict = {}
     async for r in db.receipts.find(
         {"food_subscription_id": {"$in": [o["id"] for o in orders]}, "status": "issued"},
@@ -2084,6 +2089,64 @@ async def admin_food_reports(user: dict = Depends(require("households:read", "op
     meal_rows.sort(key=lambda c: (c["day_order"], _VOUCHER_MEAL_ORDER.get(c["meal_code"], 9), c["diet"] != "veg"))
 
     from pujo_menu_2026 import COMPLIMENTARY_RULES
+
+    # --- Bijaya Sammilani package report (veg / chicken / mutton plates) ---
+    bijaya_receipts: dict = {}
+    if bijaya_orders:
+        async for r in db.receipts.find(
+            {"food_subscription_id": {"$in": [o["id"] for o in bijaya_orders]}, "status": "issued"},
+            {"_id": 0, "food_subscription_id": 1, "total_amount": 1},
+        ):
+            bijaya_receipts[r["food_subscription_id"]] = bijaya_receipts.get(r["food_subscription_id"], 0) + int(
+                r.get("total_amount") or 0
+            )
+    cat_labels = {c["code"]: c["label"] for c in _BIJAYA_CATS}
+    bijaya_plates = {c["code"]: {"code": c["code"], "label": c["label"], "confirmed": 0, "awaiting": 0} for c in _BIJAYA_CATS}
+    bijaya_rows = []
+    bijaya_billed = bijaya_paid = bijaya_due = 0
+    bijaya_confirmed_orders = bijaya_awaiting_orders = 0
+    for o in bijaya_orders:
+        stage = "confirmed" if o.get("payment_status") in _CONFIRMED_FOOD_STATUSES else "awaiting"
+        total = int(o.get("total_amount_paise") or 0)
+        paid = int(bijaya_receipts.get(o["id"]) or 0)
+        due = max(0, total - paid) if stage == "awaiting" else 0
+        breakdown = dict(o.get("plate_breakdown") or {})
+        if not breakdown:
+            for sel in (o.get("selections") or []):
+                code = (sel.get("plate_category") or "").strip()
+                if not code:
+                    d = (sel.get("diet") or "").strip()
+                    code = "veg" if d == "veg" else "non_veg_chicken" if d == "non_veg" else ""
+                if code:
+                    breakdown[code] = int(breakdown.get(code) or 0) + int(sel.get("quantity") or 0)
+        plate_qty = int(o.get("selection_count") or 0) or sum(int(v or 0) for v in breakdown.values())
+        for code, qty in breakdown.items():
+            qty = int(qty or 0)
+            if qty < 1:
+                continue
+            cell = bijaya_plates.setdefault(code, {"code": code, "label": cat_labels.get(code, code), "confirmed": 0, "awaiting": 0})
+            cell[stage] += qty
+        diet_label = o.get("diet_label") or ", ".join(
+            f"{qty}× {cat_labels.get(code, code)}" for code, qty in breakdown.items() if int(qty or 0) > 0
+        ) or ("Veg" if o.get("diet") == "veg" else "Non-veg")
+        bijaya_rows.append({
+            "id": o["id"], "ref": o["id"][-6:].upper(), "stage": stage,
+            "payment_status": o.get("payment_status"),
+            "name": o.get("name") or "", "mobile": o.get("mobile") or "",
+            "tower_name": o.get("tower_name") or "", "flat_number": o.get("flat_number") or "",
+            "diet_label": diet_label, "plate_breakdown": breakdown, "plates": plate_qty,
+            "total_paise": total, "paid_paise": paid, "due_paise": due,
+            "created_at": o.get("created_at"),
+        })
+        bijaya_billed += total
+        bijaya_paid += paid
+        bijaya_due += due
+        if stage == "confirmed":
+            bijaya_confirmed_orders += 1
+        else:
+            bijaya_awaiting_orders += 1
+    bijaya_rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+
     return {
         "generated_at": iso(),
         "meals": meal_rows,
@@ -2101,6 +2164,23 @@ async def admin_food_reports(user: dict = Depends(require("households:read", "op
             "vendor_entries": vendor_entries,
             "vendor_plates": vendor_plates,
             "vendor_value_paise": vendor_value,
+        },
+        "bijaya": {
+            "title": "Bijaya Sammilani Food",
+            "title_bn": "বিজয়া সম্মিলনী খাবার",
+            "plates": list(bijaya_plates.values()),
+            "orders": bijaya_rows,
+            "totals": {
+                "orders": len(bijaya_orders),
+                "confirmed_orders": bijaya_confirmed_orders,
+                "awaiting_orders": bijaya_awaiting_orders,
+                "plates": sum(p["confirmed"] + p["awaiting"] for p in bijaya_plates.values()),
+                "plates_confirmed": sum(p["confirmed"] for p in bijaya_plates.values()),
+                "plates_awaiting": sum(p["awaiting"] for p in bijaya_plates.values()),
+                "billed_paise": bijaya_billed,
+                "paid_paise": bijaya_paid,
+                "due_paise": bijaya_due,
+            },
         },
     }
 
@@ -2962,6 +3042,11 @@ async def admin_record_food_payment(sid: str, body: dict = Body(default={}), req
     doc = await db.food_subscriptions.find_one({"id": sid}, NO_ID)
     if not doc:
         raise HTTPException(status_code=404, detail="Food order not found.")
+    if not doc.get("intent_id") and (
+        (doc.get("event_code") or "") == "bijaya_sammilani" or (doc.get("order_mode") or "") == "bijaya_package"
+    ):
+        from routes_bijaya_admin import _ensure_payment_intent
+        doc = await _ensure_payment_intent(doc)
     intent = await db.subscription_intents.find_one({"id": doc.get("intent_id")}) if doc.get("intent_id") else None
     if doc.get("payment_status") not in ("pending", "partially_paid") or not intent or \
             intent.get("status") not in ("payment_pending", "pending", "authorised", "partially_paid"):

@@ -25,6 +25,7 @@ const TABS = [
   { value: "flats", label: "Per flat (consolidated)" },
   { value: "money", label: "Money" },
   { value: "follow", label: "Follow-ups" },
+  { value: "bijaya", label: "Bijaya Sammilani" },
 ];
 const FLAT_FILTERS = [
   { value: "", label: "All flats" },
@@ -273,6 +274,21 @@ export default function FoodReports() {
 
   const totals = data?.totals || {};
   const freeValue = money.reduce((n, r) => n + r.freeValue, 0);
+  const bijaya = data?.bijaya || null;
+  const bijayaTotals = bijaya?.totals || {};
+  const bijayaCsv = useMemo(() => (bijaya?.orders || []).map((o) => ({
+    ref: o.ref,
+    name: o.name,
+    mobile: o.mobile,
+    tower: o.tower_name,
+    flat: o.flat_number,
+    plates: o.plates,
+    diet: o.diet_label,
+    status: o.payment_status,
+    billed: (o.total_paise || 0) / 100,
+    paid: (o.paid_paise || 0) / 100,
+    due: (o.due_paise || 0) / 100,
+  })), [bijaya]);
 
   const countCell = (list, diet) => {
     const rows = (list || []).filter((m) => (diet === "non_veg" ? m.diet === "non_veg" : m.diet !== "non_veg"));
@@ -681,6 +697,84 @@ export default function FoodReports() {
                   </div>
                 ))}
               </FollowCard>
+            </div>
+          )}
+
+          {tab === "bijaya" && (
+            <div className="space-y-5" data-testid="food-reports-bijaya">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-2xl text-brown-900">{bijaya?.title || "Bijaya Sammilani Food"}</h2>
+                  <p className="text-sm text-brown-800/55">
+                    Separate from Durga Puja meal headcount. Manage uploads on{" "}
+                    <Link to="/admin/bijaya-food" className="font-semibold text-vermilion-600 underline">Bijaya Food admin</Link>.
+                  </p>
+                </div>
+                <ExportCsvButton
+                  filename="bijaya_sammilani_food.csv"
+                  items={bijayaCsv}
+                  columns={[
+                    { key: "ref", label: "Ref" }, { key: "name", label: "Name" }, { key: "mobile", label: "Mobile" },
+                    { key: "tower", label: "Tower" }, { key: "flat", label: "Flat" }, { key: "plates", label: "Plates" },
+                    { key: "diet", label: "Plate type" }, { key: "status", label: "Status" },
+                    { key: "billed", label: "Billed ₹" }, { key: "paid", label: "Paid ₹" }, { key: "due", label: "Due ₹" },
+                  ]}
+                  label="Export Bijaya CSV"
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Stat label="Orders" value={bijayaTotals.orders ?? 0} sub={`${bijayaTotals.confirmed_orders || 0} paid · ${bijayaTotals.awaiting_orders || 0} awaiting`} />
+                <Stat label="Plates" value={bijayaTotals.plates ?? 0} sub={`${bijayaTotals.plates_confirmed || 0} confirmed · ${bijayaTotals.plates_awaiting || 0} awaiting`} />
+                <Stat label="Paid" value={formatPaise(bijayaTotals.paid_paise || 0)} />
+                <Stat label="Still due" value={formatPaise(bijayaTotals.due_paise || 0)} />
+              </div>
+              <Card>
+                <CardBody className="p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-brown-900">Plate types</h3>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {(bijaya?.plates || []).map((p) => (
+                      <div key={p.code} className="rounded-lg border border-brown-800/10 bg-sun-50 px-3 py-2">
+                        <div className="text-xs uppercase tracking-wide text-brown-800/45">{p.label}</div>
+                        <div className="font-display text-2xl text-brown-900">{(p.confirmed || 0) + (p.awaiting || 0)}</div>
+                        <div className="text-xs text-brown-800/55">{p.confirmed || 0} paid · {p.awaiting || 0} awaiting</div>
+                      </div>
+                    ))}
+                  </div>
+                </CardBody>
+              </Card>
+              <Card>
+                <CardBody className="overflow-x-auto p-0">
+                  <Table>
+                    <THead>
+                      <TR>
+                        <TH>Ref</TH><TH>Name</TH><TH>Flat</TH><TH>Plate</TH>
+                        <TH right>Qty</TH><TH>Status</TH><TH right>Billed</TH><TH right>Due</TH>
+                      </TR>
+                    </THead>
+                    <tbody>
+                      {(bijaya?.orders || []).length === 0 ? (
+                        <TR><TD colSpan={8} className="py-8 text-center text-sm text-brown-800/50">No Bijaya orders yet.</TD></TR>
+                      ) : (bijaya?.orders || []).map((o) => (
+                        <TR key={o.id}>
+                          <TD className="font-mono text-xs">#{o.ref}</TD>
+                          <TD>
+                            <div className="font-medium">{o.name || "—"}</div>
+                            {o.mobile ? <div className="text-xs text-brown-800/50">{o.mobile}</div> : null}
+                          </TD>
+                          <TD className="text-sm whitespace-nowrap">{[o.tower_name, o.flat_number].filter(Boolean).join(", ") || "—"}</TD>
+                          <TD className="text-sm">{o.diet_label || "—"}</TD>
+                          <TD right>{o.plates || "—"}</TD>
+                          <TD><StatusBadge status={o.payment_status} /></TD>
+                          <TD right>{formatPaise(o.total_paise || 0)}</TD>
+                          <TD right className={o.due_paise ? "font-semibold text-vermilion-600" : ""}>
+                            {o.due_paise ? formatPaise(o.due_paise) : "—"}
+                          </TD>
+                        </TR>
+                      ))}
+                    </tbody>
+                  </Table>
+                </CardBody>
+              </Card>
             </div>
           )}
         </>

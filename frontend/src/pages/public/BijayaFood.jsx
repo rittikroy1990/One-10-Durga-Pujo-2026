@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  UtensilsCrossed, ExternalLink, Copy, Upload, Loader2, ShieldCheck,
+  UtensilsCrossed, Copy, Upload, Loader2, ShieldCheck, Download, Smartphone,
   Minus, Plus, ArrowRight, ArrowLeft, Check, ClipboardList, Clock,
 } from "lucide-react";
 import api from "../../lib/api";
@@ -239,6 +239,33 @@ export default function BijayaFood() {
       toast.success(`${label} copied`);
     } catch {
       toast.error("Could not copy");
+    }
+  };
+
+  const downloadQr = async () => {
+    if (!qrSrc) return toast.error("QR not ready yet");
+    const filename = `bijaya-upi-qr-${String(intent?.id || "pay").slice(-6).toUpperCase()}.png`;
+    try {
+      let href = qrSrc;
+      if (!String(qrSrc).startsWith("data:")) {
+        const res = await fetch(qrSrc, { credentials: "same-origin" });
+        if (!res.ok) throw new Error("fetch failed");
+        const blob = await res.blob();
+        href = URL.createObjectURL(blob);
+      }
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = filename;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (href.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(href), 1500);
+      toast.success("QR downloaded — open it on this phone for another device to scan");
+    } catch {
+      // Fallback: open image in a new tab so the resident can save/share it.
+      window.open(qrSrc, "_blank", "noopener,noreferrer");
+      toast.message("Opened QR in a new tab — long-press to save");
     }
   };
 
@@ -516,24 +543,35 @@ export default function BijayaFood() {
                 <span className="grid h-7 w-7 place-items-center rounded-full bg-vermilion-500 text-sm font-bold text-white">1</span>
                 Pay with UPI
               </h3>
-              <p className="mt-1 text-sm text-brown-800/60">Open any UPI app and scan this QR. No card payment.</p>
+              <p className="mt-1 text-sm text-brown-800/60">
+                Scan this QR with another phone’s UPI app, or download it and open the image for someone else to scan. No card payment.
+              </p>
               <div className="mt-4 flex flex-col items-center">
-                {pay?.upi_intent_url ? (
-                  <a href={pay.upi_intent_url} className="block" aria-label="Open UPI payment">
-                    <img src={qrSrc} alt="Bijaya food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="bijaya-qr-img" />
-                  </a>
-                ) : (
-                  <img src={qrSrc} alt="Bijaya food UPI QR" className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2" data-testid="bijaya-qr-img" />
-                )}
-                {pay?.upi_intent_url ? (
-                  <a
-                    href={pay.upi_intent_url}
-                    className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-vermilion-500 px-5 text-sm font-semibold text-white shadow-sm hover:bg-vermilion-600 sm:hidden"
-                    data-testid="bijaya-open-upi"
-                  >
-                    <ExternalLink className="h-4 w-4" /> Open UPI app · {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
-                  </a>
-                ) : null}
+                <img
+                  src={qrSrc}
+                  alt="Bijaya food UPI QR — scan with another phone"
+                  className="h-52 w-52 rounded-xl border border-brown-800/10 bg-white object-contain p-2"
+                  data-testid="bijaya-qr-img"
+                />
+                <div className="mt-3 flex items-start gap-2 rounded-xl border border-sun-400/25 bg-sun-50/60 px-3 py-2 text-left text-xs text-brown-800/70">
+                  <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-vermilion-600" />
+                  <span>
+                    Keep this screen open and ask someone nearby to scan with GPay / PhonePe / Paytm —
+                    or download the QR and show that image on this phone.
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  variant="primary"
+                  className="mt-4"
+                  onClick={downloadQr}
+                  disabled={!qrSrc}
+                  data-testid="bijaya-download-qr"
+                >
+                  <Download className="h-4 w-4" /> Download QR
+                  {" · "}
+                  {formatPaise(upiSession.total_amount ?? intent.total_amount_paise)}
+                </Button>
               </div>
               {pay?.vpa ? (
                 <div className="mt-5 rounded-xl border border-sun-400/25 bg-sun-50/50 p-4 text-sm">

@@ -101,9 +101,14 @@ async def _bijaya_settings() -> dict:
     }
 
 
+def _bijaya_meal_label(order: dict) -> str:
+    from bijaya_food import PACKAGE_LABEL
+    return f"{PACKAGE_LABEL} ({order.get('diet_label') or 'plate'})"
+
+
 async def _ensure_payment_intent(order: dict) -> dict:
     """Create a UPI intent for pending Bijaya orders that were saved without one (so Record pay works)."""
-    from bijaya_food import PACKAGE_CODE, PACKAGE_LABEL
+    from bijaya_food import PACKAGE_CODE
     if order.get("intent_id"):
         return order
     if order.get("payment_status") not in ("pending", "partially_paid", "not_open"):
@@ -133,7 +138,7 @@ async def _ensure_payment_intent(order: dict) -> dict:
             "is_food_subscriber": True, "created_at": iso(), "is_deleted": False,
             "source": "food_subscription",
         })
-    meal_label = f"{PACKAGE_LABEL} ({order.get('diet_label') or 'plate'})"
+    meal_label = _bijaya_meal_label(order)
     intent_id = new_id("intent")
     await db.subscription_intents.insert_one({
         "id": intent_id, "cycle_id": cycle_id, "household_id": hid,
@@ -141,7 +146,7 @@ async def _ensure_payment_intent(order: dict) -> dict:
         "food_subscription_id": order["id"],
         "event_code": _BIJAYA_EVENT,
         "base_amount": total, "donation_amount": 0, "total_amount": total,
-        "components": [{"code": PACKAGE_CODE, "label": meal_label, "amount_paise": total}],
+        "components": [{"code": PACKAGE_CODE, "label": meal_label, "amount_paise": total, "account_code": "4400"}],
         "payer_name": name, "payer_mobile": mobile,
         "status": "payment_pending", "method": "upi_qr",
         "notes": order.get("notes") or "", "created_at": iso(),
@@ -152,6 +157,96 @@ async def _ensure_payment_intent(order: dict) -> dict:
     await db.food_subscriptions.update_one({"id": order["id"]}, {"$set": patch})
     order = {**order, **patch}
     return order
+
+
+async def _sync_payment_intent(order: dict) -> dict:
+    """Keep an open intent's payable total in sync with the order (quantity/plate edits on upload)."""
+    from bijaya_food import PACKAGE_CODE
+    if order.get("payment_status") not in ("pending", "partially_paid", "not_open"):
+        return order
+    total = int(order.get("total_amount_paise") or 0)
+    if total <= 0:
+        return order
+    if not order.get("intent_id"):
+        return await _ensure_payment_intent(order)
+    intent = await db.subscription_intents.find_one({"id": order["intent_id"]}, NO_ID)
+    if not intent:
+        return await _ensure_payment_intent({**order, "intent_id": None})
+    if intent.get("status") not in ("payment_pending", "pending", "authorised"):
+        # Leave partially_paid / paid alone — Record pay owns those.
+        return order
+    meal_label = _bijaya_meal_label(order)
+    await db.subscription_intents.update_one(
+        {"id": intent["id"]},
+        {"$set": {
+            "base_amount": total,
+            "donation_amount": 0,
+            "total_amount": total,
+            "amount_due_paise": total,
+            "components": [{"code": PACKAGE_CODE, "label": meal_label, "amount_paise": total, "account_code": "4400"}],
+            "payer_name": order.get("name") or intent.get("payer_name") or "",
+            "payer_mobile": order.get("mobile") or intent.get("payer_mobile") or "",
+            "notes": order.get("notes") or intent.get("notes") or "",
+        }},
+    )
+    return order
+
+
+async def _settle_committee_paid(order: dict, request: Request = None) -> dict:
+    """Mark a Bijaya order paid via the normal receipt+ledger path (cash debit, food credit)."""
+    from routes_collect import _issue_receipt
+    total = int(order.get("total_amount_paise") or 0)
+    if total <= 0:
+        return order
+    already = await db.receipts.find_one(
+        {"food_subscription_id": order["id"], "status": "issued"}, {"_id": 1},
+    )
+    if already:
+        await db.food_subscriptions.update_one(
+            {"id": order["id"]},
+            {"$set": {"payment_status": "paid", "status": "paid", "updated_at": iso()}},
+        )
+        return {**order, "payment_status": "paid", "status": "paid"}
+
+    # Intent creation requires a pending status.
+    pending = {**order, "payment_status": "pending"}
+    pending = await _sync_payment_intent(pending)
+    intent = await db.subscription_intents.find_one({"id": pending.get("intent_id")}, NO_ID) if pending.get("intent_id") else None
+    if not intent or intent.get("status") not in ("payment_pending", "pending", "authorised", "partially_paid"):
+        return order
+    receipt = await _issue_receipt(
+        intent,
+        method="cash",
+        masked_ref="Committee upload",
+        provider_payment_id=f"bijaya_upload_{order['id'][-10:]}",
+        debit_account="1002",
+        request=request,
+        bank_verified=True,
+        issuance_source="bijaya_committee_upload",
+    )
+    if not receipt:
+        return order
+    voucher_no = order.get("voucher_no") or (
+        f"BJ-{datetime.now(timezone.utc).strftime('%y%m%d')}-{new_id('v')[-4:].upper()}"
+    )
+    await db.food_subscriptions.update_one(
+        {"id": order["id"]},
+        {"$set": {
+            "payment_status": "paid",
+            "status": "paid",
+            "voucher_no": voucher_no,
+            "receipt_id": receipt.get("id"),
+            "updated_at": iso(),
+        }},
+    )
+    return {
+        **pending,
+        "payment_status": "paid",
+        "status": "paid",
+        "voucher_no": voucher_no,
+        "receipt_id": receipt.get("id"),
+        "intent_id": pending.get("intent_id"),
+    }
 
 
 async def _enrich(item: dict) -> dict:
@@ -177,6 +272,12 @@ async def _enrich(item: dict) -> dict:
                 continue
             breakdown[code] = int(breakdown.get(code) or 0) + int(sel.get("quantity") or 0)
     it["plate_breakdown"] = breakdown
+    if not it.get("plate_category"):
+        pos = [c for c, q in breakdown.items() if int(q or 0) > 0]
+        if len(pos) == 1:
+            it["plate_category"] = pos[0]
+        elif (it.get("selections") or []):
+            it["plate_category"] = ((it.get("selections") or [{}])[0] or {}).get("plate_category") or ""
     diet = (it.get("diet") or ((it.get("selections") or [{}])[0] or {}).get("diet") or "").strip()
     it["diet"] = diet or ""
     if it.get("diet_label"):
@@ -477,12 +578,22 @@ async def admin_bijaya_import(
             payment_status = "paid"
         if payment_status == "partially_paid":
             payment_status = "paid"
-        if payment_status not in ("pending", "not_open", "paid", "complimentary"):
+        if payment_status == "complimentary":
+            skipped += 1
+            errors.append({
+                "row": idx,
+                "error": "Complimentary is not supported on upload — use payment_status=paid (or Mark all paid)",
+            })
+            continue
+        if payment_status not in ("pending", "not_open", "paid"):
             payment_status = "pending"
+        want_paid = payment_status == "paid"
         notes = str(row.get("notes") or "").strip()[:500]
-        if payment_status in ("paid", "complimentary") and "committee upload" not in notes.lower():
+        if want_paid and "committee upload" not in notes.lower():
             notes = ((notes + " · " if notes else "") + "Marked paid via committee upload").strip(" ·")[:500]
 
+        # Save as pending first when marking paid so intent sync + ledgered receipt can run.
+        stored_status = "pending" if want_paid else payment_status
         patch = {
             "name": name,
             "mobile": mobile,
@@ -492,10 +603,11 @@ async def admin_bijaya_import(
             "flat_number": flat_number,
             "diet": diet,
             "diet_label": diet_label,
+            "plate_category": plate_cat,
             "plate_breakdown": plate_breakdown,
             "notes": notes,
-            "payment_status": payment_status,
-            "status": "registered" if payment_status not in ("paid", "complimentary") else "confirmed",
+            "payment_status": stored_status,
+            "status": "registered",
             "selections": selections,
             "selection_count": quantity,
             "total_amount_paise": total_paise,
@@ -505,13 +617,10 @@ async def admin_bijaya_import(
             "event_title": EVENT_TITLE,
             "updated_at": iso(),
         }
-        if payment_status in ("paid", "complimentary"):
-            paid_marked += 1
-            if not (existing or {}).get("voucher_no"):
-                patch["voucher_no"] = f"BJ-{datetime.now(timezone.utc).strftime('%y%m%d')}-{new_id('v')[-4:].upper()}"
 
         if existing:
             sid = existing["id"]
+            # Keep existing intent_id / voucher_no when present.
             await db.food_subscriptions.update_one({"id": sid}, {"$set": patch})
             updated += 1
             await audit(
@@ -535,6 +644,7 @@ async def admin_bijaya_import(
                 "coupon_id": None,
                 "coupon_no": None,
                 "intent_id": None,
+                "voucher_no": None,
                 "created_at": iso(),
                 "source": "admin_bijaya_import",
                 **patch,
@@ -551,42 +661,17 @@ async def admin_bijaya_import(
                 request=request,
             )
 
-        if payment_status == "paid" and total_paise > 0:
-            already = await db.receipts.find_one(
-                {"food_subscription_id": sid, "status": "issued"}, {"_id": 1},
-            )
-            if not already:
-                rid = new_id("rcpt")
-                await db.receipts.insert_one({
-                    "id": rid,
-                    "receipt_no": f"BJ-COMMITTEE-{sid[-6:].upper()}",
-                    "cycle_id": cycle_id,
-                    "household_id": "",
-                    "intent_id": "",
-                    "payment_id": f"COMMITTEE-{sid[-8:].upper()}",
-                    "kind": "food_subscription",
-                    "payer_name": name,
-                    "payer_mobile": mobile or "",
-                    "tower_name": tower_name or "Bijaya Sammilani",
-                    "flat_number": flat_number or "—",
-                    "base_amount": total_paise,
-                    "donation_amount": 0,
-                    "total_amount": total_paise,
-                    "components": [{"code": PACKAGE_CODE, "label": meal_label, "amount_paise": total_paise}],
-                    "method": "committee",
-                    "masked_ref": "Committee upload",
-                    "status": "issued",
-                    "bank_verified": True,
-                    "issuance_source": "bijaya_committee_upload",
-                    "issued_at": iso(),
-                    "food_subscription_id": sid,
-                    "is_partial": False,
-                    "amount_due_after": 0,
-                })
-                await db.food_subscriptions.update_one(
-                    {"id": sid},
-                    {"$set": {"receipt_id": rid, "status": "paid"}},
-                )
+        order = await db.food_subscriptions.find_one({"id": sid}, NO_ID)
+        if not order:
+            continue
+        if want_paid and total_paise > 0:
+            order = await _settle_committee_paid(order, request=request)
+            if order.get("payment_status") == "paid":
+                paid_marked += 1
+            else:
+                errors.append({"row": idx, "error": "Saved but could not issue ledgered receipt — try Record pay"})
+        elif stored_status in ("pending", "not_open"):
+            await _sync_payment_intent(order)
 
     return {
         "ok": True,

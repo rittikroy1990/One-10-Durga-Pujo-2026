@@ -77,7 +77,18 @@ export default function BijayaFoodAdmin() {
     const needle = q.trim().toLowerCase().replace(/^#/, "");
     return items.filter((r) => {
       if (dietFilter === "non_veg") {
-        if (!String(r.diet || "").startsWith("non_veg")) return false;
+        if (!String(r.diet || "").startsWith("non_veg") && !(r.plate_breakdown?.non_veg_chicken || r.plate_breakdown?.non_veg_mutton)) {
+          return false;
+        }
+      } else if (dietFilter === "veg") {
+        if ((r.diet || "") !== "veg" && !(r.plate_breakdown?.veg > 0) && r.plate_category !== "veg") return false;
+      } else if (dietFilter === "non_veg_chicken" || dietFilter === "non_veg_mutton") {
+        const qty = Number(r.plate_breakdown?.[dietFilter] || 0);
+        const match =
+          qty > 0
+          || r.plate_category === dietFilter
+          || (r.selections || []).some((s) => (s.plate_category || "") === dietFilter);
+        if (!match) return false;
       } else if (dietFilter && (r.diet || "") !== dietFilter) {
         return false;
       }
